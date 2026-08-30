@@ -56,33 +56,33 @@ def render_page(page_key):
 
 
 def show_homepage():
-    """渲染首页"""
-    st.title("💰 基金Agent智能助手")
-    st.markdown("### 欢迎使用基金分析与管理平台")
+    """渲染首页（品牌欢迎页 + 快捷入口）"""
+    st.title("投资私人管家")
+    st.markdown("### A股基金 AI 私人顾问 · 数据免费 · 打开即用")
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
         st.markdown("""
         <div class="card">
-            <h3>📊 我的持仓</h3>
-            <p>查看和管理您的基金持仓</p>
+            <h3>📊 资产总览</h3>
+            <p>总资产与持仓收益一览</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col2:
         st.markdown("""
         <div class="card">
-            <h3>🔍 基金筛选</h3>
-            <p>智能筛选优质基金</p>
+            <h3>🩺 综合诊断</h3>
+            <p>财报 / 排雷 / 护城河 / 估值 多引擎体检</p>
         </div>
         """, unsafe_allow_html=True)
 
     with col3:
         st.markdown("""
         <div class="card">
-            <h3>🤖 AI分析</h3>
-            <p>AI驱动的基金分析报告</p>
+            <h3>🤖 AI 对话</h3>
+            <p>AI 驱动的持仓与行情问答</p>
         </div>
         """, unsafe_allow_html=True)
 
@@ -95,7 +95,7 @@ def main():
     """主函数"""
     # 页面配置
     st.set_page_config(
-        page_title="基金Agent助手",
+        page_title="投资私人管家 · invest-concierge",
         page_icon="💰",
         layout="wide",
         initial_sidebar_state="expanded"

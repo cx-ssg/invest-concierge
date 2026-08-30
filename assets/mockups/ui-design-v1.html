@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>投资私人管家 · UI 设计稿 v1（夜航蓝 × 香槟金）</title>
+<style>
+  /* ===== 设计 Tokens（与设计文档一致） ===== */
+  :root {
+    --bg: #0C111E;
+    --surface: #121A2B;
+    --surface-2: #182338;
+    --line: rgba(151,169,199,.14);
+    --line-strong: rgba(151,169,199,.26);
+    --text-1: #E9EEF7;
+    --text-2: #A8B3C7;
+    --text-3: #66738C;
+    --gold: #D6B36A;
+    --gold-hover: #E5C784;
+    --gold-soft: rgba(214,179,106,.10);
+    --gold-line: rgba(214,179,106,.35);
+    --up: #F04438;      /* 涨·红（A股口径） */
+    --down: #2DBE64;    /* 跌·绿 */
+    --warn: #E8B34B;
+    --danger: #EF4444;
+    --info: #6AA5F8;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text-1);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "HarmonyOS Sans SC", sans-serif;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .t2 { color: var(--text-2); }
+  .t3 { color: var(--text-3); }
+
+  /* ===== 布局 ===== */
+  .app { display: flex; min-height: 1580px; }
+  .sidebar {
+    width: 264px; flex: none;
+    background: #0A0F1A;
+    border-right: 1px solid var(--line);
+    padding: 22px 16px;
+    display: flex; flex-direction: column; gap: 0;
+  }
+  .main { flex: 1; padding: 26px 36px; max-width: 1176px; }
+
+  /* ===== 侧边栏 ===== */
+  .brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px 0; }
+  .seal {
+    width: 34px; height: 34px; flex: none;
+    border-radius: 9px;
+    background: var(--gold-soft);
+    border: 1px solid var(--gold-line);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--gold); font-size: 17px; font-weight: 700;
+  }
+  .brand-name { font-size: 16px; font-weight: 700; letter-spacing: .5px; }
+  .brand-en { font-size: 9px; letter-spacing: 2.2px; color: var(--text-3); margin-top: 3px; }
+  .status { display: flex; gap: 14px; padding: 12px 6px 0; font-size: 11.5px; color: var(--text-3); }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #2DBE64; margin-right: 5px; vertical-align: 1px; }
+
+  .sb-card {
+    margin-top: 18px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+  }
+  .sb-card .lbl { font-size: 11.5px; color: var(--text-3); }
+  .sb-card .val { font-size: 23px; font-weight: 650; margin-top: 4px; }
+  .sb-card .delta { font-size: 12px; margin-top: 3px; }
+
+  .group-label { font-size: 11px; color: var(--text-3); letter-spacing: 1.5px; padding: 20px 8px 8px; }
+  .nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 9px 12px; border-radius: 10px;
+    color: var(--text-2); font-size: 13.5px; position: relative;
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--text-1); }
+  .nav-item.active { background: var(--gold-soft); color: var(--gold); font-weight: 600; }
+  .nav-item.active::before {
+    content: ""; position: absolute; left: 0; top: 8px; bottom: 8px;
+    width: 2px; border-radius: 2px; background: var(--gold);
+  }
+  .nav-item .em { width: 18px; text-align: center; font-size: 14px; }
+
+  .idx { display: flex; flex-direction: column; }
+  .idx-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 6px; border-bottom: 1px solid var(--line);
+  }
+  .idx-row:last-child { border-bottom: none; }
+  .idx-name { font-size: 12.5px; color: var(--text-2); }
+  .idx-code { font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+  .idx-right { text-align: right; }
+  .idx-price { font-size: 13px; font-weight: 600; }
+  .idx-chg { font-size: 11px; margin-top: 1px; }
+
+  .sb-footer { margin-top: auto; padding: 16px 6px 0; font-size: 10.5px; color: var(--text-3); }
+
+  /* ===== 主区 ===== */
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; }
+  .page-title { font-size: 26px; font-weight: 700; }
+  .page-cap { font-size: 12.5px; color: var(--text-3); margin-top: 6px; }
+
+  .seg {
+    display: flex; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px;
+  }
+  .seg span {
+    padding: 6px 18px; border-radius: 999px; font-size: 13px;
+    color: var(--text-2); font-weight: 500;
+  }
+  .seg .on {
+    background: var(--gold-soft); color: var(--gold); font-weight: 600;
+    box-shadow: inset 0 0 0 1px var(--gold-line);
+  }
+
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 24px; }
+  .metric {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px 18px;
+  }
+  .metric .lbl { font-size: 12px; color: var(--text-3); }
+  .metric .val { font-size: 25px; font-weight: 650; margin-top: 6px; }
+  .metric .delta { font-size: 12px; margin-top: 5px; color: var(--text-3); }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 18px 20px; margin-top: 16px;
+  }
+  .card h3 { font-size: 15px; font-weight: 600; }
+  .card .cap { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  thead th {
+    font-size: 11.5px; font-weight: 500; color: var(--text-3); text-align: right;
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+  }
+  thead th:first-child { text-align: left; }
+  tbody td {
+    font-size: 13px; padding: 10px; text-align: right;
+    border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums;
+  }
+  tbody td:first-child { text-align: left; }
+  tbody tr:last-child td { border-bottom: none; }
+  .fname { color: var(--text-1); font-weight: 500; }
+  .fcode { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 0; }
+
+  /* ===== 组件样张 ===== */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; padding: 4px 12px; border-radius: 999px;
+    border: 1px solid; margin-right: 8px;
+  }
+  .b-gold  { color: var(--gold);  background: var(--gold-soft); border-color: var(--gold-line); }
+  .b-red   { color: var(--danger); background: rgba(239,68,68,.10); border-color: rgba(239,68,68,.35); }
+  .b-amber { color: var(--warn);  background: rgba(232,179,75,.10); border-color: rgba(232,179,75,.35); }
+  .b-green { color: var(--down);  background: rgba(45,190,100,.10); border-color: rgba(45,190,100,.35); }
+  .b-gray  { color: var(--text-3); background: rgba(151,169,199,.08); border-color: var(--line); }
+
+  .btn {
+    display: inline-block; border-radius: 10px; font-size: 13.5px; font-weight: 600;
+    padding: 9px 22px; margin-right: 10px;
+  }
+  .btn-primary { background: var(--gold); color: #1A2233; }
+  .btn-primary:hover { background: var(--gold-hover); }
+  .btn-ghost { color: var(--text-2); border: 1px solid var(--line-strong); }
+
+  .input {
+    margin-top: 14px; background: var(--surface-2);
+    border: 1px solid var(--gold-line); border-radius: 10px;
+    padding: 9px 12px; font-size: 13.5px; color: var(--text-1); width: 260px;
+    box-shadow: 0 0 0 2px rgba(214,179,106,.12);
+  }
+  .input .ph { color: var(--text-3); }
+
+  .tabs { display: flex; gap: 26px; margin-top: 14px; border-bottom: 1px solid var(--line); padding-bottom: 0; }
+  .tab { padding: 8px 2px 10px; font-size: 13.5px; color: var(--text-3); position: relative; }
+  .tab.on { color: var(--text-1); font-weight: 600; }
+  .tab.on::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+    height: 2px; border-radius: 2px; background: var(--gold);
+  }
+
+  .sec-label { font-size: 11px; letter-spacing: 1.5px; color: var(--text-3); margin: 30px 0 10px; }
+
+  /* ===== 新旧对比条 ===== */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+  .cmp { border-radius: 14px; padding: 18px 20px; border: 1px solid var(--line); }
+  .cmp-old { background: #1A1A1A; border-color: #3F3F46; }
+  .cmp-old .m { background: #2A2A2A; border: 1px solid #3F3F46; border-radius: 12px; padding: 14px 16px; margin-top: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  .cmp-old .navb { display: inline-block; padding: 7px 16px; border-radius: 8px; font-size: 12.5px; margin: 12px 8px 0 0; }
+  .cmp-old .nb1 { background: linear-gradient(135deg,#3B82F6,#60A5FA); color: #fff; }
+  .cmp-old .nb2 { background: #2A2A2A; color: #3B82F6; border: 1px solid #3B82F6; }
+  .cmp-new { background: var(--bg); }
+  .cmp-note { font-size: 12px; color: var(--text-3); margin-top: 12px; line-height: 1.7; }
+  .cmp-tag { font-size: 11px; letter-spacing: 1.5px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ==================== 侧边栏 ==================== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="seal">私</div>
+      <div>
+        <div class="brand-name">投资私人管家</div>
+        <div class="brand-en">INVEST&nbsp;CONCIERGE</div>
+      </div>
+    </div>
+    <div class="status"><span><span class="dot"></span>AI 已配置</span><span><span class="dot"></span>数据已就绪</span></div>
+
+    <div class="sb-card">
+      <div class="lbl">总资产概览</div>
+      <div class="val num">¥128,650.42</div>
+      <div class="delta num"><span class="up">▲ +¥1,082.36（+0.85%）</span> <span class="t3">今日</span></div>
+    </div>
+
+    <div class="group-label">基 金 专 区</div>
+    <div class="nav">
+      <div class="nav-item active"><span class="em">📊</span>资产总览</div>
+      <div class="nav-item"><span class="em">💼</span>我的持仓</div>
+      <div class="nav-item"><span class="em">📝</span>投资日记</div>
+    </div>
+
+    <div class="group-label">通 用</div>
+    <div class="nav">
+      <div class="nav-item"><span class="em">💬</span>AI 对话</div>
+      <div class="nav-item"><span class="em">⚙️</span>系统设置</div>
+    </div>
+
+    <div class="group-label">大 盘 指 数</div>
+    <div class="idx">
+      <div class="idx-row">
+        <div><div class="idx-name">上证指数</div><div class="idx-code">000001</div></div>
+        <div class="idx-right"><div class="idx-price num">3,968.52</div><div class="idx-chg num up">+16.64（+0.42%）</div></div>
+      </div>
+      <div class="idx-row">
+        <div><div class="idx-name">深证成指</div><div class="idx-code">399001</div></div>
+        <div class="idx-right"><div class="idx-price num">13,953.07</div><div class="idx-chg num down">-95.81（-0.68%）</div></div>
+      </div>
+      <div class="idx-row">
+        <div><div class="idx-name">创业板指</div><div class="idx-code">399006</div></div>
+        <div class="idx-right"><div class="idx-price num">3,424.40</div><div class="idx-chg num down">-48.95（-1.41%）</div></div>
+      </div>
+      <div class="idx-row">
+        <div><div class="idx-name">沪深300</div><div class="idx-code">000300</div></div>
+        <div class="idx-right"><div class="idx-price num">4,609.18</div><div class="idx-chg num up">+12.31（+0.27%）</div></div>
+      </div>
+    </div>
+
+    <div class="sb-footer">v1.0 · invest-concierge © 2026</div>
+  </aside>
+
+  <!-- ==================== 主内容区 ==================== -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <div class="page-title">📊 资产总览</div>
+        <div class="page-cap">行情 60s 缓存 · 数据仅供参考，不构成投资建议</div>
+      </div>
+      <div class="seg"><span class="on">📊 基金</span><span>📈 股票</span></div>
+    </div>
+
+    <div class="metrics">
+      <div class="metric"><div class="lbl">总资产</div><div class="val num">¥128,650.42</div><div class="delta num"><span class="up">▲ +0.85%</span> 今日</div></div>
+      <div class="metric"><div class="lbl">今日盈亏</div><div class="val num up">+¥1,082.36</div><div class="delta">较昨日收盘</div></div>
+      <div class="metric"><div class="lbl">持仓收益</div><div class="val num up">+¥12,405.10</div><div class="delta num"><span class="up">+10.66%</span> 累计</div></div>
+      <div class="metric"><div class="lbl">持仓数量</div><div class="val num">5 只</div><div class="delta">2 涨 · 3 跌</div></div>
+    </div>
+
+    <div class="card">
+      <h3>💼 我的持仓</h3>
+      <div class="cap">收益按最新估值实时计算 · 点击行可查看基金详情</div>
+      <table>
+        <thead><tr><th>基金名称 / 代码</th><th>持仓金额</th><th>成本单价</th><th>最新估值</th><th>今日涨跌</th><th>持仓收益</th></tr></thead>
+        <tbody>
+          <tr><td><div class="fname">华夏沪深300ETF联接A</div><div class="fcode">000051</div></td><td>¥42,300.00</td><td class="num">1.2950</td><td class="num">1.3820</td><td class="num up">+0.73%</td><td class="num up">+¥2,838.00</td></tr>
+          <tr><td><div class="fname">易方达蓝筹精选混合</div><div class="fcode">005827</div></td><td>¥31,500.00</td><td class="num">2.1040</td><td class="num">2.2960</td><td class="num up">+0.31%</td><td class="num up">+¥2,881.62</td></tr>
+          <tr><td><div class="fname">招商中证白酒指数(LOF)</div><div class="fcode">161725</div></td><td>¥21,860.00</td><td class="num">1.0820</td><td class="num">1.0930</td><td class="num down">-1.24%</td><td class="num down">-¥210.36</td></tr>
+          <tr><td><div class="fname">天弘中证500ETF联接C</div><div class="fcode">005918</div></td><td>¥18,240.00</td><td class="num">0.9130</td><td class="num">0.8940</td><td class="num down">-0.52%</td><td class="num down">-¥377.04</td></tr>
+          <tr><td><div class="fname">南方中证芯片产业ETF联接</div><div class="fcode">008888</div></td><td>¥14,750.40</td><td class="num">0.9860</td><td class="num">1.0640</td><td class="num up">+2.16%</td><td class="num up">+¥7,873.14</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="two-col">
+      <div class="card">
+        <h3>🧩 组件样张 · 状态与操作</h3>
+        <div class="cap">徽章 / 按钮 / 输入框 / 标签页 —— 全站唯一强调色为香槟金</div>
+        <div style="margin-top:16px;">
+          <span class="badge b-gold">⭐ 推荐</span>
+          <span class="badge b-red">🔴 高风险</span>
+          <span class="badge b-amber">🟡 中风险</span>
+          <span class="badge b-green">🟢 安全</span>
+          <span class="badge b-gray">未评级</span>
+        </div>
+        <div style="margin-top:18px;">
+          <span class="btn btn-primary">🔍 开始诊断</span>
+          <span class="btn btn-ghost">导出报告</span>
+        </div>
+        <div class="input"><span class="ph">输入 6 位股票代码，如 600519</span></div>
+        <div class="tabs">
+          <div class="tab on">📊 基本面</div><div class="tab">⚠️ 排雷</div><div class="tab">🏰 护城河</div><div class="tab">💰 估值</div><div class="tab">📑 财报三表</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>🩺 综合诊断 · 概览区样张</h3>
+        <div class="cap">贵州茅台（600519）　现价 <span class="num">1,297.40</span> 元</div>
+        <div class="metrics" style="grid-template-columns:repeat(2,1fr);margin-top:14px;">
+          <div class="metric" style="padding:13px 15px;"><div class="lbl">基本面评分</div><div class="val num" style="font-size:20px;">50<span class="t3" style="font-size:13px;font-weight:400;">/100</span></div></div>
+          <div class="metric" style="padding:13px 15px;"><div class="lbl">排雷评级</div><div class="val" style="font-size:20px;color:var(--warn);">🟡 中风险</div></div>
+          <div class="metric" style="padding:13px 15px;"><div class="lbl">护城河等级</div><div class="val" style="font-size:20px;color:var(--down);">🟢 较宽护城河</div></div>
+          <div class="metric" style="padding:13px 15px;"><div class="lbl">估值状态</div><div class="val" style="font-size:20px;color:var(--down);">低估</div></div>
+        </div>
+        <div class="cap" style="margin-top:14px;">📈 历史分位（近 5 年）　PE(TTM) <span class="num t2">10.5%</span>　·　PB <span class="num t2">6.6%</span>　<span class="t3">百度股市通 · 914 样本</span></div>
+      </div>
+    </div>
+
+    <!-- ==================== 新旧对比 ==================== -->
+    <div class="sec-label">新 旧 对 比（同 一 组 件）</div>
+    <div class="compare">
+      <div class="cmp cmp-old">
+        <div class="cmp-tag" style="color:#9CA3AF;">旧 版 · 现状</div>
+        <div class="m"><div style="font-size:11.5px;color:#9CA3AF;">总资产</div><div style="font-size:23px;font-weight:700;color:#FFF;margin-top:4px;" class="num">¥128,650.42</div><div style="font-size:12px;color:#EF4444;margin-top:3px;" class="num">-0.68% 今日</div></div>
+        <div style="margin-top:14px;">
+          <span class="navb nb1">🔍 开始诊断</span><span class="navb nb2">导出报告</span>
+        </div>
+        <div class="cmp-note">灰黑平铺 · 常驻阴影 · 通用科技蓝 · 按钮浮起 · 跌显示红色（口径错）</div>
+      </div>
+      <div class="cmp cmp-new">
+        <div class="cmp-tag" style="color:var(--gold);">新 版 · 本方案</div>
+        <div class="metric" style="margin-top:10px;"><div class="lbl">总资产</div><div class="val num">¥128,650.42</div><div class="delta num"><span class="down">▼ -0.68%</span> 今日</div></div>
+        <div style="margin-top:14px;">
+          <span class="btn btn-primary" style="padding:7px 18px;">🔍 开始诊断</span>
+          <span class="btn btn-ghost" style="padding:7px 18px;">导出报告</span>
+        </div>
+        <div class="cmp-note">夜航蓝分层 · 发丝线零阴影 · 香槟金唯一强调 · 静态稳重 · 跌显示绿色（A股口径）</div>
+      </div>
+    </div>
+
+    <div class="sec-label" style="margin-top:26px;">说 明</div>
+    <div class="cap" style="line-height:1.8;">
+      本页为 1:1 视觉稿（纯静态 HTML，非运行截图），色值/字号/间距与《UI 升级设计文档 v1》tokens 完全一致；
+      数据为演示样例。确认后按此实现到 styles.py + 各 live 页，Streamlit 控件（st.metric / st.tabs / 按钮 / 输入）
+      通过全局 CSS 覆盖达成同款效果。
+    </div>
+  </main>
+</div>
+</body>
+</html>

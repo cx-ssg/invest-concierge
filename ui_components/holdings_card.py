@@ -82,9 +82,18 @@ def render_holdings_card(compact: bool = False):
     # 空数据处理
     if not funds:
         if compact:
-            st.info("暂无持仓数据")
+            st.markdown(
+                '<div class="empty-state" style="padding:16px 8px;">'
+                '<div class="es-icon">💼</div><div class="es-title">暂无持仓</div>'
+                '<div class="es-hint">到「我的持仓」页添加第一笔基金</div></div>',
+                unsafe_allow_html=True)
         else:
-            st.warning("📭 暂无持仓数据，快去添加吧！")
+            st.markdown(
+                '<div class="card"><div class="empty-state">'
+                '<div class="es-icon">📭</div><div class="es-title">还没有持仓记录</div>'
+                '<div class="es-hint">到「我的持仓」页录入第一笔基金后，<br/>'
+                '这里会展示资产总览与收益追踪</div></div></div>',
+                unsafe_allow_html=True)
         return
 
     # === 计算统计数据 ===
@@ -93,148 +102,112 @@ def render_holdings_card(compact: bool = False):
     total_profit = total_value - total_cost
     profit_rate = (total_profit / total_cost * 100) if total_cost > 0 else 0
 
-    # A股习惯：红涨绿跌
-    if total_profit >= 0:
-        profit_color = "#FF4D4D"
-    else:
-        profit_color = "#00C853"
+    # A股口径：红涨绿跌（涨=红 / 跌=绿），颜色由 CSS 类 text-up/text-down 承载
     profit_sign = "+" if total_profit >= 0 else ""
 
     if compact:
         # ========== 紧凑模式：用于侧边栏 ==========
+        cls = "text-up" if total_profit >= 0 else "text-down"
         st.markdown("""
-        <div style="
-            background: linear-gradient(135deg, #2A2A2A 0%, #333 100%); 
-            border-radius: 10px; 
-            padding: 12px; 
-            margin: 8px 0;
-        ">
-            <div style="font-size: 12px; color: #999; margin-bottom: 4px;">总资产</div>
-            <div style="font-size: 20px; font-weight: bold; color: #FFF;">
-                ¥{value:,.2f}
-            </div>
-            <div style="font-size: 13px; color: {pc}; margin-top: 4px;">
-                {ps}¥{profit:,.2f} ({ps}{rate:.2f}%)
-            </div>
+        <div class="metric-card" style="padding:13px 15px;">
+            <div class="m-lbl">总资产概览</div>
+            <div class="m-val">¥{value:,.2f}</div>
+            <div class="m-delta num"><span class="{cls}">{ps}¥{profit:,.2f}（{ps}{rate:.2f}%）</span>
+             <span style="color:var(--text-3);">累计</span></div>
         </div>
-        """.format(
-            value=total_value,
-            pc=profit_color,
-            ps=profit_sign,
-            profit=total_profit,
-            rate=profit_rate
-        ), unsafe_allow_html=True)
+        """.format(value=total_value, cls=cls, ps=profit_sign,
+                   profit=total_profit, rate=profit_rate), unsafe_allow_html=True)
 
         # 显示前3只基金（纯HTML，不嵌套Streamlit组件）
         for fund in funds[:3]:
             nav, fund_profit, fund_rate, amount, _, _ = _calc_fund_profit(fund)
-            f_color = "#FF4D4D" if fund_profit >= 0 else "#00C853"
+            f_cls = "text-up" if fund_profit >= 0 else "text-down"
             f_sign = "+" if fund_profit >= 0 else ""
 
             st.markdown("""
-            <div style="
-                display: flex; 
-                justify-content: space-between; 
-                align-items: center;
-                padding: 8px 0; 
-                border-bottom: 1px solid #333;
-            ">
+            <div class="row-item">
                 <div>
-                    <div style="font-size: 13px; color: #CCC;">{name}</div>
-                    <div style="font-size: 11px; color: #666;">{code}</div>
+                    <div style="font-size:12.5px;color:var(--text-1);">{name}</div>
+                    <div style="font-size:10.5px;color:var(--text-3);margin-top:1px;">{code}</div>
                 </div>
-                <div style="text-align: right;">
-                    <div style="font-size: 13px; color: #FFF;">
-                        ¥{market_value:,.0f}
-                    </div>
-                    <div style="font-size: 11px; color: {fc};">
-                        {fs}{fr:.2f}%
-                    </div>
+                <div style="text-align:right;">
+                    <div style="font-size:12.5px;color:var(--text-1);" class="num">¥{market_value:,.0f}</div>
+                    <div style="font-size:11px;margin-top:1px;" class="num {fcls}">{fs}{fr:.2f}%</div>
                 </div>
             </div>
             """.format(
                 name=fund.get('name', '未知')[:8],
                 code=fund.get('code', ''),
                 market_value=amount,
-                fc=f_color,
+                fcls=f_cls,
                 fs=f_sign,
                 fr=fund_rate
             ), unsafe_allow_html=True)
     else:
         # ========== 完整模式：用于主页面 ==========
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                label="总资产",
-                value="¥{:,.2f}".format(total_value),
-                delta=None
-            )
-        
-        with col2:
-            st.metric(
-                label="总盈亏",
-                value="¥{:,.2f}".format(total_profit),
-                delta="{}{:.2f}%".format(profit_sign, profit_rate)
-            )
-        
-        with col3:
-            st.metric(
-                label="持仓数量",
-                value="{}只".format(len(funds)),
-                delta=None
-            )
-        
-        # 基金列表（纯HTML，避免组件嵌套冲突）
-        st.markdown("---")
-        st.markdown("### 📋 持仓明细")
-        
+        profit_cls = "text-up" if total_profit >= 0 else "text-down"
+        up_cnt = sum(1 for f in funds if _calc_fund_profit(f)[1] >= 0)
+        down_cnt = len(funds) - up_cnt
+
+        def _mcard(lbl, val, delta_html):
+            return ('<div class="metric-card"><div class="m-lbl">{}</div>'
+                    '<div class="m-val">{}</div><div class="m-delta">{}</div></div>'
+                    ).format(lbl, val, delta_html)
+
+        cards_html = "".join([
+            _mcard("总资产", "¥{:,.2f}".format(total_value),
+                   '<span class="{}">{}{:.2f}%</span> 累计收益率'.format(
+                       profit_cls, profit_sign, profit_rate)),
+            _mcard("持仓总盈亏", '<span class="{}">{}¥{:,.2f}</span>'.format(
+                profit_cls, profit_sign, total_profit), "按最新估值计算"),
+            _mcard("累计收益率", '<span class="{}">{}{:.2f}%</span>'.format(
+                profit_cls, profit_sign, profit_rate), "成本口径"),
+            _mcard("持仓数量", "{} 只".format(len(funds)),
+                   '<span class="text-up">{} 涨</span> · <span class="text-down">{} 跌</span>'.format(
+                       up_cnt, down_cnt)),
+        ])
+        st.markdown(
+            '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">{}</div>'.format(
+                cards_html), unsafe_allow_html=True)
+
+        # 基金列表（纯HTML行，避免组件嵌套冲突）
+        rows_html = ""
         for fund in funds:
             nav, fund_profit, fund_rate, amount, cost_nav_val, shares = _calc_fund_profit(fund)
-            f_color = "#FF4D4D" if fund_profit >= 0 else "#00C853"
+            f_cls = "text-up" if fund_profit >= 0 else "text-down"
             f_sign = "+" if fund_profit >= 0 else ""
-            
-            # 每只基金一行：纯HTML div，不使用st.columns
-            st.markdown("""
-            <div style="
-                display: flex; 
-                justify-content: space-between; 
-                align-items: center;
-                padding: 10px 12px;
-                margin: 4px 0;
-                background: #2A2A2A;
-                border-radius: 8px;
-                border-left: 3px solid {border_color};
-            ">
-                <div style="flex: 2;">
-                    <div style="font-size: 14px; font-weight: bold; color: #FFF;">{name}</div>
-                    <div style="font-size: 11px; color: #666;">{code}</div>
+            rows_html += """
+            <div class="row-item" style="padding:11px 8px;">
+                <div style="flex:2;">
+                    <div style="font-size:13.5px;font-weight:600;color:var(--text-1);">{name}</div>
+                    <div style="font-size:11px;color:var(--text-3);margin-top:2px;">{code}</div>
                 </div>
-                <div style="flex: 1; text-align: center;">
-                    <div style="font-size: 12px; color: #999;">净值</div>
-                    <div style="font-size: 14px; color: #CCC;">¥{nav_val:.4f}</div>
+                <div style="flex:1;text-align:center;">
+                    <div style="font-size:11px;color:var(--text-3);">净值</div>
+                    <div style="font-size:13.5px;color:var(--text-2);margin-top:2px;" class="num">{nav_val:.4f}</div>
                 </div>
-                <div style="flex: 1; text-align: center;">
-                    <div style="font-size: 12px; color: #999;">市值</div>
-                    <div style="font-size: 14px; color: #CCC;">¥{market_val:,.0f}</div>
+                <div style="flex:1;text-align:center;">
+                    <div style="font-size:11px;color:var(--text-3);">市值</div>
+                    <div style="font-size:13.5px;color:var(--text-2);margin-top:2px;" class="num">¥{market_val:,.0f}</div>
                 </div>
-                <div style="flex: 1; text-align: right;">
-                    <div style="font-size: 12px; color: #999;">盈亏</div>
-                    <div style="font-size: 14px; font-weight: bold; color: {fc};">
-                        {fs}{fr:.2f}%
-                    </div>
+                <div style="flex:1;text-align:right;">
+                    <div style="font-size:11px;color:var(--text-3);">盈亏</div>
+                    <div style="font-size:13.5px;font-weight:600;margin-top:2px;" class="num {fcls}">{fs}{fr:.2f}%</div>
                 </div>
             </div>
             """.format(
-                border_color=f_color,
                 name=fund.get('name', '未知'),
                 code=fund.get('code', ''),
                 nav_val=nav,
                 market_val=amount,
-                fc=f_color,
+                fcls=f_cls,
                 fs=f_sign,
                 fr=fund_rate
-            ), unsafe_allow_html=True)
+            )
+        st.markdown(
+            '<div class="card"><div class="card-title">📋 持仓明细</div>'
+            '<div class="card-subtitle">净值与市值按最新估值计算 · 红涨绿跌</div>{}</div>'.format(rows_html),
+            unsafe_allow_html=True)
 
 
 def render_holdings_summary() -> Dict:

@@ -105,27 +105,31 @@ def get_ai_response(messages):
 
 def build_system_prompt():
     """构建系统提示词"""
-    funds = load_funds()
+    funds = _load_funds_from_store()
     fund_context = ""
     if funds:
         fund_context = "\n用户当前持仓基金：\n"
         for code, fund in funds.items():
             fund_data = get_fund_info(code)
+            cost_nav = fund.get('cost_nav', 0) or 0
+            shares = fund.get('hold_shares', 0) or 0
+            cost = cost_nav * shares
             if fund_data:
-                current_price = safe_float_convert(fund_data.get('gsz', fund_data.get('dwjz', 0)), default=fund['buy_price'])
-                fund_name = fund_data.get('name', fund['name'])
+                current_price = safe_float_convert(
+                    fund_data.get('gsz', fund_data.get('dwjz', 0)), default=cost_nav)
+                fund_name = fund_data.get('name', fund.get('name', ''))
                 today_change = safe_float_convert(fund_data.get('gszzl', 0), default=0)
             else:
-                current_price = fund['buy_price']
-                fund_name = fund['name']
+                current_price = cost_nav
+                fund_name = fund.get('name', '')
                 today_change = 0
 
-            current_value = fund['shares'] * current_price
-            profit = current_value - fund['amount']
-            profit_rate = (profit / fund['amount']) * 100 if fund['amount'] > 0 else 0
+            current_value = shares * current_price
+            profit = current_value - cost
+            profit_rate = (profit / cost) * 100 if cost > 0 else 0
 
-            fund_context += "- {}（{}）：买入{}元，当前市值{:.2f}元，收益{:.2f}元（{:.2f}%），今日涨跌{:.2f}%\n".format(
-                fund_name, code, fund['amount'], current_value, profit, profit_rate, today_change
+            fund_context += "- {}（{}）：成本{:.2f}元，当前市值{:.2f}元，收益{:.2f}元（{:.2f}%），今日涨跌{:.2f}%\n".format(
+                fund_name, code, cost, current_value, profit, profit_rate, today_change
             )
 
     # 获取市场数据
@@ -411,3 +415,143 @@ def multi_agent_stock_analysis(stock_code, stock_name="", stock_data=None):
         "debate": debate_text,
         "rating": rating,
     }
+
+
+# ============================================
+# 演示 seed + AI 工具调用（ai_chat 接入）
+# ============================================
+
+# 内置示例持仓（演示模式用）：字段与 data.database.load_funds 一致（纯内存 seed，不写数据库）
+DEMO_FUNDS = {
+    "161725": {"name": "招商中证白酒指数(LOF)A", "code": "161725",
+               "amount": 20000.0, "cost_nav": 1.1200, "hold_shares": 17857.14},
+    "110022": {"name": "易方达消费行业股票", "code": "110022",
+               "amount": 15000.0, "cost_nav": 3.4200, "hold_shares": 4385.96},
+    "000961": {"name": "天弘沪深300ETF联接A", "code": "000961",
+               "amount": 10000.0, "cost_nav": 1.6500, "hold_shares": 6060.61},
+}
+
+
+def seed_demo_funds():
+    """演示 seed 函数：返回内置示例持仓（不改数据库结构、不落盘，仅存在于内存）"""
+    return dict(DEMO_FUNDS)
+
+
+def _is_demo_mode():
+    """演示模式开关：ai_chat 侧边栏勾选 st.session_state.use_demo_funds"""
+    try:
+        return bool(st.session_state.get("use_demo_funds", False))
+    except Exception:
+        return False
+
+
+def _load_funds_from_store():
+    """AI 上下文/工具读取持仓的统一入口：演示模式用内置示例数据，否则读真实持仓库"""
+    if _is_demo_mode():
+        return dict(DEMO_FUNDS)
+    return load_funds()
+
+
+# ==================== OpenAI tools schema ====================
+
+AI_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_fund_info",
+            "description": "查询单只基金的基本信息：名称、最新净值、估算净值、今日涨跌幅。输入 6 位基金代码（如 161725）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fund_code": {
+                        "type": "string",
+                        "description": "6 位基金代码，如 161725",
+                    }
+                },
+                "required": ["fund_code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_market_index",
+            "description": "查询当前大盘指数行情：上证指数、深证成指、创业板指、沪深300 等主要指数的点位与涨跌幅。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_funds",
+            "description": "查询用户当前的基金持仓列表（基金代码、名称、成本净值、市值、持有份额）。演示模式下返回内置示例持仓。",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+
+def execute_ai_tool(tool_name, arguments):
+    """执行一次 AI 工具调用，返回 JSON 字符串（用于回填给模型继续推理）"""
+    if not isinstance(arguments, dict):
+        arguments = {}
+    try:
+        if tool_name == "get_fund_info":
+            fund_code = str(arguments.get("fund_code", "")).strip()
+            info = get_fund_info(fund_code)
+            return json.dumps(info, ensure_ascii=False) if info else \
+                json.dumps({"error": "未找到基金 {}".format(fund_code)}, ensure_ascii=False)
+        if tool_name == "get_market_index":
+            data = get_market_index()
+            return json.dumps(data or [], ensure_ascii=False)
+        if tool_name == "load_funds":
+            funds = _load_funds_from_store()
+            return json.dumps(funds, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": "工具执行出错：{}".format(e)}, ensure_ascii=False)
+    return json.dumps({"error": "未知工具：{}".format(tool_name)}, ensure_ascii=False)
+
+
+def chat_with_tools(messages, tools=None, model=DEEPSEEK_MODEL, temperature=0.7, max_tool_rounds=4):
+    """带工具调用的多轮对话循环（ai_chat 主入口）。
+
+    流程：
+        1) messages(tools=tools, tool_choice="auto") 交给模型；
+        2) 模型请求工具 → execute_ai_tool 执行并把结果回填为 role="tool" 消息；
+        3) 循环至多 max_tool_rounds 轮，直到模型给出纯文本回答。
+
+    返回：
+        {"type": "text", "content": "最终回答", "tool_trace": [{"name", "arguments", "output"}, ...]}
+    """
+    if not API_KEY:
+        return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~", "tool_trace": []}
+
+    history = [dict(m) for m in messages]
+    tool_trace = []
+    tools = AI_TOOLS if tools is None else tools
+
+    for _round in range(max_tool_rounds + 1):
+        result = call_llm(history, tools=tools, model=model, temperature=temperature)
+        if result.get("type") != "tool_call":
+            result.setdefault("tool_trace", tool_trace)
+            return result
+
+        tool_calls = result.get("content") or []
+        history.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            name = fn.get("name", "")
+            raw_args = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args or {})
+            except Exception:
+                args = {}
+            output = execute_ai_tool(name, args)
+            tool_trace.append({"name": name, "arguments": args, "output": output})
+            history.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
+                "content": output,
+            })
+
+    return {"type": "text", "content": "⚠️ 工具调用轮数超限，请把问题拆分后再试。", "tool_trace": tool_trace}
