@@ -66,7 +66,7 @@ goto end
 
 :no_python
 echo [错误] 未找到 Python
-echo [错误] 请安装 Python 3.7 及以上版本，并勾选 Add Python to PATH
+echo [错误] 请安装 Python 3.9 及以上版本，并勾选 Add Python to PATH
 goto end
 
 :no_file

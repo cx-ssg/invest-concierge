@@ -1,5 +1,7 @@
 # 投资私人管家 · invest-concierge
 
+[![CI](https://github.com/cx-ssg/invest-concierge/actions/workflows/ci.yml/badge.svg)](https://github.com/cx-ssg/invest-concierge/actions/workflows/ci.yml)
+
 > A股基金 AI 私人顾问 —— 开源 · 免费数据 · 打开即用
 
 ## ⚠️ 免责声明（请先阅读）

@@ -362,7 +362,7 @@ def multi_agent_stock_analysis(stock_code, stock_name="", stock_data=None):
             {"role": "system", "content": full_prompt},
             {"role": "user", "content": "请对 " + stock_label + " 进行" + role_info["name"] + "。"},
         ]
-        result = get_ai_response(messages)
+        result = call_llm(messages, model=DEEPSEEK_MODEL, temperature=0.7)
 
         if result["type"] == "text":
             analyst_reports[role_key] = {
@@ -393,7 +393,7 @@ def multi_agent_stock_analysis(stock_code, stock_name="", stock_data=None):
         {"role": "system", "content": "你是交易决策委员会主席。请基于四位独立分析师报告，组织辩论并给出综合判断。"},
         {"role": "user", "content": debate_prompt},
     ]
-    debate_result = get_ai_response(messages)
+    debate_result = call_llm(messages, model=DEEPSEEK_MODEL, temperature=0.7)
     debate_text = debate_result["content"] if debate_result["type"] == "text" else "综合判断生成失败"
 
     # 提取评级
