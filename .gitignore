@@ -1,0 +1,58 @@
+# ===== 敏感配置 =====
+local_env.bat
+local_env.bat.bak
+*.env
+*.env.local
+
+# ===== 用户数据（真实持仓/日记，严禁入库） =====
+my_funds.json
+investment_diary.json
+alert_settings.json
+*.migrated
+
+# ===== 数据库 =====
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# ===== 备份 =====
+*.bak
+*.backup
+
+# ===== 内部工作文件（开源仓库不含，本地保留作素材） =====
+.agents/
+.zcode/
+.mimosa/
+Obsidian-Vault/
+.clinerules
+task_progress.md
+architecture_report.md
+_akshare_diagnosis.md
+_archive/
+
+# ===== 旧截图（v1.0 前替换为新图） =====
+/screen.png
+/screen2.png
+/屏幕截图*.png
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+.venv/
+venv/
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
