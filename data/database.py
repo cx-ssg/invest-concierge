@@ -672,6 +672,25 @@ def update_agent_session_summary(session_id, summary):
         conn.close()
 
 
+def list_agent_sessions(limit=8):
+    """取最近 limit 条会话（无论有无摘要，会话历史列表用），按更新倒序"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT id, title, summary, created_at, updated_at FROM agent_sessions "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?",
+            (int(limit),)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print("读取 Agent 会话列表失败：{}".format(e))
+        return []
+    finally:
+        conn.close()
+
+
 def list_recent_agent_sessions(limit=3):
     """取最近 limit 条【已有摘要】的会话，按更新倒序（同秒按 id 倒序稳定排序）"""
     conn = get_conn()

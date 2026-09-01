@@ -13,15 +13,16 @@ _UP = "var(--up)"      # 涨·红
 _DOWN = "var(--down)"  # 跌·绿
 
 
-def render_market_index():
-    """渲染大盘指数列表（行式布局，红涨绿跌）"""
-    indices = get_market_index()
+def render_market_index(data=None):
+    """渲染大盘指数列表（红涨绿跌）
 
-    if not indices:
-        st.warning("无法获取市场指数")
-        return
+    data: 预取的指数数据；None 时自行拉取（侧边栏建议用
+    utils.sidebar_data.fetch_with_timeout 预取，避免阻塞整页渲染）。
+    """
+    if data is None:
+        data = get_market_index()
 
-    st.markdown("### 📈 大盘指数")
+    indices = data
 
     # 兼容 list 或 DataFrame 输入
     items = indices if isinstance(indices, list) else (indices.to_dict('records') if hasattr(indices, 'to_dict') else [])
@@ -55,9 +56,12 @@ def render_market_index():
         ), unsafe_allow_html=True)
 
 
-def render_hot_sectors():
-    """渲染热门板块（红涨绿跌）"""
-    sectors = get_hot_sectors()
+def render_hot_sectors(data=None):
+    """渲染热门板块（红涨绿跌）；data 为预取数据，None 时自行拉取"""
+    if data is None:
+        sectors = get_hot_sectors()
+    else:
+        sectors = data
 
     if not sectors:
         return

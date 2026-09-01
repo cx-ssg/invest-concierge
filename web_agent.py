@@ -114,9 +114,9 @@ def main():
     # 注入全局CSS样式
     inject_global_css()
 
-    # 初始化 session_state
+    # 初始化 session_state（Agent-first：默认打开对话中心）
     if "page" not in st.session_state:
-        st.session_state.page = "home"
+        st.session_state.page = "ai_chat"
 
     # 渲染侧边栏
     render_sidebar()
