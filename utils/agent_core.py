@@ -293,14 +293,16 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
 
     messages = [{"role": "system", "content": system}]
 
-    # 追问链：复用同一会话的最近消息（避免上轮结果丢失）
+    # 追问链：复用同一会话的最近对话（只重放 user/assistant 文本——
+    # tool 消息缺 tool_call_id/前置 assistant.tool_calls 会被 DeepSeek 400 拒掉；
+    # 工具结论已含在 assistant 回复里，落库仅作审计）
     if memory and session_id and continue_question:
         prior = get_agent_messages(session_id, limit=6)
         for m in prior:
             role = m.get("role")
-            content = m.get("content")
-            if role in ("user", "assistant", "tool") and content:
-                messages.append({"role": role, "content": str(content)})
+            content = str(m.get("content") or "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
 
     messages.append({"role": "user", "content": str(task)})
 

@@ -136,3 +136,33 @@
 
 - 估值偏差 ≤5% 锚点、ST 样本、护城河真实总分：均卡本机 EM 阻断，**用户开代理或有网机器上按 §6 步骤 10 分钟可补**。
 - AI 有 key 端到端：等 local_env.bat 放入有效 key。
+
+---
+
+## 9. AI 端到端联调（2026-09-02 · 真实 DeepSeek Key，zcode）
+
+> 前置：用户提供有效 key（local_env.bat，已 gitignore）。联调入口 = `agent_run`（ai_chat 与诊断追问共用）。
+> 本机网络：THS/新浪可达；EM 全线被代理拦截（v2rayN TUN 模式，无解，见 §8.2）。
+
+### 9.1 多步工具循环（Round 1）
+
+- 输入："帮我诊断一下 600519，看看值不值得关注"
+- **Agent 自主 6 连工具调用**：`get_stock_diagnosis → get_stock_valuation → get_stock_minefield → get_stock_moat → get_market_index → get_market_sentiment`
+- 耗时 179s（EM 阻断重试拖慢，有网环境预期 <60s）；`tool_trace` 完整落库
+- **防幻觉守则实测生效**：结论主动声明"本次诊断中部分数据不可得（估值/护城河/行情字段为空），基于已获取的真实数据进行分析"，全程无编造数值；
+  报告中的 ROE 32.53% / 毛利率 91.18% / 净利率 50.53% / 负债率 16.42% 均来自修复后的真实引擎输出（§8）
+- 会话落库：agent_sessions#2 + 8 条 agent_messages（user/tool×6/assistant）
+
+### 9.2 追问链（Round 2）与联调发现的真实 bug
+
+- 首跑即暴露：追问链重放 `tool` 消息缺 `tool_call_id` 且缺前置 `assistant.tool_calls` → DeepSeek 400
+  （**mock 测不出**——DeepSeek 的 API 校验只有真实调用才触发；正是端到端联调的价值）
+- **修复**：追问链只重放 user/assistant 文本消息（工具结论已含在 assistant 回复里），tool 消息继续落库供审计
+- 修复后重跑 ✅：Agent 再次自主 6 连工具（含二次 `get_stock_valuation` 核实），结论带真实数据（ROE 32.53% /
+  毛利率 91.18% / 营收增速 -1.2%），并如实标注"成长性/估值维度数据缺失"——E2E PASS
+
+### 9.3 结论
+
+- Agent v1.1 三大承诺（**工具调用 / 越用越懂 / 不编造**）在真实 key 下全部验证；
+  追问链 bug 已修复并沉淀为端到端才能发现的教训（mock 覆盖不到协议层校验）。
+- EM 数据源在本机（TUN 代理）不可用属环境限制；有网/规则模式环境下建议按 §6 步骤补跑一轮含估值/护城河数值的完整对话。
