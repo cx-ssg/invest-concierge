@@ -15,6 +15,8 @@ from data.cache import cached, CACHE_FUNDAMENTALS
 import utils.common
 safe_float_convert = getattr(utils.common, "safe_float_convert", lambda x, default=0.0: default)
 call_akshare_with_retry = getattr(utils.common, "call_akshare_with_retry", lambda func, **kwargs: None)
+clean_number = getattr(utils.common, "clean_number", None)
+latest_report_row = getattr(utils.common, "latest_report_row", None)
 
 
 @cached(CACHE_FUNDAMENTALS)
@@ -71,54 +73,55 @@ def get_stock_financial_data(stock_code):
     try:
         df_fin = call_akshare_with_retry(ak.stock_financial_abstract_ths, symbol=stock_code, indicator="按年度")
         if df_fin is not None and not df_fin.empty:
-            # 取最新一期数据
-            latest = df_fin.iloc[0]
-            
+            # 取最新一期（THS 按年度为年份升序，iloc[0] 会取到最旧年度；
+            # 值带单位字符串如 "91.93%"、"1,741.44亿"，safe_float_convert 会转成 0）
+            latest = latest_report_row(df_fin)
+
             # ROE
             for col in ['净资产收益率', 'ROE', '加权净资产收益率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['roe'] = val
                         break
-            
+
             # 毛利率
             for col in ['毛利率', '销售毛利率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['gross_margin'] = val
                         break
-            
+
             # 净利率
             for col in ['净利率', '销售净利率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['net_margin'] = val
                         break
-            
+
             # 资产负债率
             for col in ['资产负债率', '资产负债比率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['debt_ratio'] = val
                         break
-            
+
             # 营收增长率
             for col in ['营业收入增长率', '营收增长率', '营业总收入同比增长率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['revenue_growth'] = val
                         break
-            
+
             # 净利润增长率
             for col in ['净利润增长率', '归属净利润增长率', '归属于母公司所有者的净利润同比增长率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['profit_growth'] = val
                         break
     except Exception as e:

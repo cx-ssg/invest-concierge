@@ -356,6 +356,61 @@ def get_sign(change):
         return ""
 
 
+# ==================== 数值清洗与最新报告行（THS 带单位字符串/年份升序防御） ====================
+
+_UNIT_SUFFIXES = (("%", 1.0), ("万亿", 1e12), ("亿元", 1e8), ("亿", 1e8),
+                  ("万元", 1e4), ("万", 1e4), ("元", 1.0))
+
+
+def clean_number(value):
+    """清洗"带单位/符号的字符串数值"。
+
+    "91.93%"→91.93、"1,741.44亿"→1.74144e11、"(3.20)"→-3.2、"3,210"→3210.0；
+    数字原样转 float；解析失败返回 None（调用方按缺数据处理，勿用 0 冒充）。
+    背景：THS 财务摘要接口返回带单位字符串且按年份升序，safe_float_convert
+    会把 "91.93%" 转成 0，导致字段全空。
+    """
+    if value is None or value != value:  # None / NaN
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(",", "").replace("，", "")
+    if not s or s in ("--", "-", "nan"):
+        return None
+    sign = 1.0
+    if s.startswith("(") and s.endswith(")"):
+        sign, s = -1.0, s[1:-1]
+    for suffix, mult in _UNIT_SUFFIXES:
+        if s.endswith(suffix):
+            s = s[: -len(suffix)]
+            try:
+                return sign * float(s) * mult
+            except ValueError:
+                return None
+    try:
+        return sign * float(s)
+    except ValueError:
+        return None
+
+
+def latest_report_row(df, date_cols=("报告期", "报告日", "截止日期", "日期")):
+    """取 DataFrame 中报告期最新的一行。
+
+    优先按日期列解析取 max（THS 按年度为年份升序，iloc[0] 会取到最旧年度——历史 bug）；
+    无可解析日期列时保守取最后一行（升序接口的最新数据在尾部）。
+    """
+    import pandas as pd
+
+    if df is None or df.empty:
+        return None
+    for col in date_cols:
+        if col in df.columns:
+            dates = pd.to_datetime(df[col], errors="coerce")
+            if dates.notna().any():
+                return df.loc[dates.idxmax()]
+    return df.iloc[-1]
+
+
 if __name__ == "__main__":
     # 简单测试
     print("safe_json_parse 测试:", safe_json_parse('{"a": 1}', "测试数据"))

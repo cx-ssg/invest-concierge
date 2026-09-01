@@ -10,7 +10,7 @@ from datetime import datetime
 
 
 from data.cache import cached, CACHE_MINEFIELD
-from utils.common import safe_float_convert
+from utils.common import safe_float_convert, clean_number
 
 
 @cached(CACHE_MINEFIELD)
@@ -301,14 +301,14 @@ def _get_gross_margins_history(stock_code, result):
         time.sleep(0.3)
         df_fin = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按年度")
         if df_fin is not None and not df_fin.empty:
-            # 取近3年毛利率
+            # 取最近3年毛利率（THS 按年度为年份升序，需反转后从头取；值带单位字符串需清洗）
             count = 0
-            for _, row in df_fin.iterrows():
+            for _, row in df_fin.iloc[::-1].iterrows():
                 if count >= 3:
                     break
                 for col in ['毛利率', '销售毛利率']:
                     if col in df_fin.columns:
-                        val = safe_float_convert(row.get(col))
+                        val = clean_number(row.get(col))
                         if val is not None and val != 0:
                             result['gross_margins'].append(val)
                             count += 1

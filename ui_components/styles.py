@@ -202,8 +202,11 @@ def inject_global_css() -> None:
     div[data-testid="stSidebarNav"] { display: none !important; }
     ul[data-testid="stSidebarNavItems"] { display: none !important; }
 
-    /* ===== 双轨切换（segmented control · Streamlit 1.58 真实 DOM：button[kind=segmented_control*]） ===== */
-    div[data-testid="stButtonGroup"]:has(button[data-testid*="segmented_control"]) {
+    /* ===== 双轨切换（segmented control）
+       1.58: button[kind/data-testid=segmented_control*]
+       ≥1.6x: React Aria 重构 → button[data-variant=segmented_control*][aria-checked] ===== */
+    div[data-testid="stButtonGroup"]:has(button[data-testid*="segmented_control"]),
+    div[data-testid="stButtonGroup"]:has(button[data-variant*="segmented_control"]) {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
@@ -216,8 +219,41 @@ def inject_global_css() -> None:
         width: fit-content !important;
     }
     /* 中间包装层透明化，让按钮直接成为组的 flex 子项（否则竖排） */
-    div[data-testid="stButtonGroup"]:has(button[data-testid*="segmented_control"]) > div {
+    div[data-testid="stButtonGroup"]:has(button[data-testid*="segmented_control"]) > div,
+    div[data-testid="stButtonGroup"]:has(button[data-variant*="segmented_control"]) > div {
         display: contents !important;
+    }
+    .stApp button[data-variant="segmented_control"] {
+        display: inline-flex !important;
+        flex-direction: row !important;
+        align-items: center;
+        width: auto !important;
+        background: transparent !important;
+        color: var(--text-2) !important;
+        border: 1px solid transparent !important;
+        border-radius: 999px !important;
+        box-shadow: none !important;
+        transition: background .16s var(--ease), color .16s var(--ease);
+    }
+    .stApp button[data-variant="segmented_control"] p,
+    .stApp button[data-variant="segmented_control"] span:not([data-testid="stIconEmoji"]) {
+        color: var(--text-2) !important;
+    }
+    .stApp button[data-variant="segmented_control"]:hover {
+        color: var(--text-1) !important;
+    }
+    /* 高特异度：1.6x 的 emotion 样式动态插在文档流后部，需更长选择器压过 */
+    .stApp div[data-testid="stElementContainer"] div[data-testid="stButtonGroup"] button[data-variant="segmented_control"][data-selected="true"],
+    .stApp div[data-testid="stElementContainer"] div[data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] {
+        background: var(--gold-soft) !important;
+        color: var(--gold) !important;
+        border: 1px solid var(--gold-line) !important;
+        border-radius: 999px !important;
+        box-shadow: none !important;
+    }
+    .stApp div[data-testid="stElementContainer"] div[data-testid="stButtonGroup"] button[data-variant="segmented_control"][data-selected="true"] *,
+    .stApp div[data-testid="stElementContainer"] div[data-testid="stButtonGroup"] button[data-variant="segmented_control"][aria-checked="true"] * {
+        color: var(--gold) !important;
     }
     .stApp button[kind="segmented_control"],
     .stApp button[data-testid="stBaseButton-segmented_control"] {

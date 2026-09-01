@@ -69,6 +69,9 @@ def show_homepage():
             <p>总资产与持仓收益一览</p>
         </div>
         """, unsafe_allow_html=True)
+        if st.button("打开 →", key="home_go_dashboard", use_container_width=True):
+            st.session_state.page = "dashboard"
+            st.rerun()
 
     with col2:
         st.markdown("""
@@ -77,6 +80,10 @@ def show_homepage():
             <p>财报 / 排雷 / 护城河 / 估值 多引擎体检</p>
         </div>
         """, unsafe_allow_html=True)
+        if st.button("打开 →", key="home_go_diagnosis", use_container_width=True):
+            st.session_state.track = "stock"
+            st.session_state.page = "stock_diagnosis"
+            st.rerun()
 
     with col3:
         st.markdown("""
@@ -85,6 +92,9 @@ def show_homepage():
             <p>AI 驱动的持仓与行情问答</p>
         </div>
         """, unsafe_allow_html=True)
+        if st.button("打开 →", key="home_go_chat", use_container_width=True):
+            st.session_state.page = "ai_chat"
+            st.rerun()
 
     # 风险提示
     st.markdown("---")

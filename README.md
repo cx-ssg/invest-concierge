@@ -16,9 +16,11 @@
 
 ## 🖼️ 界面预览
 
-| 基金轨首页 | 股票综合诊断 | 双轨导航 |
+![功能导览](assets/screenshots/demo-tour.gif)
+
+| 基金持仓管理 | 股票综合诊断 | 双轨导航 |
 |---|---|---|
-| ![基金轨](assets/screenshots/screen-dashboard.png) | ![诊断](assets/screenshots/screen-diagnosis.png) | ![导航](assets/screenshots/screen-navigation.png) |
+| ![基金轨](assets/screenshots/02-dashboard-holdings.png) | ![诊断](assets/screenshots/09-diagnosis-overview.png) | ![导航](assets/screenshots/07-track-stock-sidebar.png) |
 
 ## 这是什么
 

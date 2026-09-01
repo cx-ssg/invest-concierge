@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
+# 版本区间锁定说明（2026-09-01 实测）：
+# - akshare 1.18.x 已移除 stock_a_lg_indicator/stock_dividents_cninfo 等 5 个旧接口（代码已适配降级），
+#   上限 <2 防大版本破坏；下限取实测过的 1.18。
+# - numpy 2.x 可用（页面已规避 pyarrow 图表），但 <3 防未测试的大版本。
 streamlit>=1.28.0
 pandas>=1.3.0
-numpy>=1.21.0
-akshare>=1.8.0
+numpy>=1.21.0,<3
+akshare>=1.18.0,<2
 openai>=1.0.0
 requests>=2.28.0
 matplotlib>=3.5.0

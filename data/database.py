@@ -103,6 +103,25 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # ===== 旧表迁移：fund_holdings 老结构（buy_price/shares）补列并回填 =====
+    # （CREATE TABLE IF NOT EXISTS 不会迁移已存在的旧表；老用户的 6 月库缺 cost_nav/hold_shares）
+    cursor.execute("PRAGMA table_info(fund_holdings)")
+    existing_cols = {row[1] for row in cursor.fetchall()}
+    if "cost_nav" not in existing_cols:
+        cursor.execute("ALTER TABLE fund_holdings ADD COLUMN cost_nav REAL DEFAULT 0")
+    if "hold_shares" not in existing_cols:
+        cursor.execute("ALTER TABLE fund_holdings ADD COLUMN hold_shares REAL DEFAULT 0")
+    if {"cost_nav", "buy_price"} <= existing_cols or "buy_price" in existing_cols:
+        cursor.execute(
+            "UPDATE fund_holdings "
+            "SET cost_nav = buy_price "
+            "WHERE buy_price IS NOT NULL AND (cost_nav IS NULL OR cost_nav = 0)")
+        cursor.execute(
+            "UPDATE fund_holdings "
+            "SET hold_shares = shares "
+            "WHERE shares IS NOT NULL AND (hold_shares IS NULL OR hold_shares = 0)")
+
     conn.commit()
     conn.close()
 
@@ -426,18 +445,33 @@ def save_diary(entries):
     try:
         cursor.execute("DELETE FROM diary_entries")
         for entry in entries:
-            cursor.execute("""
-                INSERT INTO diary_entries (id, date, fund_code, fund_name, action, amount, note)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                entry.get('id', 0),
-                entry.get('date', ''),
-                entry.get('fund_code', ''),
-                entry.get('fund_name', ''),
-                entry.get('action', ''),
-                entry.get('amount', 0),
-                entry.get('note', ''),
-            ))
+            entry_id = entry.get("id")
+            if entry_id:
+                cursor.execute("""
+                    INSERT INTO diary_entries (id, date, fund_code, fund_name, action, amount, note)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    entry_id,
+                    entry.get('date', ''),
+                    entry.get('fund_code', ''),
+                    entry.get('fund_name', ''),
+                    entry.get('action', ''),
+                    entry.get('amount', 0),
+                    entry.get('note', ''),
+                ))
+            else:
+                # 无 id：交给 AUTOINCREMENT（显式写 0 会撞 UNIQUE 约束）
+                cursor.execute("""
+                    INSERT INTO diary_entries (date, fund_code, fund_name, action, amount, note)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (
+                    entry.get('date', ''),
+                    entry.get('fund_code', ''),
+                    entry.get('fund_name', ''),
+                    entry.get('action', ''),
+                    entry.get('amount', 0),
+                    entry.get('note', ''),
+                ))
         conn.commit()
         return True
     except Exception as e:

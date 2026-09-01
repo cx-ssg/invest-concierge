@@ -10,7 +10,7 @@ from datetime import datetime
 
 
 from data.cache import cached, CACHE_MOAT
-from utils.common import safe_float_convert
+from utils.common import safe_float_convert, clean_number, latest_report_row
 
 
 @cached(CACHE_MOAT)
@@ -67,48 +67,49 @@ def _get_basic_financial_data(stock_code, result):
         time.sleep(0.3)
         df_fin = ak.stock_financial_abstract_ths(symbol=stock_code, indicator="按年度")
         if df_fin is not None and not df_fin.empty:
-            latest = df_fin.iloc[0]
-            
+            # THS 按年度为年份升序（iloc[0] 取到最旧年度），值带单位字符串（"91.93%"）——统一清洗
+            latest = latest_report_row(df_fin)
+
             # ROE
             for col in ['净资产收益率', 'ROE', '加权净资产收益率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val is not None and val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['roe'] = val
                         break
-            
+
             # 毛利率
             for col in ['毛利率', '销售毛利率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val is not None and val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['gross_margin'] = val
                         break
-            
+
             # 净利率
             for col in ['净利率', '销售净利率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val is not None and val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['net_margin'] = val
                         break
-            
+
             # 营收增长率
             for col in ['营业收入增长率', '营收增长率', '营业总收入同比增长率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val is not None and val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['revenue_growth'] = val
                         break
-            
+
             # 净利润增长率
             for col in ['净利润增长率', '归属净利润增长率', '归属于母公司所有者的净利润同比增长率']:
                 if col in df_fin.columns:
-                    val = safe_float_convert(latest.get(col))
-                    if val is not None and val != 0:
+                    val = clean_number(latest.get(col))
+                    if val:
                         result['profit_growth'] = val
                         break
-            
+
             result['_raw_data']['financial_abstract'] = df_fin
     except Exception as e:
         print("获取 {} 财务指标失败：{}".format(stock_code, e))
@@ -228,19 +229,20 @@ def _get_industry_data(stock_code, result):
                     time.sleep(0.1)
                     df_fin = ak.stock_financial_abstract_ths(symbol=code, indicator="按年度")
                     if df_fin is not None and not df_fin.empty:
-                        latest = df_fin.iloc[0]
-                        
+                        # 同上：取最新年度 + 清洗带单位字符串（否则行业均值是 1998 年的 0）
+                        latest = latest_report_row(df_fin)
+
                         for col in ['毛利率', '销售毛利率']:
                             if col in df_fin.columns:
-                                val = safe_float_convert(latest.get(col))
-                                if val is not None and val > 0:
+                                val = clean_number(latest.get(col))
+                                if val and val > 0:
                                     gross_margins.append(val)
                                 break
-                        
+
                         for col in ['净利率', '销售净利率']:
                             if col in df_fin.columns:
-                                val = safe_float_convert(latest.get(col))
-                                if val is not None and val > 0:
+                                val = clean_number(latest.get(col))
+                                if val and val > 0:
                                     net_margins.append(val)
                                 break
                 except Exception:
