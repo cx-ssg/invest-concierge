@@ -135,6 +135,13 @@ def inject_global_css() -> None:
         padding: 14px 8px 6px;
     }
 
+    /* 右侧数据面板小标签 */
+    .panel-label {
+        font-size: 11px; letter-spacing: 1.5px;
+        color: var(--text-3);
+        margin: 16px 0 6px;
+    }
+
     /* ===== 侧边栏 ===== */
     section[data-testid="stSidebar"] {
         background-color: var(--bg-sidebar);

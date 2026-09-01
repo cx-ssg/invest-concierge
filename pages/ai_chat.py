@@ -19,9 +19,9 @@ from ui_components.holdings_card import render_holdings_card
 from ui_components.market_indicator import render_market_index
 
 EXAMPLE_QUESTIONS = [
-    "我的持仓怎么样？",
-    "帮我诊断一下 600519，看看值不值得关注",
-    "今天大盘表现如何？",
+    "我的持仓怎么样",
+    "帮我诊断一下 600519",
+    "今天大盘表现如何",
 ]
 
 
@@ -82,23 +82,20 @@ def _session_display_messages(session_id, limit=40):
 
 
 def _render_right_panel():
-    """Reasonix 式右栏：持仓概览 / 大盘指数 / 会话记忆"""
-    with st.container():
-        st.markdown("#### 📌 持仓概览")
-        render_holdings_card(compact=True)
-    with st.container():
-        st.markdown("#### 📈 大盘指数")
-        try:
-            render_market_index()
-        except Exception:
-            st.caption("行情暂不可用")
-    with st.container():
-        st.markdown("#### 🧠 会话记忆")
-        ctx = build_memory_context()
-        if ctx:
-            st.caption(ctx.replace("最近会话记忆：\n", ""))
-        else:
-            st.caption("暂无记忆——对话满 8 轮后自动生成摘要")
+    """数据右栏：持仓概览 / 大盘指数 / 会话记忆（小标签 + 紧凑）"""
+    st.markdown('<div class="panel-label">持仓概览</div>', unsafe_allow_html=True)
+    render_holdings_card(compact=True)
+    st.markdown('<div class="panel-label">大盘指数</div>', unsafe_allow_html=True)
+    try:
+        render_market_index()
+    except Exception:
+        st.caption("暂无数据")
+    st.markdown('<div class="panel-label">会话记忆</div>', unsafe_allow_html=True)
+    ctx = build_memory_context()
+    if ctx:
+        st.caption(ctx.replace("最近会话记忆：\n", ""))
+    else:
+        st.caption("暂无记忆——对话满 8 轮后自动生成摘要")
 
 
 # ==================== 消息渲染 ====================
@@ -178,9 +175,6 @@ def _handle_prompt(prompt):
 
 
 def main():
-    st.title("💬 Agent 对话")
-    st.markdown("### 越用越懂你的投资私人顾问——自主调用工具，记忆保存在本地")
-
     # 演示模式开关 + 会话历史（侧边栏）
     with st.sidebar:
         st.markdown("#### 🧪 演示模式")
@@ -200,24 +194,27 @@ def main():
         return
 
     # 中央对话主体 + 右侧数据面板
-    col_main, col_side = st.columns([3, 1.15])
+    col_main, col_side = st.columns([3, 1.1], gap="medium")
 
     with col_main:
         view = st.session_state.get("agent_view") or []
         if not view:
-            # 新会话空状态：品牌欢迎 + 建议 chips（点击即问）
+            # 新会话空状态：一行主文案 + 横排紧凑建议 chips（点击即问）
             st.markdown(
-                '<div class="empty-state" style="padding:26px 12px;">'
+                '<div class="empty-state" style="padding:34px 10px 16px;">'
                 '<div class="es-icon">🤖</div>'
-                '<div class="es-title">我是你的投资私人管家</div>'
-                '<div class="es-hint">我可以自主调用 11 个数据工具：查持仓、诊断个股、看大盘、'
-                '读日记。<br/>试着问我一句，或在下面直接输入问题。</div></div>',
+                '<div class="es-title">有什么可以帮你？</div>'
+                '<div class="es-hint">查持仓 · 诊断个股 · 看大盘 · 读日记</div></div>',
                 unsafe_allow_html=True,
             )
-            for q in EXAMPLE_QUESTIONS:
-                if st.button("💬 " + q, key="chip_{}".format(hash(q)), use_container_width=True):
-                    _handle_prompt(q)
-                    st.rerun()
+            c1, c2, c3 = st.columns(3, gap="small")
+            for col, q, key in ((c1, EXAMPLE_QUESTIONS[0], "chip_a"),
+                                (c2, EXAMPLE_QUESTIONS[1], "chip_b"),
+                                (c3, EXAMPLE_QUESTIONS[2], "chip_c")):
+                with col:
+                    if st.button(q, key=key, use_container_width=True):
+                        _handle_prompt(q)
+                        st.rerun()
         else:
             _render_view()
 
