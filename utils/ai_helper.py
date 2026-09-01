@@ -12,6 +12,11 @@ from config import DEEPSEEK_API_BASE, DEEPSEEK_MODEL, API_KEY
 from data.database import load_funds
 from data.fund_api import get_fund_info, safe_float_convert, calc_fund_metrics, compare_funds
 from data.market_api import get_market_index, get_valuation_data, get_hot_sectors, calc_market_sentiment
+# Agent MVP：execute_ai_tool 兼容别名 + AI_TOOLS 派生自 agent_core.TOOL_REGISTRY（11 工具）。
+# 晚绑定：execute_ai_tool_v2 经 resolve() 调用时动态查 ai_helper 模块属性，
+# 存量 test_ai_tools 的 patch.object(ai_helper, "get_fund_info", ...) 因此仍然生效。
+# （agent_core 不反向 import ai_helper 模块级符号，无循环 import。）
+from utils.agent_core import execute_ai_tool, build_tool_schemas
 
 
 def _get_client():
@@ -453,63 +458,10 @@ def _load_funds_from_store():
 
 
 # ==================== OpenAI tools schema ====================
+# Agent MVP：AI_TOOLS 由 utils.agent_core.TOOL_REGISTRY 派生（11 个声明式工具），
+# 对外 shape 不变（{"type":"function","function":{...}}），ai_chat 无感知。
 
-AI_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "get_fund_info",
-            "description": "查询单只基金的基本信息：名称、最新净值、估算净值、今日涨跌幅。输入 6 位基金代码（如 161725）。",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "fund_code": {
-                        "type": "string",
-                        "description": "6 位基金代码，如 161725",
-                    }
-                },
-                "required": ["fund_code"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_market_index",
-            "description": "查询当前大盘指数行情：上证指数、深证成指、创业板指、沪深300 等主要指数的点位与涨跌幅。",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "load_funds",
-            "description": "查询用户当前的基金持仓列表（基金代码、名称、成本净值、市值、持有份额）。演示模式下返回内置示例持仓。",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-]
-
-
-def execute_ai_tool(tool_name, arguments):
-    """执行一次 AI 工具调用，返回 JSON 字符串（用于回填给模型继续推理）"""
-    if not isinstance(arguments, dict):
-        arguments = {}
-    try:
-        if tool_name == "get_fund_info":
-            fund_code = str(arguments.get("fund_code", "")).strip()
-            info = get_fund_info(fund_code)
-            return json.dumps(info, ensure_ascii=False) if info else \
-                json.dumps({"error": "未找到基金 {}".format(fund_code)}, ensure_ascii=False)
-        if tool_name == "get_market_index":
-            data = get_market_index()
-            return json.dumps(data or [], ensure_ascii=False)
-        if tool_name == "load_funds":
-            funds = _load_funds_from_store()
-            return json.dumps(funds, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": "工具执行出错：{}".format(e)}, ensure_ascii=False)
-    return json.dumps({"error": "未知工具：{}".format(tool_name)}, ensure_ascii=False)
+AI_TOOLS = build_tool_schemas()
 
 
 def chat_with_tools(messages, tools=None, model=DEEPSEEK_MODEL, temperature=0.7, max_tool_rounds=4):

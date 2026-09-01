@@ -795,3 +795,42 @@ def get_comprehensive_advice(risk_rating, risk_items):
         'advice': '\n\n'.join(advice_parts),
         'focus_items': focus_items,
     }
+
+
+def minefield_pipeline(stock_code):
+    """排雷五连链打包（Agent 工具入口）：data → check_minefields → calculate_risk_rating
+    → get_risk_items / get_safe_items → get_comprehensive_advice。
+
+    只暴露对 LLM 有用的可读结论（原始 dict 含 DataFrame 的 _raw_data 对 LLM 无用）。
+    单段失败不阻断，errors 记录原因（Agent 依此明说"数据不可得"）。
+
+    实现依据：docs/AGENT_MVP_DESIGN.md §3 首批工具清单（P0）。
+    """
+    result = {
+        "stock_code": stock_code,
+        "risk_rating": None,
+        "risk_items": [],
+        "safe_items": [],
+        "advice": None,
+        "checked_count": 0,
+        "errors": [],
+    }
+    try:
+        raw_data = get_financial_minefield_data(stock_code)
+    except Exception as e:  # noqa: BLE001
+        result["errors"].append("排雷数据获取失败：{}".format(e))
+        return result
+    if not raw_data:
+        result["errors"].append("排雷原始数据不可得（可能停牌或接口无返回）")
+        return result
+
+    try:
+        results = check_minefields(raw_data)
+        result["risk_rating"] = calculate_risk_rating(results)
+        result["risk_items"] = get_risk_items(results)
+        result["safe_items"] = get_safe_items(results)
+        result["checked_count"] = len(results)
+        result["advice"] = get_comprehensive_advice(result["risk_rating"], result["risk_items"])
+    except Exception as e:  # noqa: BLE001
+        result["errors"].append("排雷分析失败：{}".format(e))
+    return result

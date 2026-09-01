@@ -10,31 +10,20 @@ import json
 import streamlit as st
 
 from config import API_KEY
-from utils.ai_helper import AI_TOOLS, build_system_prompt, chat_with_tools
+from utils.agent_core import agent_run
 
 EXAMPLE_QUESTIONS = [
     "我的持仓怎么样？",
     "帮我查一下 161725 这只基金",
-    "今天大盘表现如何？",
+    "帮我看看持仓，再诊断一下我的重仓股",
 ]
 
 
 def _init_chat_history():
     if "messages" not in st.session_state:
         st.session_state.messages = []
-
-
-def _system_message():
-    """构建系统提示词（按演示模式缓存两份，切换后下次发送自动重建）"""
-    cache_key = "ai_sys_prompt_demo" if st.session_state.get("use_demo_funds") else "ai_sys_prompt_real"
-    if cache_key not in st.session_state:
-        with st.spinner("正在准备 AI 上下文…"):
-            st.session_state[cache_key] = build_system_prompt()
-    return {"role": "system", "content": st.session_state[cache_key]}
-
-
-def _build_messages():
-    return [_system_message()] + list(st.session_state.messages)
+    if "agent_session_id" not in st.session_state:
+        st.session_state.agent_session_id = None
 
 
 def _render_messages():
@@ -73,31 +62,40 @@ def _handle_prompt(prompt):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("AI 思考中…"):
+        with st.spinner("Agent 规划与调用工具中…（多步查询约 30-90 秒）"):
             try:
-                result = chat_with_tools(_build_messages(), tools=AI_TOOLS)
+                result = agent_run(
+                    prompt,
+                    memory=True,
+                    session_id=st.session_state.get("agent_session_id"),
+                    continue_question=True,
+                )
             except Exception as e:
                 st.error("AI 响应失败：{}".format(e))
                 return
+            if result.get("session_id"):
+                st.session_state.agent_session_id = result["session_id"]
 
-        # 工具调用过程展示（可折叠）
-        tool_trace = result.get("tool_trace") or []
-        if tool_trace:
-            with st.expander("🔧 本次调用工具 {} 次".format(len(tool_trace)), expanded=False):
-                for t in tool_trace:
-                    args_text = json.dumps(t.get("arguments") or {}, ensure_ascii=False)
-                    st.markdown("**{}**　`{}`".format(t.get("name", ""), args_text))
-                    st.code(str(t.get("output", ""))[:800], language="json")
+            # 工具调用时间线（可折叠；步数少时默认展开，让"Agent 在干活"可见）
+            tool_trace = result.get("tool_trace") or []
+            if tool_trace:
+                with st.expander(
+                        "🔧 Agent 自主调用了 {} 次工具".format(len(tool_trace)),
+                        expanded=len(tool_trace) <= 3):
+                    for t in tool_trace:
+                        args_text = json.dumps(t.get("arguments") or {}, ensure_ascii=False)
+                        st.markdown("**{}**　`{}`".format(t.get("name", ""), args_text))
+                        st.code(str(t.get("output", ""))[:800], language="json")
 
-        response = result.get("content") or ""
-        if response:
-            st.markdown(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            response = result.get("content") or ""
+            if response:
+                st.markdown(response)
+                st.session_state.messages.append({"role": "assistant", "content": response})
 
 
 def main():
     st.title("💬 AI 对话")
-    st.markdown("### 智能投资助手")
+    st.markdown("### 越用越懂你的投资助手（对话记忆保存在本地）")
 
     # 演示模式：内置示例持仓（纯内存 seed，点击即生效，不写数据库）
     with st.sidebar:

@@ -879,3 +879,45 @@ def _generate_advice(total_score, level, strengths, weaknesses):
     advice_parts.append('护城河是定性+定量的结合，不能保证100%准确。投资有风险，入市需谨慎。')
     
     return '\n'.join(advice_parts)
+
+
+def moat_pipeline(stock_code):
+    """护城河两步链打包（Agent 工具入口）：get_moat_analysis_data → calculate_moat_scores。
+
+    只暴露可读结论（scores/level/summary/strengths/weaknesses/advice），
+    丢弃含 DataFrame 的 _raw_data。单段失败不阻断，errors 记录原因（Agent 明说"数据不可得"）。
+
+    实现依据：docs/AGENT_MVP_DESIGN.md §3 首批工具清单（P1）。
+    """
+    result = {
+        "stock_code": stock_code,
+        "scores": None,
+        "total_score": None,
+        "level": "--",
+        "summary": "",
+        "strengths": [],
+        "weaknesses": [],
+        "advice": "",
+        "errors": [],
+    }
+    try:
+        raw_data = get_moat_analysis_data(stock_code)
+    except Exception as e:  # noqa: BLE001
+        result["errors"].append("护城河数据获取失败：{}".format(e))
+        return result
+    if not raw_data:
+        result["errors"].append("护城河原始数据不可得（可能停牌或接口无返回）")
+        return result
+
+    try:
+        scores = calculate_moat_scores(raw_data)
+        result["scores"] = scores.get("scores")
+        result["total_score"] = scores.get("total_score")
+        result["level"] = scores.get("level", "--")
+        result["summary"] = scores.get("summary", "")
+        result["strengths"] = scores.get("strengths") or []
+        result["weaknesses"] = scores.get("weaknesses") or []
+        result["advice"] = scores.get("advice", "")
+    except Exception as e:  # noqa: BLE001
+        result["errors"].append("护城河分析失败：{}".format(e))
+    return result

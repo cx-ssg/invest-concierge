@@ -85,6 +85,24 @@ def init_db():
             created_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS agent_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            role TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -496,3 +514,145 @@ def delete_fund_holding(code):
     cursor.execute("DELETE FROM fund_holdings WHERE code=?", (code,))
     conn.commit()
     conn.close()
+
+
+# ==================== Agent 会话记忆操作 (SQLite) ====================
+# Agent MVP 记忆层：跨页持久化对话（ai_chat / 诊断页"AI 追问"共用），
+# 所有 SQL 均参数绑定。短连接读写（不存 session_state，避免多标签 check_same_thread 炸）。
+
+
+def create_agent_session(title=""):
+    """创建一条 Agent 会话，返回自增 id；失败返回 0"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO agent_sessions (title, summary) VALUES (?, ?)",
+            (str(title or ""), "")
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    except Exception as e:
+        print("创建 Agent 会话失败：{}".format(e))
+        return 0
+    finally:
+        conn.close()
+
+
+def add_agent_message(session_id, role, content):
+    """写入一条 Agent 会话消息（role: user / assistant / tool）"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO agent_messages (session_id, role, content) VALUES (?, ?, ?)",
+            (int(session_id), str(role), str(content or ""))
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print("写入 Agent 消息失败：{}".format(e))
+        return False
+    finally:
+        conn.close()
+
+
+def get_agent_session(session_id):
+    """按 id 取单条 Agent 会话，不存在返回 None"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM agent_sessions WHERE id = ?", (int(session_id),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+    except Exception as e:
+        print("读取 Agent 会话失败：{}".format(e))
+        return None
+    finally:
+        conn.close()
+
+
+def get_agent_messages(session_id, limit=None):
+    """按 id 顺序读取会话消息；limit 为 None 返回全部"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        if limit:
+            cursor.execute(
+                "SELECT * FROM agent_messages WHERE session_id = ? ORDER BY id LIMIT ?",
+                (int(session_id), int(limit))
+            )
+        else:
+            cursor.execute(
+                "SELECT * FROM agent_messages WHERE session_id = ? ORDER BY id",
+                (int(session_id),)
+            )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print("读取 Agent 消息失败：{}".format(e))
+        return []
+    finally:
+        conn.close()
+
+
+def count_agent_messages(session_id, role=None):
+    """统计会话消息数；role 非空时只统计该角色"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        if role:
+            cursor.execute(
+                "SELECT COUNT(*) as cnt FROM agent_messages WHERE session_id = ? AND role = ?",
+                (int(session_id), str(role))
+            )
+        else:
+            cursor.execute(
+                "SELECT COUNT(*) as cnt FROM agent_messages WHERE session_id = ?",
+                (int(session_id),)
+            )
+        row = cursor.fetchone()
+        return int(row['cnt']) if row else 0
+    except Exception as e:
+        print("统计 Agent 消息失败：{}".format(e))
+        return 0
+    finally:
+        conn.close()
+
+
+def update_agent_session_summary(session_id, summary):
+    """更新会话摘要，并刷新 updated_at（供"最近 N 条摘要"按更新倒序取）"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE agent_sessions SET summary = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (str(summary or ""), int(session_id))
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        print("更新 Agent 会话摘要失败：{}".format(e))
+        return False
+    finally:
+        conn.close()
+
+
+def list_recent_agent_sessions(limit=3):
+    """取最近 limit 条【已有摘要】的会话，按更新倒序（同秒按 id 倒序稳定排序）"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT * FROM agent_sessions "
+            "WHERE summary IS NOT NULL AND TRIM(summary) != '' "
+            "ORDER BY updated_at DESC, id DESC LIMIT ?",
+            (int(limit),)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        print("读取最近 Agent 会话失败：{}".format(e))
+        return []
+    finally:
+        conn.close()
