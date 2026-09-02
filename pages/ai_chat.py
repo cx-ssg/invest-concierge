@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Agent 对话中心（Agent-first 主页面 · 打开即对话）
-布局：中央对话主体 + 左侧会话历史（侧边栏）+ 右侧数据面板（持仓/指数/记忆）
+布局模仿 Reasonix 式 agent 产品：中央对话主体 + 左侧会话列表 + 右侧功能面板
 
 - 对话走 agent_run（11 工具规划循环 + 记忆落库 + 追问链）
 - 会话历史来自 agent_sessions（SQLite），点击续聊 = 从 agent_messages 重建
+- 左栏（st.sidebar）：新建对话 + 会话列表（本页独占，导航在右栏功能面板）
+- 右栏：功能导航（当前轨道页面入口）+ 持仓/指数/记忆数据面板
 - 无 Key 降级：引导卡 + 聊天框禁用，不崩溃
 - 演示模式：预置示例持仓（纯内存 seed）
 """
@@ -19,6 +21,7 @@ from utils.common import fetch_with_timeout
 from ui_components.holdings_card import render_holdings_card
 from ui_components.market_indicator import render_market_index
 from data.market_api import get_market_index
+from ui_components.sidebar import get_live_pages
 
 EXAMPLE_QUESTIONS = [
     "我的持仓怎么样",
@@ -40,8 +43,7 @@ def _init_state():
 
 
 def _render_session_sidebar():
-    """侧边栏：新建对话 + 最近会话列表（点击续聊）"""
-    st.sidebar.markdown('<div class="nav-group">会 话 历 史</div>', unsafe_allow_html=True)
+    """左栏（本页独占）：新建对话 + 最近会话列表（点击续聊），模仿 agent 产品的会话侧栏"""
     if st.sidebar.button("＋ 新建对话", key="agent_new_session", use_container_width=True,
                          type="primary" if st.session_state.get("agent_session_id") is None else "secondary"):
         st.session_state.agent_session_id = None
@@ -49,12 +51,13 @@ def _render_session_sidebar():
         st.session_state.messages = []
         st.rerun()
 
+    st.sidebar.markdown('<div class="nav-group">会 话 历 史</div>', unsafe_allow_html=True)
     sessions = list_agent_sessions(limit=8)
     for s in sessions:
         title = (s.get("title") or "未命名会话")[:16]
         sid = s.get("id")
         current = st.session_state.get("agent_session_id") == sid
-        label = ("🟡 " if current else "💬 ") + title
+        label = ("🟡 " if current else "") + title
         if st.sidebar.button(label, key="agent_sess_{}".format(sid), use_container_width=True):
             st.session_state.agent_session_id = sid
             msgs = []
@@ -65,6 +68,16 @@ def _render_session_sidebar():
             st.rerun()
     if not sessions:
         st.sidebar.caption("还没有会话记录")
+
+    # 底部：演示模式开关（低调节奏，不抢会话列表的视觉主体）
+    st.sidebar.markdown("---")
+    st.sidebar.checkbox(
+        "🧪 演示模式（示例持仓做 AI 分析）",
+        key="use_demo_funds",
+        help="开启后 Agent 将基于内置示例持仓（白酒/消费/沪深300）回答问题，"
+             "适合还没有持仓数据的新人体验；不会写入真实数据库。",
+    )
+    st.sidebar.caption("v1.0 · invest-concierge © 2026")
 
 
 def _session_display_messages(session_id, limit=40):
@@ -80,15 +93,27 @@ def _session_display_messages(session_id, limit=40):
     return out
 
 
-# ==================== 右侧数据面板 ====================
+# ==================== 右侧功能面板 ====================
 
 
 def _render_right_panel():
-    """数据右栏：持仓概览 / 大盘指数 / 会话记忆（小标签 + 紧凑）
+    """右栏（功能在右，模仿参考图）：功能导航 + 持仓概览 + 大盘指数 + 会话记忆
 
     行情走 fetch_with_timeout 预取（上限 8s）：无参直连会在代理拦截数据源时
     把每次 rerun 都拖成 30s+ 重试等待，整页交互卡顿的主因之一。
     """
+    # 顶部让位：右上角 fixed 的基金/股票切换胶囊悬浮在本栏上方（44px 防压盖）
+    st.markdown('<div style="height:44px;"></div>', unsafe_allow_html=True)
+    # 功能导航：当前轨道的 live 页面入口（ai_chat 自身排除）
+    st.markdown('<div class="panel-label">功 能</div>', unsafe_allow_html=True)
+    track = st.session_state.get("track", "fund")
+    nav_pages = [(k, l) for k, l in get_live_pages(track) if k != "ai_chat"]
+    common_pages = [(k, l) for k, l in get_live_pages("common") if k != "ai_chat"]
+    for key, label in nav_pages + common_pages:
+        if st.button(label, key="fn_nav_{}".format(key), use_container_width=True):
+            st.session_state.page = key
+            st.rerun()
+
     st.markdown('<div class="panel-label">持仓概览</div>', unsafe_allow_html=True)
     render_holdings_card(compact=True)
     st.markdown('<div class="panel-label">大盘指数</div>', unsafe_allow_html=True)
@@ -182,15 +207,7 @@ def _handle_prompt(prompt):
 
 
 def main():
-    # 演示模式开关 + 会话历史（侧边栏）
-    with st.sidebar:
-        st.markdown("#### 🧪 演示模式")
-        st.checkbox(
-            "用示例持仓做 AI 分析",
-            key="use_demo_funds",
-            help="开启后 Agent 将基于内置示例持仓（白酒/消费/沪深300）回答问题，"
-                 "适合还没有持仓数据的新人体验；不会写入真实数据库。",
-        )
+    # 左栏独占：新建对话 + 会话历史 + 底部演示模式（参考图式 agent 会话侧栏）
     _render_session_sidebar()
 
     _init_state()
@@ -200,8 +217,8 @@ def main():
         st.caption("⚠️ 风险提示：AI 分析仅供参考，不构成投资建议。")
         return
 
-    # 中央对话主体 + 右侧数据面板
-    col_main, col_side = st.columns([3, 1.1], gap="medium")
+    # 中央对话主体 + 右侧功能面板（功能在右）
+    col_main, col_side = st.columns([5, 1.15], gap="medium")
 
     with col_main:
         view = st.session_state.get("agent_view") or []

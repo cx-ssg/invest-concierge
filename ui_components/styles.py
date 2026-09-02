@@ -57,6 +57,7 @@ def inject_global_css() -> None:
         padding: 1.6rem 2.2rem 3rem;
         margin: 0 auto;
     }
+    /* ai_chat 对话中心页由 st.columns([5,1.15]) 自然分流中栏/右栏，走默认满幅流式布局 */
 
     /* 隐藏 Streamlit 默认元素 */
     #MainMenu { visibility: hidden; }
@@ -567,6 +568,19 @@ def inject_global_css() -> None:
     .empty-state .es-icon { font-size: 30px; margin-bottom: 10px; }
     .empty-state .es-title { font-size: 14.5px; color: var(--text-2); font-weight: 600; }
     .empty-state .es-hint { font-size: 12.5px; color: var(--text-3); margin-top: 6px; line-height: 1.7; }
+
+    /* ===== 顶部固定双轨切换（最右上角） =====
+       Streamlit 1.58+ 给每个组件容器打 st-key-<widget key> 类名，
+       track_switcher 的容器直接 fixed 到视口右上角；
+       右栏功能面板顶部已留 44px 让位条（ai_chat 页内联 spacer）。 */
+    [data-testid="stMainBlockContainer"] .st-key-track_switcher {
+        position: fixed;
+        top: 10px;
+        right: 14px;
+        z-index: 1000;
+        margin: 0;
+        width: auto;
+    }
 
     /* ===== 动效关闭 ===== */
     @media (prefers-reduced-motion: reduce) {

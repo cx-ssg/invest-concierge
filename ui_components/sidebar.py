@@ -118,27 +118,25 @@ def get_live_page_keys(track=None):
 
 def render_track_switcher():
     """
-    主内容区顶部右上角：双轨切换（📊 基金 / 📈 股票）
+    双轨切换（📊 基金 / 📈 股票）——固定悬浮在屏幕最右上角。
 
-    定案（§6 实现要点）：右上角 = 首页第一行 st.columns（Streamlit 无原生顶栏按钮位）；
-    st.segmented_control 即"一半一半"分段按钮（1.58 实测支持）。
+    Streamlit 给组件容器打 st-key-track_switcher 类名（1.58+），
+    styles.py 用它把整个切换器 fixed 到视口右上角，不占内容区行位。
     切换仅更新 st.session_state.track 并 st.rerun()，侧边栏据此按轨渲染。
     """
     if "track" not in st.session_state:
         st.session_state.track = "fund"
     current = st.session_state.track
 
-    col_left, col_right = st.columns([4, 2], vertical_alignment="center")
-    with col_right:
-        selected = st.segmented_control(
-            "投资轨道",
-            options=list(TRACK_OPTIONS),
-            format_func=lambda k: _TRACK_LABELS[k],
-            default=current,
-            key="track_switcher",
-            label_visibility="collapsed",
-            help="切换「📊 基金」/「📈 股票」专栏",
-        )
+    selected = st.segmented_control(
+        "投资轨道",
+        options=list(TRACK_OPTIONS),
+        format_func=lambda k: _TRACK_LABELS[k],
+        default=current,
+        key="track_switcher",
+        label_visibility="collapsed",
+        help="切换「📊 基金」/「📈 股票」专栏",
+    )
 
     if selected is not None and selected != current:
         st.session_state.track = selected
@@ -163,6 +161,7 @@ def render_navigation():
 
     占位页（live=false）一律不渲染 = 不进导航。profile/alert 在结构里但 live=false。
     当前页对应按钮走 active 金色态（纯展示，不影响路由逻辑）。
+    ai_chat 自身不进导航（它是默认首页，且页面内已提供会话/返回入口）。
     """
     track = st.session_state.get("track", "fund")
     current = st.session_state.get("page")
@@ -173,17 +172,26 @@ def render_navigation():
             PAGE_META[track]["label"].split(" ", 1)[-1]),
         unsafe_allow_html=True)
     for key, label in get_live_pages(track):
+        if key == "ai_chat":
+            continue
         _render_nav_item(label, key, active=(key == current))
 
-    # 通用专区（两轨共享：ai_chat / settings）
-    st.sidebar.markdown('<div class="nav-group">通 用</div>', unsafe_allow_html=True)
-    for key, label in get_live_pages("common"):
-        _render_nav_item(label, key, active=(key == current))
+    # 通用专区（两轨共享：ai_chat 已在上方跳过，这里只出 settings）
+    common_pages = [(k, l) for k, l in get_live_pages("common") if k != "ai_chat"]
+    if common_pages:
+        st.sidebar.markdown('<div class="nav-group">通 用</div>', unsafe_allow_html=True)
+        for key, label in common_pages:
+            _render_nav_item(label, key, active=(key == current))
 
 
 def render_sidebar():
     """
-    渲染侧边栏（顶部双轨切换 + 品牌区 + 持仓概览 + 按轨导航 + 大盘指数 + 热门板块）
+    渲染侧边栏。
+
+    对话中心（ai_chat）：左栏 = 品牌 + 状态 + 会话历史（会话由 pages/ai_chat 渲染），
+    对齐参考图「会话在左」；品牌/导航/持仓/行情不进入，导航改由页面右栏功能面板承载。
+
+    其余页面：品牌区 + 持仓概览 + 按轨导航 + 大盘指数 + 热门板块（原布局不变）。
 
     数据流:
         render_holdings_card(compact=True)   -> data.database.load_funds()
@@ -198,7 +206,7 @@ def render_sidebar():
         - 指数/板块加载失败：记录 logger.warning，不阻塞侧边栏
         - 持仓加载失败：由 render_holdings_card 内部处理，显示友好提示
     """
-    # ========== 顶部轨道切换（主内容区右上角，第一行） ==========
+    # ========== 顶部轨道切换（CSS 固定到屏幕最右上角，全页共用） ==========
     render_track_switcher()
 
     # ========== 品牌区 ==========
@@ -215,6 +223,11 @@ def render_sidebar():
         '<div class="status-row">{}'
         '<span><span class="status-dot"></span>数据源已连接</span></div>'.format(ai_status),
         unsafe_allow_html=True)
+
+    # ========== 对话中心：左栏到此为止，会话历史由 ai_chat 接续渲染 ==========
+    if st.session_state.get("page") == "ai_chat":
+        st.sidebar.markdown("---")
+        return
 
     # ========== 持仓概览（使用可复用组件；显式进入侧边栏上下文，
     # 否则组件内部的 st.* 会渲染到主区） ==========
