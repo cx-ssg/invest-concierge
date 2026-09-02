@@ -165,12 +165,19 @@ def _render_msg(role, content):
 
 
 def _render_trace(payload):
-    """思考链折叠块（完成后持久保留在对话流里）：步骤时间线 + 工具输出"""
-    steps = payload.get("steps") or []
+    """思考链折叠块（完成后持久保留）：模型原生思考流 + 工具调用记录"""
+    events = payload.get("events") or []
     trace = payload.get("trace") or []
-    with st.expander("💭 思考链（{} 步 · {} 次工具调用）".format(len(steps), len(trace)), expanded=False):
-        for s in steps:
-            st.markdown(s)
+    with st.expander("💭 思考过程（{} 段思考 · {} 次工具）".format(
+            sum(1 for k, _ in events if k == "reasoning"), len(trace)), expanded=False):
+        for kind, text in events:
+            if kind == "reasoning":
+                st.markdown(
+                    '<div class="think-flow">{}</div>'.format(
+                        html_lib.escape(str(text)).replace("\n", "<br/>")),
+                    unsafe_allow_html=True)
+            elif kind == "tool":
+                st.markdown("🔧 `{}`".format(text))
         if trace:
             st.markdown("---")
             for t in trace:
@@ -216,21 +223,38 @@ def _handle_prompt(prompt):
     st.session_state.messages.append({"role": "user", "content": prompt})
     _render_msg("user", prompt)
 
-    # 实时思考链：st.status 逐事件更新（规划轮次/工具调用/组织回答），不再让用户干等
-    steps = []
+    # 实时思考链：st.status 逐事件更新——reasoning=模型原生思考流（reasoner），
+    # tool=工具调用；不再显示合成进度标签
+    events = []
 
     def _on_progress(stage, detail):
-        icon = {"thinking": "🧠", "tool": "🔧", "writing": "✍️"}.get(stage, "•")
-        steps.append("{} {}".format(icon, detail))
+        if stage == "reasoning":
+            events.append(("reasoning", detail))
+        elif stage == "tool":
+            events.append(("tool", detail))
+        else:  # writing
+            events.append(("act", detail))
+        html_parts = []
+        for kind, text in events:
+            if kind == "reasoning":
+                html_parts.append(
+                    '<div class="think-flow">{}</div>'.format(
+                        html_lib.escape(str(text)).replace("\n", "<br/>")))
+            elif kind == "tool":
+                html_parts.append(
+                    '<div class="think-evt">🔧 <code>{}</code></div>'.format(html_lib.escape(str(text))))
+            else:
+                html_parts.append('<div class="think-evt">{}</div>'.format(html_lib.escape(str(text))))
         try:
-            status.update(label="Agent 思考中…（已 {} 步）".format(len(steps)),
-                          state="running", expanded=True)
+            status.update(label="Agent 思考中…", state="running", expanded=True)
         except Exception:  # noqa: BLE001 - 进度展示失败不影响主流程
             pass
-        log.markdown("\n".join(steps))
+        log.markdown(
+            '<div class="think-chain">{}</div>'.format("".join(html_parts)),
+            unsafe_allow_html=True)
 
     try:
-        with st.status("Agent 规划中…（多步查询约 30-90 秒）", expanded=True) as status:
+        with st.status("Agent 思考中…", expanded=True) as status:
             log = st.empty()
             result = agent_run(
                 prompt,
@@ -241,8 +265,8 @@ def _handle_prompt(prompt):
             )
             if result.get("session_id"):
                 st.session_state.agent_session_id = result["session_id"]
-            status.update(label="✅ 完成——{} 步思考 · {} 次工具".format(
-                len(steps), len(result.get("tool_trace") or [])),
+            status.update(label="✅ 完成 · {} 次工具调用".format(
+                len(result.get("tool_trace") or [])),
                 state="complete", expanded=False)
     except Exception as e:
         st.error("AI 响应失败：{}".format(e))
@@ -252,7 +276,7 @@ def _handle_prompt(prompt):
     response = result.get("content") or ""
     tool_trace = result.get("tool_trace") or []
     if response:
-        trace_msg = {"role": "trace", "content": {"steps": list(steps), "trace": tool_trace}}
+        trace_msg = {"role": "trace", "content": {"events": list(events), "trace": tool_trace}}
         st.session_state.messages.append(trace_msg)
         st.session_state.messages.append({"role": "assistant", "content": response})
         if st.session_state.get("agent_view") is not None:

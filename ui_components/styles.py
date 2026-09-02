@@ -526,6 +526,29 @@ def inject_global_css() -> None:
     .msg-agent code { font-size: 12px; }
     .msg-agent pre { overflow-x: auto; }
     .msg-agent ul, .msg-agent ol { padding-left: 1.2em; margin: .3em 0; }
+
+    /* ===== Agent 思考链（模型原生 reasoning_content） ===== */
+    .think-chain .think-flow,
+    .think-flow {
+        font-size: 12px;
+        color: var(--text-3);
+        line-height: 1.8;
+        border-left: 2px solid var(--gold-line);
+        padding: 2px 0 2px 10px;
+        margin: 8px 0;
+        white-space: pre-wrap;
+    }
+    .think-chain .think-evt,
+    .think-evt {
+        font-size: 12.5px;
+        color: var(--text-2);
+        margin: 6px 0;
+    }
+    .think-evt code {
+        background: var(--surface-2);
+        border: 1px solid var(--line);
+        padding: 1px 6px;
+    }
     [data-testid="stChatInput"] textarea, [data-testid="stChatInput"] > div {
         background: var(--surface-2) !important;
         border: 1px solid var(--line) !important;

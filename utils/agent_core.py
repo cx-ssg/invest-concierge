@@ -16,7 +16,7 @@ import json
 import sys
 from typing import Optional, List, Dict, Any
 
-from config import DEEPSEEK_MODEL
+from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
 
 # Windows 控制台 GBK 防护
 if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
@@ -263,7 +263,7 @@ AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投�
 
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
-              model=DEEPSEEK_MODEL, temperature=0.7, max_tool_rounds=8,
+              model=DEEPSEEK_REASONER_MODEL, temperature=0.7, max_tool_rounds=8,
               continue_question=False, on_progress=None):
     """带规划的 Agent 多轮执行循环（ai_chat / 诊断页"AI 追问"共用入口）。
 
@@ -273,11 +273,13 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         memory: 是否落库记忆（创建/续写 agent_sessions + agent_messages，满 8 轮自动摘要）
         session_id: 续写指定会话；memory=True 且为 None 时新建
         tools: 工具 schema 列表，None 用注册表全量
+        model: 模型名，默认 deepseek-reasoner（返回 reasoning_content 原生思考流，
+            由 on_progress("reasoning", ...) 实时透传给 UI 思考链）
         max_tool_rounds: 工具调用轮次上限（默认 8，诊断类多步需要）
         continue_question: 追问链开关——memory 会话有历史时，把最近消息作为上下文带入
         on_progress: 进度回调 fn(stage, detail)——UI 实时思考链用，不传则无副作用。
-            stage: "thinking"（规划本轮）/"tool"（工具调用）/"writing"（组织最终回答）
-            detail: 人类可读描述（如 "get_stock_diagnosis(600519)" / "第 2/8 轮规划"）
+            stage: "reasoning"（模型原生思考流文本）/ "tool"（工具调用）/
+                   "writing"（组织最终回答）；detail 为人类可读描述
 
     返回：
         {"type": "text", "content": "...", "tool_trace": [...], "session_id": id|None}
@@ -327,8 +329,10 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         tools = [t.schema for t in TOOL_REGISTRY.values()]
 
     for _round in range(max_tool_rounds + 1):
-        _progress("thinking", "第 {}/{} 轮规划".format(_round + 1, max_tool_rounds + 1))
         result = ai_helper.call_llm(messages, tools=tools, model=model, temperature=temperature)
+        # 模型原生思考流（reasoner 才有；deepseek-chat 为空）实时透传
+        if result.get("reasoning"):
+            _progress("reasoning", result["reasoning"])
         if result.get("type") != "tool_call":
             _progress("writing", "组织最终回答")
             content = result.get("content") or ""

@@ -81,12 +81,16 @@ def call_llm(prompt, tools=None, model="deepseek-chat", temperature=0.7):
                         "arguments": tc.function.arguments
                     }
                 })
-            return {"type": "tool_call", "content": tool_calls}
+            # reasoner 模型在决定工具调用时也会返回原生思考流
+            reasoning = getattr(choice.message, "reasoning_content", None) or ""
+            return {"type": "tool_call", "content": tool_calls, "reasoning": reasoning}
 
         content = choice.message.content
         if content is None:
             content = ""
-        return {"type": "text", "content": content}
+        # reasoner 的原生思考流（deepseek-chat 为空字符串）
+        reasoning = getattr(choice.message, "reasoning_content", None) or ""
+        return {"type": "text", "content": content, "reasoning": reasoning}
 
     except Exception as e:
         error_msg = str(e)

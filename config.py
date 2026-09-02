@@ -8,6 +8,8 @@ import os
 # ==================== API 配置 ====================
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
+# reasoner：返回 reasoning_content（模型原生思考流，对话中心思考链展示用）
+DEEPSEEK_REASONER_MODEL = os.environ.get("DEEPSEEK_REASONER_MODEL", "deepseek-reasoner")
 
 # ==================== 缓存配置 ====================
 CACHE_TTL = {
