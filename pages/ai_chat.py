@@ -324,13 +324,15 @@ def main():
         else:
             _render_view()
 
+        # chat_input 必须在 col_main 上下文内处理——否则 st.status 思考链和
+        # 气泡会渲染到主区左侧全宽（脱离列上下文 = 第一条消息思考链跑左边 bug）
+        prompt = st.chat_input("请输入问题，例如：帮我诊断一下 600519")
+        if prompt:
+            _handle_prompt(prompt)
+            st.rerun()
+
     with col_side:
         _render_right_panel()
-
-    prompt = st.chat_input("请输入问题，例如：帮我诊断一下 600519")
-    if prompt:
-        _handle_prompt(prompt)
-        st.rerun()
 
     st.caption("⚠️ 风险提示：AI 分析仅供参考，不构成投资建议。工具数据来自 AkShare，可能存在延迟。")
 
