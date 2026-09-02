@@ -28,7 +28,9 @@ _INDEX_MAP = {
 }
 
 
-@st.cache_data(ttl=30)
+# 行情缓存 5 分钟：TUN 代理拦截数据源时，过短 TTL 会让每次页面 rerun 都重新
+# 等满超时（交互卡顿的主因）；指数/板块本就是低频变化数据
+@st.cache_data(ttl=300)
 @cached(CACHE_QUOTE)
 def get_market_index():
     """获取大盘指数数据 - 使用 AkShare stock_zh_index_spot_em"""
@@ -247,7 +249,7 @@ def _get_valuation_fallback():
         return []
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 @cached(CACHE_SECTOR)
 def get_hot_sectors():
     """获取热门板块涨跌幅 - 使用 AkShare stock_board_industry_name_em"""

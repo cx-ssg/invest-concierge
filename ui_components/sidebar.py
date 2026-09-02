@@ -28,8 +28,6 @@ v1.0 渲染集（live=true，只渲染真实可跑页）:
     - 所有异常通过 logging 记录，不静默忽略
 """
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 import streamlit as st
 
@@ -37,28 +35,13 @@ from config import API_KEY
 from data.market_api import get_market_index, get_hot_sectors
 from ui_components.holdings_card import render_holdings_card
 from ui_components.market_indicator import render_market_index, render_hot_sectors
+from utils.common import fetch_all_with_timeout
 
 logger = logging.getLogger(__name__)
 
 # 侧边栏市场数据的最大等待秒数（超时即降级跳过，不阻塞整页——
 # 数据源被代理拦截/弱网时，否则首屏可能白等 1-2 分钟）
 SIDEBAR_FETCH_TIMEOUT = 8
-
-
-def _fetch_with_timeout(fn, timeout=SIDEBAR_FETCH_TIMEOUT):
-    """带超时的数据预取：超时返回 None，主线程立即继续（后台线程自行结束，结果丢弃）。
-
-    注意：不能用 with ThreadPoolExecutor —— 其 __exit__ 的 shutdown(wait=True)
-    会在超时后仍然阻塞到工作线程结束，超时就失去意义。
-    """
-    ex = ThreadPoolExecutor(max_workers=1)
-    try:
-        return ex.submit(fn).result(timeout=timeout)
-    except (FuturesTimeoutError, Exception) as e:  # noqa: BLE001 - 侧边栏降级，不阻塞
-        logger.warning("侧边栏数据预取失败/超时：{}".format(e))
-        return None
-    finally:
-        ex.shutdown(wait=False)
 
 
 # ==================== 轨道归属结构（21 页全量 = ROADMAP 生成源） ====================
@@ -243,9 +226,10 @@ def render_sidebar():
     render_navigation()
     st.sidebar.markdown("---")
 
-    # ========== 大盘指数（预取带超时，失败/超时快速降级不阻塞） ==========
+    # ========== 大盘指数 + 热门板块（并发预取，总等待上限 8s；失败/超时快速降级） ==========
+    idx_data, sector_data = fetch_all_with_timeout(
+        [get_market_index, get_hot_sectors], timeout=SIDEBAR_FETCH_TIMEOUT)
     try:
-        idx_data = _fetch_with_timeout(get_market_index)
         with st.sidebar:
             if idx_data:
                 render_market_index(data=idx_data)
@@ -257,7 +241,6 @@ def render_sidebar():
 
     # ========== 热门板块（同上） ==========
     try:
-        sector_data = _fetch_with_timeout(get_hot_sectors)
         with st.sidebar:
             if sector_data:
                 render_hot_sectors(data=sector_data)

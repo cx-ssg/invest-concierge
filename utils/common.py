@@ -321,6 +321,60 @@ def call_akshare_with_retry(func, *args, retries=2, timeout=30, **kwargs):
     return None
 
 
+# ==================== 带超时的预取（UI 防阻塞） ====================
+
+
+def fetch_with_timeout(fn, timeout=8.0, *args, **kwargs):
+    """线程池预取：超时返回 None，主线程立即继续（工作线程自行结束，结果丢弃）。
+
+    用于 UI 层渲染兜底——数据源被代理拦截/弱网时，行情类请求可能挂起数十秒，
+    不能让整页脚本同步等待。注意：不能用 with ThreadPoolExecutor——其
+    __exit__ 的 shutdown(wait=True) 在超时后仍会阻塞到工作线程结束。
+
+    超时后工作线程若最终完成，其写入的函数级缓存（st.cache_data）仍会生效，
+    下一次 rerun 可直接命中缓存渐进恢复。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as _FutTimeout
+
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(fn, *args, **kwargs).result(timeout=timeout)
+    except (_FutTimeout, Exception) as e:  # noqa: BLE001 - UI 降级，不阻塞
+        logging.warning("预取失败/超时（{}s）：{}".format(timeout, e))
+        return None
+    finally:
+        ex.shutdown(wait=False)
+
+
+def fetch_all_with_timeout(fns, timeout=8.0):
+    """并发预取多个函数，总等待上限 timeout 秒；未完成/异常项返回 None。
+
+    与逐个 fetch_with_timeout 相比，总等待时间从 N*timeout 降为 timeout。
+    """
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    if not fns:
+        return []
+    ex = ThreadPoolExecutor(max_workers=len(fns))
+    try:
+        futures = [ex.submit(fn) for fn in fns]
+        done, _not_done = wait(futures, timeout=timeout)
+        out = []
+        for f in futures:
+            if f in done:
+                try:
+                    out.append(f.result())
+                except Exception as e:  # noqa: BLE001 - 单项失败降级 None
+                    logging.warning("并发预取单项失败：{}".format(e))
+                    out.append(None)
+            else:
+                out.append(None)
+        return out
+    finally:
+        ex.shutdown(wait=False)
+
+
 # ==================== 颜色/符号工具 ====================
 
 

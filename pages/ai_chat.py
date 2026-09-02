@@ -15,8 +15,10 @@ import streamlit as st
 from config import API_KEY
 from utils.agent_core import agent_run
 from utils.agent_memory import list_agent_sessions, build_memory_context
+from utils.common import fetch_with_timeout
 from ui_components.holdings_card import render_holdings_card
 from ui_components.market_indicator import render_market_index
+from data.market_api import get_market_index
 
 EXAMPLE_QUESTIONS = [
     "我的持仓怎么样",
@@ -82,13 +84,18 @@ def _session_display_messages(session_id, limit=40):
 
 
 def _render_right_panel():
-    """数据右栏：持仓概览 / 大盘指数 / 会话记忆（小标签 + 紧凑）"""
+    """数据右栏：持仓概览 / 大盘指数 / 会话记忆（小标签 + 紧凑）
+
+    行情走 fetch_with_timeout 预取（上限 8s）：无参直连会在代理拦截数据源时
+    把每次 rerun 都拖成 30s+ 重试等待，整页交互卡顿的主因之一。
+    """
     st.markdown('<div class="panel-label">持仓概览</div>', unsafe_allow_html=True)
     render_holdings_card(compact=True)
     st.markdown('<div class="panel-label">大盘指数</div>', unsafe_allow_html=True)
-    try:
-        render_market_index()
-    except Exception:
+    idx_data = fetch_with_timeout(get_market_index)
+    if idx_data:
+        render_market_index(data=idx_data)
+    else:
         st.caption("暂无数据")
     st.markdown('<div class="panel-label">会话记忆</div>', unsafe_allow_html=True)
     ctx = build_memory_context()
