@@ -264,7 +264,7 @@ AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投�
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
               model=DEEPSEEK_MODEL, temperature=0.7, max_tool_rounds=8,
-              continue_question=False):
+              continue_question=False, on_progress=None):
     """带规划的 Agent 多轮执行循环（ai_chat / 诊断页"AI 追问"共用入口）。
 
     参数：
@@ -275,10 +275,21 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         tools: 工具 schema 列表，None 用注册表全量
         max_tool_rounds: 工具调用轮次上限（默认 8，诊断类多步需要）
         continue_question: 追问链开关——memory 会话有历史时，把最近消息作为上下文带入
+        on_progress: 进度回调 fn(stage, detail)——UI 实时思考链用，不传则无副作用。
+            stage: "thinking"（规划本轮）/"tool"（工具调用）/"writing"（组织最终回答）
+            detail: 人类可读描述（如 "get_stock_diagnosis(600519)" / "第 2/8 轮规划"）
 
     返回：
         {"type": "text", "content": "...", "tool_trace": [...], "session_id": id|None}
     """
+
+    def _progress(stage, detail):
+        if on_progress:
+            try:
+                on_progress(stage, detail)
+            except Exception:  # noqa: BLE001 - 进度展示失败不影响主流程
+                pass
+
     # 晚绑定：避免 import 环（ai_helper → agent_core），且让测试可 patch ai_helper.call_llm
     from utils import ai_helper
     from utils.agent_memory import ensure_session, record_message, maybe_summarize_session, get_agent_messages
@@ -316,8 +327,10 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         tools = [t.schema for t in TOOL_REGISTRY.values()]
 
     for _round in range(max_tool_rounds + 1):
+        _progress("thinking", "第 {}/{} 轮规划".format(_round + 1, max_tool_rounds + 1))
         result = ai_helper.call_llm(messages, tools=tools, model=model, temperature=temperature)
         if result.get("type") != "tool_call":
+            _progress("writing", "组织最终回答")
             content = result.get("content") or ""
             if memory:
                 record_message(session_id, "assistant", content)
@@ -336,6 +349,8 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args or {})
             except Exception:
                 args = {}
+            _progress("tool", "{}({})".format(
+                name, ", ".join("{}={}".format(k, v) for k, v in list(args.items())[:2])))
             # 模块级名调用 → 测试可 patch agent_core.execute_ai_tool_v2
             output = execute_ai_tool_v2(name, args)
             tool_trace.append({"name": name, "arguments": args, "output": output})

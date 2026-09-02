@@ -10,6 +10,7 @@ Agent 对话中心（Agent-first 主页面 · 打开即对话）
 - 无 Key 降级：引导卡 + 聊天框禁用，不崩溃
 - 演示模式：预置示例持仓（纯内存 seed）
 """
+import html as html_lib
 import json
 
 import streamlit as st
@@ -139,11 +140,52 @@ def _render_right_panel():
 # ==================== 消息渲染 ====================
 
 
+def _md_to_html(text):
+    """Markdown → HTML（agent 回复渲染进气泡用）；库缺失时降级纯文本"""
+    try:
+        import markdown
+        return markdown.markdown(text or "", extensions=["fenced_code", "tables"])
+    except Exception:  # noqa: BLE001 - 渲染降级，不阻塞
+        return html_lib.escape(text or "").replace("\n", "<br/>")
+
+
+def _render_msg(role, content):
+    """消息气泡：user 右对齐（金色调）/ assistant 左对齐——无头像的聊天布局"""
+    content = str(content or "")
+    if role == "user":
+        st.markdown(
+            '<div class="msg-row msg-row-user"><div class="msg-bubble msg-user">{}</div></div>'.format(
+                html_lib.escape(content)),
+            unsafe_allow_html=True)
+    else:
+        st.markdown(
+            '<div class="msg-row msg-row-agent"><div class="msg-bubble msg-agent">{}</div></div>'.format(
+                _md_to_html(content)),
+            unsafe_allow_html=True)
+
+
+def _render_trace(payload):
+    """思考链折叠块（完成后持久保留在对话流里）：步骤时间线 + 工具输出"""
+    steps = payload.get("steps") or []
+    trace = payload.get("trace") or []
+    with st.expander("💭 思考链（{} 步 · {} 次工具调用）".format(len(steps), len(trace)), expanded=False):
+        for s in steps:
+            st.markdown(s)
+        if trace:
+            st.markdown("---")
+            for t in trace:
+                args_text = json.dumps(t.get("arguments") or {}, ensure_ascii=False)
+                st.markdown("**{}**　`{}`".format(t.get("name", ""), args_text))
+                st.code(str(t.get("output", ""))[:500], language="json")
+
+
 def _render_view():
     view = st.session_state.get("agent_view") or st.session_state.get("messages") or []
     for msg in view:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        if msg.get("role") == "trace":
+            _render_trace(msg.get("content") or {})
+        else:
+            _render_msg(msg["role"], msg["content"])
 
 
 def _render_no_key_guide():
@@ -172,41 +214,51 @@ def _render_no_key_guide():
 
 def _handle_prompt(prompt):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    _render_msg("user", prompt)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Agent 规划与调用工具中…（多步查询约 30-90 秒）"):
-            try:
-                result = agent_run(
-                    prompt,
-                    memory=True,
-                    session_id=st.session_state.get("agent_session_id"),
-                    continue_question=True,
-                )
-            except Exception as e:
-                st.error("AI 响应失败：{}".format(e))
-                return
+    # 实时思考链：st.status 逐事件更新（规划轮次/工具调用/组织回答），不再让用户干等
+    steps = []
+
+    def _on_progress(stage, detail):
+        icon = {"thinking": "🧠", "tool": "🔧", "writing": "✍️"}.get(stage, "•")
+        steps.append("{} {}".format(icon, detail))
+        try:
+            status.update(label="Agent 思考中…（已 {} 步）".format(len(steps)),
+                          state="running", expanded=True)
+        except Exception:  # noqa: BLE001 - 进度展示失败不影响主流程
+            pass
+        log.markdown("\n".join(steps))
+
+    try:
+        with st.status("Agent 规划中…（多步查询约 30-90 秒）", expanded=True) as status:
+            log = st.empty()
+            result = agent_run(
+                prompt,
+                memory=True,
+                session_id=st.session_state.get("agent_session_id"),
+                continue_question=True,
+                on_progress=_on_progress,
+            )
             if result.get("session_id"):
                 st.session_state.agent_session_id = result["session_id"]
+            status.update(label="✅ 完成——{} 步思考 · {} 次工具".format(
+                len(steps), len(result.get("tool_trace") or [])),
+                state="complete", expanded=False)
+    except Exception as e:
+        st.error("AI 响应失败：{}".format(e))
+        return
 
-            # 工具调用时间线（内联在回复上方；步数少时默认展开）
-            tool_trace = result.get("tool_trace") or []
-            if tool_trace:
-                with st.expander(
-                        "🔧 Agent 自主调用了 {} 次工具".format(len(tool_trace)),
-                        expanded=len(tool_trace) <= 3):
-                    for t in tool_trace:
-                        args_text = json.dumps(t.get("arguments") or {}, ensure_ascii=False)
-                        st.markdown("**{}**　`{}`".format(t.get("name", ""), args_text))
-                        st.code(str(t.get("output", ""))[:800], language="json")
-
-            response = result.get("content") or ""
-            if response:
-                st.markdown(response)
-                st.session_state.messages.append({"role": "assistant", "content": response})
-                if st.session_state.get("agent_view") is not None:
-                    st.session_state.agent_view = list(st.session_state.messages)
+    # Agent 回复 + 思考链归档：trace 折叠块在气泡之前，完成后随视图持久保留
+    response = result.get("content") or ""
+    tool_trace = result.get("tool_trace") or []
+    if response:
+        trace_msg = {"role": "trace", "content": {"steps": list(steps), "trace": tool_trace}}
+        st.session_state.messages.append(trace_msg)
+        st.session_state.messages.append({"role": "assistant", "content": response})
+        if st.session_state.get("agent_view") is not None:
+            st.session_state.agent_view = list(st.session_state.messages)
+        _render_trace(trace_msg["content"])
+        _render_msg("assistant", response)
 
 
 # ==================== 主流程 ====================

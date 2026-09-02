@@ -483,11 +483,49 @@ def inject_global_css() -> None:
     }
 
     /* ===== 聊天 ===== */
+    /* 去头像：st.chat_message 自带的 avatar 区一律隐藏（对话中心用自绘气泡，无头像） */
+    [data-testid="stChatMessageAvatar"] {
+        display: none !important;
+    }
+    [data-testid="stChatMessage"] [data-testid="stChatMessageContent"] {
+        width: 100% !important;
+    }
     [data-testid="stChatMessage"] {
         background: var(--surface);
         border: 1px solid var(--line);
         border-radius: 14px;
     }
+
+    /* ===== 对话中心消息气泡（无头像：user 右对齐金色 / agent 左对齐表面色） ===== */
+    .msg-row { display: flex; margin: 10px 0; }
+    .msg-row-user { justify-content: flex-end; }
+    .msg-row-agent { justify-content: flex-start; }
+    .msg-bubble {
+        max-width: 86%;
+        padding: 10px 14px;
+        border-radius: 14px;
+        font-size: 13.5px;
+        line-height: 1.75;
+    }
+    .msg-user {
+        background: var(--gold-soft);
+        border: 1px solid var(--gold-line);
+        color: var(--text-1);
+        border-bottom-right-radius: 4px;
+        white-space: pre-wrap;
+    }
+    .msg-agent {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        color: var(--text-2);
+        border-bottom-left-radius: 4px;
+    }
+    .msg-agent p { margin: .3em 0; }
+    .msg-agent h1, .msg-agent h2, .msg-agent h3 { font-size: 14.5px; margin: .6em 0 .3em; }
+    .msg-agent table { font-size: 12.5px; }
+    .msg-agent code { font-size: 12px; }
+    .msg-agent pre { overflow-x: auto; }
+    .msg-agent ul, .msg-agent ol { padding-left: 1.2em; margin: .3em 0; }
     [data-testid="stChatInput"] textarea, [data-testid="stChatInput"] > div {
         background: var(--surface-2) !important;
         border: 1px solid var(--line) !important;
