@@ -13,11 +13,12 @@ _UP = "var(--up)"      # 涨·红
 _DOWN = "var(--down)"  # 跌·绿
 
 
-def render_market_index(data=None):
+def render_market_index(data=None, limit=None):
     """渲染大盘指数列表（红涨绿跌）
 
     data: 预取的指数数据；None 时自行拉取（侧边栏建议用
-    utils.sidebar_data.fetch_with_timeout 预取，避免阻塞整页渲染）。
+    utils.common.fetch_with_timeout 预取，避免阻塞整页渲染）。
+    limit: 最多展示前 N 条（右栏等紧凑场景用；None=全部）。
     """
     if data is None:
         data = get_market_index()
@@ -26,6 +27,8 @@ def render_market_index(data=None):
 
     # 兼容 list 或 DataFrame 输入
     items = indices if isinstance(indices, list) else (indices.to_dict('records') if hasattr(indices, 'to_dict') else [])
+    if limit:
+        items = items[:limit]
 
     for idx in items:
         change = idx.get('change', 0)
@@ -56,8 +59,8 @@ def render_market_index(data=None):
         ), unsafe_allow_html=True)
 
 
-def render_hot_sectors(data=None):
-    """渲染热门板块（红涨绿跌）；data 为预取数据，None 时自行拉取"""
+def render_hot_sectors(data=None, limit=5):
+    """渲染热门板块（红涨绿跌）；data 为预取数据，None 时自行拉取；limit 最多展示条数"""
     if data is None:
         sectors = get_hot_sectors()
     else:
@@ -70,7 +73,7 @@ def render_hot_sectors(data=None):
 
     items = sectors if isinstance(sectors, list) else (sectors.to_dict('records') if hasattr(sectors, 'to_dict') else [])
 
-    for sector in items[:5]:
+    for sector in items[:limit]:
         change_pct = sector.get('change_pct', sector.get('change', 0))
         # A股口径：红涨绿跌
         color = _UP if change_pct >= 0 else _DOWN

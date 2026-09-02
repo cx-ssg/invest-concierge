@@ -104,28 +104,34 @@ def _render_right_panel():
     """
     # 顶部让位：右上角 fixed 的基金/股票切换胶囊悬浮在本栏上方（44px 防压盖）
     st.markdown('<div style="height:44px;"></div>', unsafe_allow_html=True)
-    # 功能导航：当前轨道的 live 页面入口（ai_chat 自身排除）
+    # 功能导航：当前轨道的 live 页面入口（ai_chat 自身排除），两列小格压缩纵向高度
     st.markdown('<div class="panel-label">功 能</div>', unsafe_allow_html=True)
     track = st.session_state.get("track", "fund")
     nav_pages = [(k, l) for k, l in get_live_pages(track) if k != "ai_chat"]
     common_pages = [(k, l) for k, l in get_live_pages("common") if k != "ai_chat"]
-    for key, label in nav_pages + common_pages:
-        if st.button(label, key="fn_nav_{}".format(key), use_container_width=True):
-            st.session_state.page = key
-            st.rerun()
+    page_list = nav_pages + common_pages
+    grid_cols = st.columns(2)
+    for i, (key, label) in enumerate(page_list):
+        with grid_cols[i % 2]:
+            if st.button(label, key="fn_nav_{}".format(key), use_container_width=True):
+                st.session_state.page = key
+                st.rerun()
 
     st.markdown('<div class="panel-label">持仓概览</div>', unsafe_allow_html=True)
     render_holdings_card(compact=True)
     st.markdown('<div class="panel-label">大盘指数</div>', unsafe_allow_html=True)
     idx_data = fetch_with_timeout(get_market_index)
     if idx_data:
-        render_market_index(data=idx_data)
+        render_market_index(data=idx_data, limit=3)
     else:
         st.caption("暂无数据")
     st.markdown('<div class="panel-label">会话记忆</div>', unsafe_allow_html=True)
     ctx = build_memory_context()
     if ctx:
-        st.caption(ctx.replace("最近会话记忆：\n", ""))
+        txt = ctx.replace("最近会话记忆：\n", "")
+        if len(txt) > 90:
+            txt = txt[:90] + "…"
+        st.caption(txt)
     else:
         st.caption("暂无记忆——对话满 8 轮后自动生成摘要")
 

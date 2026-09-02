@@ -582,6 +582,23 @@ def inject_global_css() -> None:
         width: auto;
     }
 
+    /* ===== ai_chat 右栏功能面板紧凑化 =====
+       右栏 = 唯一含 .panel-label 的 stColumn，锚定后压缩按钮/卡片/行距，
+       目标：笔记本 800px 可视高内不溢出。其他页面不受影响。 */
+    div[data-testid="stColumn"]:has(.panel-label) .panel-label { margin: 10px 0 4px; }
+    div[data-testid="stColumn"]:has(.panel-label) .stButton button {
+        padding: .22rem .55rem !important;
+        font-size: 12px !important;
+        border-radius: 8px !important;
+        min-height: 30px !important;
+    }
+    div[data-testid="stColumn"]:has(.panel-label) .stButton button p { font-size: 12px !important; }
+    div[data-testid="stColumn"]:has(.panel-label) .metric-card { padding: 10px 12px; }
+    div[data-testid="stColumn"]:has(.panel-label) .metric-card .m-val { font-size: 20px; }
+    div[data-testid="stColumn"]:has(.panel-label) .row-item { padding: 6px 6px; }
+    div[data-testid="stColumn"]:has(.panel-label) [data-testid="stCaptionContainer"],
+    div[data-testid="stColumn"]:has(.panel-label) .stCaption { font-size: 11px !important; }
+
     /* ===== 动效关闭 ===== */
     @media (prefers-reduced-motion: reduce) {
         * { transition: none !important; animation: none !important; }
