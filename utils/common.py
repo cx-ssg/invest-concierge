@@ -303,9 +303,15 @@ def request_with_retry(url, params=None, retries=3, timeout=10, headers=None):
     return None
 
 
-def call_akshare_with_retry(func, *args, retries=2, timeout=30, **kwargs):
-    """调用akshare函数并重试，失败返回 None
-    timeout: 每个请求的初始超时时间（秒），超时后立即重试
+def call_akshare_with_retry(func, *args, retries=1, timeout=10, **kwargs):
+    """调用akshare函数并重试，失败快速返回 None（不叠多层重试）
+
+    防卡顿要点（2026-08-31 优化）：
+      - retries 默认 1（外层只 1 轮）——akshare 内部已有自己的重试链，
+        两层叠加会拖到 20s+（东财失败时一次调用=内部3次×1.1s + 外层2轮）
+      - timeout 默认 10（原 30 太大）
+      - 配合调用方：失败结果也要缓存（把 None 也写进失败缓存，5 分钟 TTL），
+        避免切页每次都白等
     """
     from time import sleep, time as now
     for i in range(retries):

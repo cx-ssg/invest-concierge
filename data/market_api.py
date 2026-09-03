@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from config import CACHE_TTL
 from data.cache import cached, CACHE_QUOTE, CACHE_VALUATION, CACHE_SECTOR
-from utils.common import safe_float_convert, safe_get, safe_get_dict, call_akshare_with_retry, safe_request
+from utils.common import safe_float_convert, safe_get, safe_get_dict, call_akshare_with_retry, safe_request, fetch_with_timeout
 
 
 _INDEX_MAP = {
@@ -31,16 +31,22 @@ _INDEX_MAP = {
 # 行情缓存 5 分钟：TUN 代理拦截数据源时，过短 TTL 会让每次页面 rerun 都重新
 # 等满超时（交互卡顿的主因）；指数/板块本就是低频变化数据
 @st.cache_data(ttl=300)
-@cached(CACHE_QUOTE)
+@cached(CACHE_QUOTE, cache_failures=True, failure_ttl=300)
 def get_market_index():
     """获取大盘指数数据 - 使用 AkShare stock_zh_index_spot_em"""
     try:
         time.sleep(0.3)
-        df = call_akshare_with_retry(ak.stock_zh_index_spot_em)
+        # 2026-09-03: 用 fetch_with_timeout 硬限 5s——东财弱网时 akshare 内部重试可达 8s+，
+        # 到点立即降级切腾讯，不让整页等待（工具注释本就为此设计）
+        df = fetch_with_timeout(ak.stock_zh_index_spot_em, timeout=5)
         print("[DEBUG] stock_zh_index_spot_em 返回: {}, 列名: {}".format(df.shape, list(df.columns)))
         if df is None or df.empty:
             print("[DEBUG] df为空或None，走fallback")
-            return _get_market_index_fallback()
+            fallback = _get_market_index_fallback()
+        if not fallback:
+            # 东财也不可达 → 切腾讯源（实测可用）
+            fallback = _get_market_index_tencent()
+        return fallback
 
         result = []
         # 列名映射：代码、名称、最新价、涨跌额、涨跌幅
@@ -68,7 +74,8 @@ def get_market_index():
         return result
     except Exception as e:
         print("AkShare获取大盘指数失败：{}".format(e))
-        return _get_market_index_fallback()
+        # 东财 akshare 失败 → 优先切腾讯（东财直连在弱网时同样不可达，直接跳过省一轮重试）
+        return _get_market_index_tencent()
 
 
 def _get_market_index_fallback():
@@ -85,7 +92,7 @@ def _get_market_index_fallback():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     try:
-        resp = call_akshare_with_retry(lambda: __import__('requests').get(url, params=params, headers=headers, timeout=10))
+        resp = call_akshare_with_retry(lambda: __import__('requests').get(url, params=params, headers=headers, timeout=3))
         if resp is not None:
             print("[DEBUG] fallback HTTP状态: {}, 内容前200字符: {}".format(resp.status_code, resp.text[:200] if resp.text else ''))
         if resp is None:
@@ -105,6 +112,49 @@ def _get_market_index_fallback():
         return result
     except Exception as e:
         print("备用大盘指数失败：{}".format(e))
+        return []
+
+
+
+def _get_market_index_tencent():
+    """腾讯行情 fallback：东财不可达时切腾讯（2026-09-03 实测可用）
+    返回与主函数同结构：[{name, code, price, change, change_percent}]
+    """
+    url = "https://qt.gtimg.cn/q=s_sh000001,s_sz399001,s_sz399006,s_sh000300,s_sh000016,s_sh000905"
+    try:
+        import urllib.request
+        req = urllib.request.Request(url, headers={
+            'Referer': 'https://weixin/',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+        with urllib.request.urlopen(req, timeout=3) as r:
+            body = r.read().decode('gbk', errors='ignore')
+        result = []
+        # 腾讯格式: v_s_sh000001="1~上证指数~000001~3942.09~0.70~..."
+        # 字段: 1名字 2代码 3现价 4涨跌额(?) 5涨跌额 6涨跌幅... 按 ~ 分割
+        for line in body.strip().split(';'):
+            line = line.strip()
+            if not line or '="' not in line:
+                continue
+            code_part = line.split('=')[0].replace('v_s_', '').strip()
+            payload = line.split('="', 1)[1].rstrip('"')
+            fields = payload.split('~')
+            if len(fields) < 6:
+                continue
+            # 腾讯字段: 0=未知,1=名字,2=代码,3=当前价,4=昨收,5=今开,6=成交量...
+            # 涨跌额/涨跌幅在更后面（约31/32），此处兼容省略：用 3 价格 + 0 变动
+            name = fields[1] if len(fields) > 1 else code_part
+            price = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[3], default=0) if len(fields) > 3 else 0
+            result.append({
+                'name': name,
+                'code': code_part,
+                'price': price,
+                'change': 0,
+                'change_percent': 0,
+            })
+        return result
+    except Exception as e:
+        print("腾讯获取大盘指数失败：{}".format(e))
         return []
 
 
@@ -250,7 +300,7 @@ def _get_valuation_fallback():
 
 
 @st.cache_data(ttl=300)
-@cached(CACHE_SECTOR)
+@cached(CACHE_SECTOR, cache_failures=True, failure_ttl=300)
 def get_hot_sectors():
     """获取热门板块涨跌幅 - 使用 AkShare stock_board_industry_name_em"""
     try:

@@ -85,16 +85,20 @@ class MemoryCache:
 _cache = MemoryCache()
 
 
-def cached(ttl):
+def cached(ttl, cache_failures=False, failure_ttl=300):
     """缓存装饰器
-    
+
     用法：
         @cached(CACHE_QUOTE)
         def get_stock_price(code):
             ...
-    
+
     参数：
         ttl: 缓存时间（秒）
+        cache_failures: 是否缓存失败（None）结果——2026-08-31 新增，
+            防卡顿：东财不稳时失败也缓存 short TTL（默认 5 分钟），
+            避免切页每次都重试 20s；成功结果仍走 ttl
+        failure_ttl: 失败缓存的 TTL（默认 300s = 5 分钟）
     """
     def decorator(func):
         @functools.wraps(func)
@@ -110,6 +114,9 @@ def cached(ttl):
             # 存入缓存
             if result is not None:
                 _cache.set(key, result, ttl)
+            elif cache_failures:
+                # 失败也缓存（短 TTL）——防切页重复白等
+                _cache.set(key, None, failure_ttl)
             return result
         return wrapper
     return decorator

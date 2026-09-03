@@ -29,7 +29,7 @@ def _get_fund_list():
     return _get_fund_list._cache
 
 
-@cached(CACHE_QUOTE)
+@cached(CACHE_QUOTE, cache_failures=True, failure_ttl=300)
 def get_fund_info(fund_code):
     """获取基金基本信息（名称、基金类型等）"""
     try:
