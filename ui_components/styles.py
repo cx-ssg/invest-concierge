@@ -556,6 +556,47 @@ def inject_global_css() -> None:
         border: 1px solid var(--line);
         padding: 1px 6px;
     }
+
+    /* ===== 会话列表（自绘行：左键续聊 / 右键菜单） ===== */
+    .sess-list { margin: 2px -4px; }
+    .sess-item {
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 13px;
+        color: var(--text-2);
+        cursor: pointer;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        transition: background .14s var(--ease);
+    }
+    .sess-item:hover { background: var(--surface-2); color: var(--text-1); }
+    .sess-item.current {
+        background: var(--gold-soft);
+        color: var(--gold);
+        box-shadow: inset 2px 0 0 var(--gold);
+    }
+    /* 左键承接的隐藏按钮（tertiary 类型仅用于此；JS 找 textContent 触发原生点击） */
+    section[data-testid="stSidebar"] button[kind="tertiary"] { display: none !important; }
+
+    /* ===== 右键菜单（自绘 .ctx-menu） ===== */
+    .ctx-menu {
+        position: absolute;
+        z-index: 9999;
+        min-width: 150px;
+        background: var(--surface-2);
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        padding: 5px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.45);
+        font-size: 12.5px;
+        display: none;
+    }
+    .ctx-item {
+        padding: 7px 10px;
+        border-radius: 7px;
+        color: var(--text-2);
+        cursor: pointer;
+    }
+    .ctx-item:hover { background: var(--surface); color: var(--text-1); }
     [data-testid="stChatInput"] textarea, [data-testid="stChatInput"] > div {
         background: var(--surface-2) !important;
         border: 1px solid var(--line) !important;

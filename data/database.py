@@ -122,6 +122,14 @@ def init_db():
             "SET hold_shares = shares "
             "WHERE shares IS NOT NULL AND (hold_shares IS NULL OR hold_shares = 0)")
 
+    # ===== 旧表迁移：agent_sessions 补 pinned/archived（会话右键菜单：置顶/归档） =====
+    cursor.execute("PRAGMA table_info(agent_sessions)")
+    sess_cols = {row[1] for row in cursor.fetchall()}
+    if "pinned" not in sess_cols:
+        cursor.execute("ALTER TABLE agent_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+    if "archived" not in sess_cols:
+        cursor.execute("ALTER TABLE agent_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+
     conn.commit()
     conn.close()
 
@@ -672,14 +680,19 @@ def update_agent_session_summary(session_id, summary):
         conn.close()
 
 
-def list_agent_sessions(limit=8):
-    """取最近 limit 条会话（无论有无摘要，会话历史列表用），按更新倒序"""
+def list_agent_sessions(limit=8, include_archived=False):
+    """取最近 limit 条会话（无论有无摘要，会话历史列表用），置顶优先再按更新倒序
+
+    include_archived=True 时附带已归档会话（回收站视图用）
+    """
     conn = get_conn()
     cursor = conn.cursor()
     try:
+        arch = "" if include_archived else "WHERE archived = 0 "
         cursor.execute(
-            "SELECT id, title, summary, created_at, updated_at FROM agent_sessions "
-            "ORDER BY updated_at DESC, id DESC LIMIT ?",
+            "SELECT id, title, summary, pinned, archived, created_at, updated_at FROM agent_sessions "
+            + arch +
+            "ORDER BY pinned DESC, updated_at DESC, id DESC LIMIT ?",
             (int(limit),)
         )
         rows = cursor.fetchall()
@@ -687,6 +700,80 @@ def list_agent_sessions(limit=8):
     except Exception as e:
         print("读取 Agent 会话列表失败：{}".format(e))
         return []
+    finally:
+        conn.close()
+
+
+# ==================== 会话管理（右键菜单：置顶/重命名/归档/删除） ====================
+
+def toggle_agent_session_pinned(session_id):
+    """置顶/取消置顶，返回切换后的状态（True=已置顶）"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE agent_sessions SET pinned = CASE pinned WHEN 1 THEN 0 ELSE 1 END "
+            "WHERE id = ?", (int(session_id),))
+        conn.commit()
+        cursor.execute("SELECT pinned FROM agent_sessions WHERE id = ?", (int(session_id),))
+        row = cursor.fetchone()
+        return bool(row and row["pinned"])
+    except Exception as e:
+        print("切换会话置顶失败：{}".format(e))
+        return False
+    finally:
+        conn.close()
+
+
+def rename_agent_session(session_id, title):
+    """重命名会话，返回是否成功"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE agent_sessions SET title = ? WHERE id = ?",
+            (str(title or "").strip()[:60], int(session_id)))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print("重命名会话失败：{}".format(e))
+        return False
+    finally:
+        conn.close()
+
+
+def toggle_agent_session_archived(session_id):
+    """归档/取消归档（移到回收站/恢复），返回切换后的状态（True=已归档）"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE agent_sessions SET archived = CASE archived WHEN 1 THEN 0 ELSE 1 END "
+            "WHERE id = ?", (int(session_id),))
+        conn.commit()
+        cursor.execute("SELECT archived FROM agent_sessions WHERE id = ?", (int(session_id),))
+        row = cursor.fetchone()
+        return bool(row and row["archived"])
+    except Exception as e:
+        print("切换会话归档失败：{}".format(e))
+        return False
+    finally:
+        conn.close()
+
+
+def delete_agent_session(session_id):
+    """彻底删除会话及其全部消息（回收站内的删除按钮），返回是否成功"""
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        sid = int(session_id)
+        cursor.execute("DELETE FROM agent_messages WHERE session_id = ?", (sid,))
+        cursor.execute("DELETE FROM agent_sessions WHERE id = ?", (sid,))
+        conn.commit()
+        return True
+    except Exception as e:
+        print("删除会话失败：{}".format(e))
+        return False
     finally:
         conn.close()
 

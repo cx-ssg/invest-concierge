@@ -20,6 +20,10 @@ from data.database import (
     update_agent_session_summary,
     list_recent_agent_sessions,
     list_agent_sessions,
+    toggle_agent_session_pinned,
+    rename_agent_session,
+    toggle_agent_session_archived,
+    delete_agent_session,
 )
 
 # 每会话满 N 轮（用户提问数）后生成摘要

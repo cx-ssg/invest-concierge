@@ -158,3 +158,79 @@ def test_constants_match_design():
     """设计定值：满 8 轮触发；注入最近 3 条"""
     assert SUMMARY_TRIGGER_ROUNDS == 8
     assert MEMORY_CONTEXT_SESSIONS == 3
+
+
+# ==================== 会话管理（右键菜单：置顶/重命名/归档/删除） ====================
+
+
+def test_session_pin_toggle_and_ordering(tmp_path, monkeypatch):
+    """置顶：切换 + 列表排序（置顶优先）"""
+    monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "sess_pin.db"))
+    database.init_db()
+    s1 = database.create_agent_session(title="旧会话")
+    s2 = database.create_agent_session(title="新会话")
+    # 默认按 updated_at 倒序：新会话在前
+    ids = [s["id"] for s in database.list_agent_sessions()]
+    assert ids[0] == s2
+    # 置顶旧会话后：旧会话回到第一
+    assert database.toggle_agent_session_pinned(s1) is True
+    ids = [s["id"] for s in database.list_agent_sessions()]
+    assert ids[0] == s1
+    assert len(ids) == 2
+    # 再切一次：取消置顶
+    assert database.toggle_agent_session_pinned(s1) is False
+
+
+def test_session_rename(tmp_path, monkeypatch):
+    """重命名：更新标题并保留在列表"""
+    monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "sess_rename.db"))
+    database.init_db()
+    sid = database.create_agent_session(title="原始标题")
+    assert database.rename_agent_session(sid, "茅台诊断复盘")
+    session = database.get_agent_session(sid)
+    assert session["title"] == "茅台诊断复盘"
+
+
+def test_session_archive_and_recycle(tmp_path, monkeypatch):
+    """归档（移到回收站）：默认列表不出现；include_archived 可见且标记；恢复；彻底删除连消息一起清"""
+    monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "sess_arch.db"))
+    database.init_db()
+    sid = database.create_agent_session(title="要归档的会话")
+    database.add_agent_message(sid, "user", "hello")
+
+    assert database.toggle_agent_session_archived(sid) is True
+    # 默认列表（不含归档）看不到
+    assert all(s["id"] != sid for s in database.list_agent_sessions())
+    # 回收站视图（include_archived）能看到且标记 archived
+    in_arch = [s for s in database.list_agent_sessions(limit=50, include_archived=True)
+               if s["id"] == sid]
+    assert in_arch and in_arch[0]["archived"] == 1
+    # 恢复
+    assert database.toggle_agent_session_archived(sid) is False
+    assert any(s["id"] == sid for s in database.list_agent_sessions())
+    # 彻底删除：会话 + 消息全清
+    database.toggle_agent_session_archived(sid)  # 先归档（回收站删除按钮只在归档时出现）
+    assert database.delete_agent_session(sid)
+    assert all(s["id"] != sid for s in
+               database.list_agent_sessions(limit=50, include_archived=True))
+    assert database.count_agent_messages(sid) == 0
+
+
+def test_init_db_migrates_old_agent_sessions_table(tmp_path, monkeypatch):
+    """旧库迁移：手工建缺 pinned/archived 列的 agent_sessions → init_db 自动补列"""
+    import sqlite3
+    db_path = str(tmp_path / "old_sess.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE agent_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '', "
+        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(database, "DB_FILE", db_path)
+    database.init_db()
+    conn = sqlite3.connect(db_path)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(agent_sessions)")}
+    conn.close()
+    assert {"pinned", "archived"} <= cols

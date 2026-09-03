@@ -14,10 +14,15 @@ import html as html_lib
 import json
 
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from config import API_KEY
 from utils.agent_core import agent_run
-from utils.agent_memory import list_agent_sessions, build_memory_context
+from utils.agent_memory import (
+    list_agent_sessions, build_memory_context,
+    toggle_agent_session_pinned, rename_agent_session,
+    toggle_agent_session_archived, delete_agent_session,
+)
 from utils.common import fetch_with_timeout
 from ui_components.holdings_card import render_holdings_card
 from ui_components.market_indicator import render_market_index
@@ -44,7 +49,12 @@ def _init_state():
 
 
 def _render_session_sidebar():
-    """左栏（本页独占）：新建对话 + 最近会话列表（点击续聊），模仿 agent 产品的会话侧栏"""
+    """左栏（本页独占）：新建对话 + 最近会话列表（点击续聊/右键管理），模仿 agent 产品的会话侧栏
+
+    会话行右键菜单（原生 contextmenu + 自绘菜单，样式 .ctx-menu）：
+    置顶 · 重命名 · 移到回收站。菜单动作经 URL query param 回传本页处理。
+    左键续聊走隐藏承接按钮（原生 rerun，无整页刷新）。
+    """
     if st.sidebar.button("＋ 新建对话", key="agent_new_session", use_container_width=True,
                          type="primary" if st.session_state.get("agent_session_id") is None else "secondary"):
         st.session_state.agent_session_id = None
@@ -53,22 +63,97 @@ def _render_session_sidebar():
         st.rerun()
 
     st.sidebar.markdown('<div class="nav-group">会 话 历 史</div>', unsafe_allow_html=True)
+
+    # 重命名弹窗（st.dialog；rename_sid 由右键菜单的隐藏按钮写入）
+    rename_sid = st.session_state.get("rename_sid")
+    if rename_sid is not None:
+
+        @st.dialog("重命名会话")
+        def _rename_dialog():
+            val = st.text_input("会话名称", value=st.session_state.get("rename_title", ""),
+                                key="rename_input", max_chars=60)
+            c_save, c_cancel = st.columns(2)
+            if c_save.button("保存", key="rename_save", type="primary", use_container_width=True):
+                if val.strip():
+                    rename_agent_session(rename_sid, val)
+                st.session_state.pop("rename_sid", None)
+                st.session_state.pop("rename_title", None)
+                st.rerun()
+            if c_cancel.button("取消", key="rename_cancel", use_container_width=True):
+                st.session_state.pop("rename_sid", None)
+                st.session_state.pop("rename_title", None)
+                st.rerun()
+
+        _rename_dialog()
+
+    # ===== 会话列表（置顶优先，归档不显示） =====
     sessions = list_agent_sessions(limit=8)
-    for s in sessions:
-        title = (s.get("title") or "未命名会话")[:16]
-        sid = s.get("id")
-        current = st.session_state.get("agent_session_id") == sid
-        label = ("🟡 " if current else "") + title
-        if st.sidebar.button(label, key="agent_sess_{}".format(sid), use_container_width=True):
-            st.session_state.agent_session_id = sid
-            msgs = []
-            for m in _session_display_messages(sid):
-                msgs.append({"role": m["role"], "content": m["content"]})
-            st.session_state.agent_view = msgs
-            st.session_state.messages = msgs
-            st.rerun()
-    if not sessions:
+    if sessions:
+        rows_html = ""
+        for s in sessions:
+            sid = s.get("id")
+            title = (s.get("title") or "未命名会话")[:16]
+            pinned = bool(s.get("pinned"))
+            current = st.session_state.get("agent_session_id") == sid
+            pin_icon = "📌 " if pinned else ""
+            cls = "sess-item current" if current else "sess-item"
+            rows_html += (
+                '<div class="{}" data-sid="{}" title="右键：置顶 / 重命名 / 移到回收站">'
+                '<span class="sess-txt">{}{}</span></div>'.format(cls, sid, pin_icon, title))
+        st.sidebar.markdown(
+            '<div class="sess-list">{}</div>'.format(rows_html), unsafe_allow_html=True)
+
+        # 承接按钮（隐藏 tertiary；JS 左键点行=open，右键菜单项=pin/rename/archive）。
+        # 全走 Streamlit 原生按钮点击 → 原生 rerun，不经 URL 跳转（iframe 改
+        # parent.location 会被沙箱拦截，实测不生效）
+        for s in sessions:
+            sid = s.get("id")
+            if st.sidebar.button("hidden-open-{}".format(sid),
+                                 key="agent_sess_open_{}".format(sid), type="tertiary"):
+                _open_session(sid)
+                st.rerun()
+            if st.sidebar.button("hidden-pin-{}".format(sid),
+                                 key="agent_sess_pin_{}".format(sid), type="tertiary"):
+                toggle_agent_session_pinned(sid)
+                st.rerun()
+            if st.sidebar.button("hidden-rename-{}".format(sid),
+                                 key="agent_sess_rename_{}".format(sid), type="tertiary"):
+                st.session_state.rename_sid = sid
+                st.session_state.rename_title = (s.get("title") or "")[:60]
+                st.rerun()
+            if st.sidebar.button("hidden-archive-{}".format(sid),
+                                 key="agent_sess_archive_{}".format(sid), type="tertiary"):
+                if st.session_state.get("agent_session_id") == sid:
+                    st.session_state.agent_session_id = None
+                    st.session_state.agent_view = []
+                    st.session_state.messages = []
+                toggle_agent_session_archived(sid)
+                st.rerun()
+
+        # 右键菜单（components.html iframe 内执行，操作 parent DOM）
+        with st.sidebar:
+            components_html(_ctx_menu_js(), height=0)
+    else:
         st.sidebar.caption("还没有会话记录")
+
+    # ===== 回收站（归档会话：恢复 / 彻底删除） =====
+    archived = [s for s in list_agent_sessions(limit=50, include_archived=True)
+                if s.get("archived")]
+    if archived:
+        with st.sidebar.expander("🗑️ 回收站（{}）".format(len(archived)), expanded=False):
+            for s in archived:
+                sid = s.get("id")
+                title = (s.get("title") or "未命名会话")[:14]
+                c1, c2, c3 = st.columns([3, 1.2, 1.2])
+                c1.markdown(
+                    '<span style="font-size:12px;color:var(--text-3);">{}</span>'.format(title),
+                    unsafe_allow_html=True)
+                if c2.button("恢复", key="agent_unarchive_{}".format(sid)):
+                    toggle_agent_session_archived(sid)
+                    st.rerun()
+                if c3.button("删除", key="agent_del_{}".format(sid)):
+                    delete_agent_session(sid)
+                    st.rerun()
 
     # 底部：演示模式开关（低调节奏，不抢会话列表的视觉主体）
     st.sidebar.markdown("---")
@@ -79,6 +164,78 @@ def _render_session_sidebar():
              "适合还没有持仓数据的新人体验；不会写入真实数据库。",
     )
     st.sidebar.caption("v1.0 · invest-concierge © 2026")
+
+
+def _open_session(sid):
+    """载入指定会话到视口（历史会话点击续聊共用）"""
+    st.session_state.agent_session_id = sid
+    msgs = []
+    for m in _session_display_messages(sid):
+        msgs.append({"role": m["role"], "content": m["content"]})
+    st.session_state.agent_view = msgs
+    st.session_state.messages = msgs
+
+
+def _ctx_menu_js():
+    """会话行右键菜单 JS（components.html iframe 内执行，操作 parent DOM）。
+
+    contextmenu 命中 .sess-item → 自绘菜单（置顶/重命名/回收站）→
+    点击项触发对应隐藏 tertiary 按钮的原生点击（Streamlit 原生 rerun 通道；
+    iframe 改 parent.location 会被沙箱拦截，不可用）。
+    左键 .sess-item → 触发 hidden-open-<sid> 按钮（续聊）。
+    """
+    return """
+<script>
+(function () {
+  var doc = window.parent.document;
+  var old = doc.getElementById('ctxMenu'); if (old) old.remove();
+  var menu = doc.createElement('div');
+  menu.id = 'ctxMenu'; menu.className = 'ctx-menu';
+  menu.innerHTML = [
+    '<div class="ctx-item" data-act="pin">📌 置顶对话</div>',
+    '<div class="ctx-item" data-act="rename">✏️ 重命名会话</div>',
+    '<div class="ctx-item" data-act="archive">🗑️ 移到回收站</div>'
+  ].join('');
+  doc.body.appendChild(menu);
+  menu.style.display = 'none';
+
+  function trigger(sid, act) {
+    var btns = doc.querySelectorAll('[data-testid="stSidebar"] button');
+    var want = 'hidden-' + act + '-' + sid;
+    for (var i = 0; i < btns.length; i++) {
+      if ((btns[i].textContent || '').trim() === want) { btns[i].click(); return true; }
+    }
+    return false;
+  }
+
+  doc.addEventListener('contextmenu', function (e) {
+    var row = e.target.closest ? e.target.closest('.sess-item') : null;
+    if (!row) { menu.style.display = 'none'; return; }
+    e.preventDefault();
+    var sid = row.getAttribute('data-sid');
+    menu.style.display = 'block';
+    menu.style.left = Math.min(e.pageX, doc.documentElement.clientWidth - 170) + 'px';
+    menu.style.top = Math.min(e.pageY, doc.documentElement.clientHeight - 130) + 'px';
+    menu.querySelectorAll('.ctx-item').forEach(function (it) {
+      it.onclick = function (ev) {
+        ev.stopPropagation();
+        menu.style.display = 'none';
+        trigger(sid, it.getAttribute('data-act'));
+      };
+    });
+  }, true);
+
+  doc.addEventListener('click', function (e) {
+    if (menu.style.display === 'block' && !menu.contains(e.target)) {
+      menu.style.display = 'none';
+    }
+    var row = e.target.closest ? e.target.closest('.sess-item') : null;
+    if (!row) return;
+    trigger(row.getAttribute('data-sid'), 'open');
+  }, true);
+})();
+</script>
+"""
 
 
 def _session_display_messages(session_id, limit=40):
@@ -289,6 +446,10 @@ def _handle_prompt(prompt):
 
 
 def main():
+    # 库结构自愈：老库缺 pinned/archived 列时自动迁移（init_db 幂等，重复调用无副作用）
+    from data.database import init_db
+    init_db()
+
     # 左栏独占：新建对话 + 会话历史 + 底部演示模式（参考图式 agent 会话侧栏）
     _render_session_sidebar()
 
