@@ -40,6 +40,8 @@
 
 ¹ AI 对话与 AI 辩论需要配置 DeepSeek API Key（[注册地址](https://platform.deepseek.com/)，有免费额度）；**不配置 Key 时其余功能完整可用**。
 
+> 🚧 **开发中**：回测 / 定投 / 基金对比 / 涨停复盘等更多页面正在迭代（数据层函数已就绪，UI 接线中）；FastAPI 桥 + 前端重构同步推进（见 `docs/`）。
+
 ## 🚀 快速开始
 
 环境要求：**Python 3.9+**（Windows 安装时建议勾选 Add Python to PATH）
