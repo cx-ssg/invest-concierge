@@ -58,6 +58,13 @@ class MemoryCache:
                 del self._cache[key]
         return None
 
+    def contains(self, key):
+        """键是否存在（未过期）——区分'缓存 miss'与'缓存了 None'（评审修复 2026-09-03）"""
+        if key in self._cache:
+            item = self._cache[key]
+            return time.time() < item['expire_time']
+        return False
+
     def set(self, key, value, ttl):
         """设置缓存"""
         self._cache[key] = {
@@ -105,10 +112,9 @@ def cached(ttl, cache_failures=False, failure_ttl=300):
         def wrapper(*args, **kwargs):
             # 生成缓存键
             key = "{}:{}:{}".format(func.__name__, str(args), str(sorted(kwargs.items())))
-            # 尝试获取缓存
-            result = _cache.get(key)
-            if result is not None:
-                return result
+            # 尝试获取缓存——用 contains 区分 miss 与缓存了 None（评审修复 2026-09-03）
+            if _cache.contains(key):
+                return _cache.get(key)
             # 执行函数
             result = func(*args, **kwargs)
             # 存入缓存

@@ -39,14 +39,9 @@ def get_market_index():
         # 2026-09-03: 用 fetch_with_timeout 硬限 5s——东财弱网时 akshare 内部重试可达 8s+，
         # 到点立即降级切腾讯，不让整页等待（工具注释本就为此设计）
         df = fetch_with_timeout(ak.stock_zh_index_spot_em, timeout=5)
-        print("[DEBUG] stock_zh_index_spot_em 返回: {}, 列名: {}".format(df.shape, list(df.columns)))
         if df is None or df.empty:
-            print("[DEBUG] df为空或None，走fallback")
-            fallback = _get_market_index_fallback()
-        if not fallback:
-            # 东财也不可达 → 切腾讯源（实测可用）
-            fallback = _get_market_index_tencent()
-        return fallback
+            # 东财 akshare 失败 → fallback（腾讯，评审修复：只在此分支才需要 fallback）
+            return _get_market_index_tencent()
 
         result = []
         # 列名映射：代码、名称、最新价、涨跌额、涨跌幅

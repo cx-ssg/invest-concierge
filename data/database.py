@@ -19,6 +19,9 @@ from utils.common import is_safe_write_path
 def get_conn():
     """获取 SQLite 数据库连接"""
     conn = sqlite3.connect(DB_FILE)
+    # 评审修复 2026-09-03：WAL + busy_timeout 防并发 database locked（Streamlit rerun 多线程）
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -411,9 +414,29 @@ def load_funds():
     return load_my_funds()
 
 
+def _invalidate_funds_cache():
+    """评审修复 2026-09-03：写持仓后失效相关缓存，防 60s 缓存窗口丢首笔。
+    同时清 Streamlit 的 st.cache_data（若在 UI 环境）与 data/cache 的自建缓存。"""
+    try:
+        from data.cache import _cache
+        _cache.clear_by_prefix('load_funds')
+        _cache.clear_by_prefix('load_my_funds')
+    except Exception:
+        pass
+    try:
+        import streamlit as st
+        if hasattr(st, 'cache_data') and callable(getattr(load_funds, 'clear', None)):
+            load_funds.clear()
+    except Exception:
+        pass
+
+
 def save_funds(funds):
     """兼容旧接口：同 save_my_funds()"""
-    return save_my_funds(funds)
+    result = save_my_funds(funds)
+    # 评审修复 2026-09-03：写后失效 load_funds 缓存（否则 60s 内连加两笔丢首笔）
+    _invalidate_funds_cache()
+    return result
 
 
 # ==================== 投资日记操作 (SQLite) ====================
