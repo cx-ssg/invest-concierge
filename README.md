@@ -1,10 +1,10 @@
-# 投资私人管家 · invest-concierge
+# invest-concierge · 投资私人管家
 
 [![CI](https://github.com/cx-ssg/invest-concierge/actions/workflows/ci.yml/badge.svg)](https://github.com/cx-ssg/invest-concierge/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
-> A股基金 AI 私人顾问 —— 开源 · 免费数据 · 打开即用
+> A股/基金 AI 私人顾问 —— 开源 · 免费数据 · 桌面版 / 网页版双形态
 >
 > **投资私人管家（Invest Concierge）**：把财报、估值、资金面翻译成普通人能看懂的话。
 
@@ -12,75 +12,160 @@
 
 - 本项目仅供**学习与技术研究**，不构成任何投资建议或操作依据。
 - 股市有风险，入市需谨慎；据此操作，风险自担。
-- 项目数据来自公开免费接口（AkShare / 天天基金 / 新浪财经），可能存在延迟或错误，请以官方披露信息为准。
+- 项目数据来自公开免费接口（AkShare / 天天基金 / 新浪财经等），可能存在延迟或错误，请以官方披露信息为准。
 
-## 🖼️ 界面预览
+## ✨ 这是什么
 
-![功能导览](assets/screenshots/demo-tour.gif)
+一个开源的 **A股与基金分析助手**：不依赖任何收费数据源，克隆下来就能跑。内置 AI 能力（可选接入 DeepSeek），把财报、估值、资金面翻译成普通人能看懂的话。
 
-| 基金持仓管理 | 股票综合诊断 | 双轨导航 |
-|---|---|---|
-| ![基金轨](assets/screenshots/02-dashboard-holdings.png) | ![诊断](assets/screenshots/09-diagnosis-overview.png) | ![导航](assets/screenshots/07-track-stock-sidebar.png) |
+当前已上线 6 个 live 页面（React 前端，桌面壳 / 浏览器双入口）：
 
-## 这是什么
+| 页面 | 说明 |
+|---|---|
+| 💬 AI 对话（首页） | 投资问答助手：SSE 流式输出 + 模型原生思考流 + 工具调用时间线（11 个工具：行情/财报/持仓/日记…） |
+| 📊 基金 · 资产总览 | 总资产与持仓收益一览 |
+| 💼 基金 · 持仓管理 | 录入持仓，自动追踪收益与当日实时估值 |
+| 📔 基金 · 投资日记 | 记录每笔操作的理由，与未来的自己对话 |
+| 🩺 股票 · 综合诊断 | 基本面 / 排雷 / 护城河 / 估值 / 财报三表 / AI 辩论 六引擎体检 |
+| ⚙️ 设置 | API Key 状态 / 应用信息 |
 
-**投资私人管家**是一个基于 Streamlit 的开源 A股/基金分析助手：不依赖任何收费数据源，克隆下来就能跑。内置 AI 能力（可选接入 DeepSeek），把财报、估值、资金面翻译成普通人能看懂的话。
+> 🚧 **开发中**：回测 / 定投 / 基金对比 / 涨停复盘等更多页面在路线图中迭代（见 [docs/ROADMAP.md](docs/ROADMAP.md)，欢迎提 issue）。
 
-**双轨导航**：主界面右上角一键切换「📊 基金」/「📈 股票」两大专栏，侧边栏随轨变化，干净不杂乱。
+## 🚀 快速开始（三种方式，任选其一）
 
-## ✨ 当前功能
+环境要求：**Python 3.9+**（Windows 安装时勾选 *Add Python to PATH*）。
 
-| 功能 | 说明 | 状态 |
-|---|---|---|
-| 💼 基金持仓管理 | 录入持仓，自动追踪收益与当日实时估值 | ✅ |
-| 📊 资产总览 | 总资产与持仓收益一览 | ✅ |
-| 📔 投资日记 | 记录每笔操作的理由，与未来的自己对话 | ✅ |
-| 💬 AI 对话 | 接入 DeepSeek 的投资问答助手（含工具调用） | ✅ 可选¹ |
-| 🩺 股票综合诊断 | 财报 / 排雷 / 护城河 / 估值 / 三表 多引擎体检 + AI 多角色辩论 | ✅ |
+### 方式一：普通用户 —— 桌面版（推荐，双击即用）
 
-¹ AI 对话与 AI 辩论需要配置 DeepSeek API Key（[注册地址](https://platform.deepseek.com/)，有免费额度）；**不配置 Key 时其余功能完整可用**。
+```bash
+# 1. 安装依赖（只需一次）
+pip install -r requirements.txt
+```
 
-> 🚧 **开发中**：回测 / 定投 / 基金对比 / 涨停复盘等更多页面正在迭代（数据层函数已就绪，UI 接线中）；FastAPI 桥 + 前端重构同步推进（见 `docs/`）。
+```text
+# 2. 双击 desktop\start.bat
+```
 
-## 🚀 快速开始
+启动后会自动完成：内嵌 FastAPI 后端（127.0.0.1:8000，被占用时自动换空闲端口）→ 打开原生桌面窗口（pywebview 渲染前端）→ 关窗最小化到系统托盘，托盘「退出」结束程序。
 
-环境要求：**Python 3.9+**（Windows 安装时建议勾选 Add Python to PATH）
+- 桌面上不了/没图形环境也别慌：`desktop\launcher.py` 会自动回退为**浏览器模式**，功能零损失。
+- 预打包 exe 将随 GitHub Releases 提供（当前请用方式一/二）。
+
+### 方式二：开发者 —— 源码直接跑
 
 ```bash
 git clone https://github.com/cx-ssg/invest-concierge.git
 cd invest-concierge
 pip install -r requirements.txt
+
+# 构建前端（生产模式产物 frontend/dist；构建用相对 /api，任意端口同源可用）
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 桌面版（等价于 start.bat）
+python desktop\launcher.py
+
+# 或纯浏览器模式（不起 GUI）
+python desktop\launcher.py --browser
 ```
 
-配置 AI Key（可选）：复制 `local_env.bat.example` 为 `local_env.bat`，填入你的 DeepSeek API Key。
-
-启动：
+前端开发（热更新）：
 
 ```bash
-# Windows：双击 start.bat，或
-python -m streamlit run app.py
+# 终端 1：起 Vite dev server
+cd frontend && npm run dev
+
+# 终端 2：桌面壳指向 dev server
+python desktop\launcher.py --mode dev
 ```
 
-浏览器会自动打开 http://localhost:8501 。
+### 方式三：纯网页模式
+
+```bash
+# 前提：已执行过 npm run build（frontend/dist 存在）
+uvicorn server.main:app --host 127.0.0.1 --port 8000
+```
+
+浏览器打开 **http://127.0.0.1:8000** 即可。
+
+## 🔑 配置 DeepSeek API Key（可选）
+
+AI 对话与诊断 AI 辩论需要 Key；**不配置时其余功能完整可用**（无 Key 会在页面显示引导卡，不会报错）。
+
+1. 到 [DeepSeek 开放平台](https://platform.deepseek.com/) 注册并创建 API Key（有免费额度）。
+2. **复制 `.env.example` 为根目录 `.env`，填入你的 Key：**
+
+```bash
+# Windows PowerShell
+Copy-Item .env.example .env
+# 然后编辑 .env，把 DEEPSEEK_API_KEY= 后面填上你的 Key
+```
+
+```text
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
+```
+
+> ✅ `.env` 已被 `.gitignore` 忽略，真实 Key **不会**被提交到仓库；`.env.example` 只是不含密钥的模板。
+> 💡 也可以不建 `.env`，直接设置系统环境变量 `DEEPSEEK_API_KEY`（系统变量优先级更高）。
 
 ## 🏗️ 架构
 
 ```mermaid
-flowchart TD
-    A[app.py] --> B[web_agent.py 路由]
-    B --> C[pages/ 21 模块<br/>v1.0 渲染 6 个 live 页]
-    C --> D[ui_components/ 组件]
-    C --> E[utils/ 工具<br/>ai_helper AI引擎]
-    D --> F[data/ 14 数据模块]
-    E --> F
-    F --> G[AkShare / 天天基金 / 新浪]
-    F --> H[(SQLite 本地库)]
-    E --> I[DeepSeek API 可选]
+flowchart LR
+    subgraph 客户端
+      A[桌面壳<br/>pywebview + 托盘]
+      B[浏览器]
+    end
+    A --> C[FastAPI · 127.0.0.1]
+    B --> C
+    C --> H[frontend/dist<br/>React 静态页面]
+    C --> D[services/ 业务服务层]
+    D --> E[data/ 数据层<br/>AkShare/新浪/腾讯/东财 免费源]
+    D --> F[(SQLite 本地库)]
+    D --> G[DeepSeek API · 可选]
 ```
 
-**数据层**：`data/` 下 14 个模块覆盖基金/股票行情、财报、估值、资金流、情绪、涨停复盘、护城河、财务排雷等；统一走 `cache.py` 内存缓存 + fallback 降级。
+- **前端**：React 19 单页应用（三区壳：标题栏 / 侧边栏 / 状态栏），通过 HTTP + SSE 与后端通信。
+- **后端**：FastAPI 提供 REST（持仓/日记/诊断/设置）+ SSE（AI 对话流式事件：`status → reasoning → tool_start/tool_end → done`）。
+- **数据层**：`data/` 模块统一走缓存 + fallback 降级（弱网自动切备用源，失败显示「--」不崩溃）。
+- **Agent 引擎**：`utils/agent_core.py` 工具注册表（晚绑定 importlib）+ 8 轮规划循环，`utils/agent_memory.py` 会话摘要注入。
 
-**AI 引擎**：`utils/ai_helper.py` 支持工具调用（Tool Calling），多角色分析（基本面/技术/情绪/风控 → 决策委员会主席）产出带评级的辩论结论。
+## 📁 目录结构
+
+```text
+invest-concierge/
+├─ server/            FastAPI 路由 + frontend/dist 静态托管（入口：server.main:app）
+├─ services/          业务服务层（agent / diagnosis / holdings / diary / settings / status）
+├─ frontend/          React 19 前端（Vite + TypeScript + Tailwind v4）→ 构建产物 dist/
+├─ desktop/           桌面壳（launcher.py 主入口 / backend.py 内嵌 uvicorn / tray.py 托盘 / start.bat）
+├─ data/              数据层（AkShare 等免费数据源 + SQLite 持久化 + 缓存/降级）
+├─ utils/             AI 引擎与 Agent（ai_helper / agent_core 工具注册表 / agent_memory）
+├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
+├─ tests/             110 个 pytest 用例（含 M0 桥 / 工具注册表 / 记忆 / 排雷 / 估值）
+├─ assets/            设计素材（mockups）
+├─ .env.example       环境变量模板（复制为 .env 使用）
+├─ requirements.txt   Python 依赖
+└─ docs/              文档（架构 / 路线图 / 贡献指南 / 验收记录）
+```
+
+## 🧰 技术栈
+
+| 层 | 技术 |
+|---|---|
+| 后端 | FastAPI + uvicorn + pydantic（REST + SSE 流式） |
+| 前端 | React 19 + Vite 8 + TypeScript + Tailwind CSS v4 |
+| 桌面 | pywebview（WebView2）+ pystray 托盘 + Pillow |
+| 数据 | AkShare（免费行情/财报/估值）+ SQLite + pandas / numpy |
+| AI | DeepSeek API（OpenAI 兼容 SDK；工具调用 + 推理思考流） |
+
+## ⚠️ 已知限制
+
+- **免费数据源波动**：行情/财报来自免费公开接口，网络弱或被限速时自动 fallback（如腾讯/新浪/百度），数据可能延迟或缺失；akshare 接口随版本变动，页面一律降级显示「--」，不会崩溃。
+- **桌面壳平台**：依赖 Edge WebView2 Runtime（Win10/11 一般自带）；无图形环境或缺少 pywebview 时自动回退浏览器模式。Linux/macOS 建议直接使用**网页模式**。
+- **AI 依赖网络与 Key**：未配置 DeepSeek Key 时 AI 功能展示引导卡；弱网下 AI 流式对话可能超时。
+- **当前 live 页面 6 个**：其余规划页（回测/定投/基金对比等）数据层函数已就绪，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 🧭 差异化
 
@@ -88,16 +173,19 @@ flowchart TD
 |---|---|---|
 | 数据源 | 全免费（AkShare 等） | 常需付费 Key |
 | 上手 | 克隆即跑，零配置可用 | 需自己搭环境 |
-| AI | 多角色辩论（非单问答） | 多为单轮问答 |
-| 体检 | 排雷 8 区 + 护城河 6 维 + 估值 | 多为单指标展示 |
+| AI | 多角色辩论 + 工具调用 + 思考流（非单问答） | 多为单轮问答 |
+| 体检 | 排雷 + 护城河 6 维 + 估值分位 + 三表 | 多为单指标展示 |
+
+## 🧪 测试与质量
+
+- 后端：`pytest tests/`（110 用例，全部通过）
+- 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）
+- 桌面壳：`python desktop\smoke_test.py`（依赖 / dist 产物 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）
+- CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）+ gitleaks 密钥扫描
 
 ## 🤖 Built with AI
 
-本项目通过多 Agent 协作开发（AI 辅助编程工作流）：规划拆解 → 模块化实现 → 测试先行 → 独立审计。涉及技能：TDD / 安全加固 / CI 门禁 / 文档蒸馏。
-
-## 🧭 开发路线（Roadmap）
-
-见 [docs/ROADMAP.md](docs/ROADMAP.md)（占位功能陆续点亮中，欢迎提 issue）。
+本项目通过多 Agent 协作开发（AI 辅助编程工作流）：规划拆解 → 模块化实现 → 测试先行 → 独立审计。
 
 ## 📜 文档
 
