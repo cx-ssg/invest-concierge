@@ -461,13 +461,14 @@ def main():
         return
 
     # 中央对话主体 + 右侧功能面板（功能在右）
+    # 比例 [4, 1.4]：1600+ 宽屏下右栏 ≈340px（两列功能格不挤行），窄屏自动缩
     # 思考链/气泡必须渲染在 col_main 内（Agent 侧·左）。chat_input 顶层提交后
     # 暂存 pending_prompt 再 rerun，由本列在既有消息之后渲染：
     # - 顶层直接处理 → 状态卡渲染到页面底部全宽（首个 bug）
     # - 列内调 chat_input → 输入框内联卡在页面中部不固定底部（第二个坑）
     pending = st.session_state.pop("pending_prompt", None)
 
-    col_main, col_side = st.columns([5, 1.15], gap="medium")
+    col_main, col_side = st.columns([4, 1.4], gap="medium", vertical_alignment="top")
 
     with col_main:
         view = st.session_state.get("agent_view") or []

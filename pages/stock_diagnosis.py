@@ -204,7 +204,7 @@ def _render_overview(data):
 
     header = "{}（{}）".format(name, code) if name else code
     if stock_info and price:
-        st.subheader("{}　现价 {} 元".format(header, _fmt_num(price)))
+        st.subheader("{}　现价 ¥{}".format(header, _fmt_num(price)))
     else:
         st.subheader(header)
         st.warning("该股票可能停牌或无行情数据，以下为财务口径数据（如有）。")
@@ -436,7 +436,7 @@ def _render_valuation_tab(data):
             "{}　（安全边际 {}%）".format(status, _fmt_num(val.get("margin_of_safety"))),
             color)
         st.caption(
-            "买入参考价 {} 元 / 卖出参考价 {} 元；有效估值方法 {} / {}。"
+            "买入参考价 ¥{} / 卖出参考价 ¥{}；有效估值方法 {} / {}。"
             "行情 60s 缓存，估值与东财同源、可能有延迟。".format(
                 _fmt_num(val.get("buy_price")), _fmt_num(val.get("sell_price")),
                 val.get("valid_methods", 0), val.get("total_methods", 5)))
@@ -477,7 +477,7 @@ def _render_valuation_tab(data):
     for r in results:
         fair = r.get("fair_price")
         dev = r.get("deviation")
-        title = "{}｜合理价 {} 元".format(r.get("method_name", ""), _fmt_num(fair))
+        title = "{}｜合理价 ¥{}".format(r.get("method_name", ""), _fmt_num(fair))
         if dev is not None:
             title += "（偏离 {}%）".format(_fmt_num(dev))
         with st.expander(title, expanded=False):
@@ -617,7 +617,7 @@ def _build_stock_data(data):
                    if percentile and percentile.get("pe") is not None
                    else "历史分位获取失败，PE 为相对合理 PE 口径")
 
-    valuation_text = "PE {}/ PB {}/ 股息率 {}/ 综合估值: {}（合理价 {} 元）".format(
+    valuation_text = "PE {}/ PB {}/ 股息率 {}/ 综合估值: {}（合理价 ¥{}）".format(
         _fmt_num(fund_raw.get("pe")), _fmt_num(fund_raw.get("pb")),
         _fmt_pct(fund_raw.get("dividend_rate")),
         val.get("valuation_status", "--"), _fmt_num(val.get("avg_fair_price")))
@@ -636,7 +636,7 @@ def _build_stock_data(data):
         _fmt_pct(latest.get("debt_ratio")), _fmt_yi(latest.get("operating_cf")))
 
     return {
-        "现价/市值": "{} 元 / {}（行情 60s 缓存）".format(_fmt_num(price), market_cap_text),
+        "现价/市值": "¥{} / {}（行情 60s 缓存）".format(_fmt_num(price), market_cap_text),
         "基本面": fundamentals_text,
         "估值": valuation_text + "；" + pe_pct_text,
         "排雷": minefield_text,
