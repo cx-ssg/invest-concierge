@@ -136,16 +136,17 @@ def _get_market_index_tencent():
             fields = payload.split('~')
             if len(fields) < 6:
                 continue
-            # 腾讯字段: 0=未知,1=名字,2=代码,3=当前价,4=昨收,5=今开,6=成交量...
-            # 涨跌额/涨跌幅在更后面（约31/32），此处兼容省略：用 3 价格 + 0 变动
+            # 腾讯字段（实测 2026-09-03）：[0]未知 [1]名字 [2]代码 [3]当前价 [4]涨跌额 [5]涨跌幅%
             name = fields[1] if len(fields) > 1 else code_part
             price = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[3], default=0) if len(fields) > 3 else 0
+            change = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[4], default=0) if len(fields) > 4 else 0
+            change_pct = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[5], default=0) if len(fields) > 5 else 0
             result.append({
                 'name': name,
                 'code': code_part,
                 'price': price,
-                'change': 0,
-                'change_percent': 0,
+                'change': change,
+                'change_percent': change_pct,
             })
         return result
     except Exception as e:
