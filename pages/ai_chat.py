@@ -300,11 +300,17 @@ def main():
         return
 
     # 中央对话主体 + 右侧功能面板（功能在右）
+    # 思考链/气泡必须渲染在 col_main 内（Agent 侧·左）。chat_input 顶层提交后
+    # 暂存 pending_prompt 再 rerun，由本列在既有消息之后渲染：
+    # - 顶层直接处理 → 状态卡渲染到页面底部全宽（首个 bug）
+    # - 列内调 chat_input → 输入框内联卡在页面中部不固定底部（第二个坑）
+    pending = st.session_state.pop("pending_prompt", None)
+
     col_main, col_side = st.columns([5, 1.15], gap="medium")
 
     with col_main:
         view = st.session_state.get("agent_view") or []
-        if not view:
+        if not view and not pending:
             # 新会话空状态：一行主文案 + 横排紧凑建议 chips（点击即问）
             st.markdown(
                 '<div class="empty-state" style="padding:34px 10px 16px;">'
@@ -319,20 +325,22 @@ def main():
                                 (c3, EXAMPLE_QUESTIONS[2], "chip_c")):
                 with col:
                     if st.button(q, key=key, use_container_width=True):
-                        _handle_prompt(q)
+                        st.session_state.pending_prompt = q
                         st.rerun()
         else:
             _render_view()
 
-        # chat_input 必须在 col_main 上下文内处理——否则 st.status 思考链和
-        # 气泡会渲染到主区左侧全宽（脱离列上下文 = 第一条消息思考链跑左边 bug）
-        prompt = st.chat_input("请输入问题，例如：帮我诊断一下 600519")
-        if prompt:
-            _handle_prompt(prompt)
-            st.rerun()
+        if pending:
+            _handle_prompt(pending)
 
     with col_side:
         _render_right_panel()
+
+    # chat_input 顶层调用 = 固定在页面底部（聊天应用标准形态）
+    prompt = st.chat_input("请输入问题，例如：帮我诊断一下 600519")
+    if prompt:
+        st.session_state.pending_prompt = prompt
+        st.rerun()
 
     st.caption("⚠️ 风险提示：AI 分析仅供参考，不构成投资建议。工具数据来自 AkShare，可能存在延迟。")
 

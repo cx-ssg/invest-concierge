@@ -527,7 +527,14 @@ def inject_global_css() -> None:
     .msg-agent pre { overflow-x: auto; }
     .msg-agent ul, .msg-agent ol { padding-left: 1.2em; margin: .3em 0; }
 
-    /* ===== Agent 思考链（模型原生 reasoning_content） ===== */
+    /* ===== Agent 思考链（模型原生 reasoning_content）=====
+       与 Agent 气泡同视觉列：思考流块限宽 86% 靠左（Agent 侧）。
+       通过 :has(.think-flow) 只命中思考链容器（诊断页等普通 expander 不受影响） */
+    [data-testid="stExpander"]:has(.think-flow),
+    [data-testid="stExpander"]:has(.think-evt) {
+        max-width: 86%;
+    }
+    [data-testid="stExpanderDetails"] .think-flow,
     .think-chain .think-flow,
     .think-flow {
         font-size: 12px;
