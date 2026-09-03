@@ -577,10 +577,11 @@ def inject_global_css() -> None:
     /* 左键承接的隐藏按钮（tertiary 类型仅用于此；JS 找 textContent 触发原生点击） */
     section[data-testid="stSidebar"] button[kind="tertiary"] { display: none !important; }
 
-    /* ===== 右键菜单（自绘 .ctx-menu） ===== */
+    /* ===== 右键菜单（自绘 .ctx-menu） =====
+       z-index 压过 Streamlit sidebar 的 999991（否则菜单被侧栏层盖住/视觉重叠） */
     .ctx-menu {
         position: absolute;
-        z-index: 9999;
+        z-index: 9999990;
         min-width: 150px;
         background: var(--surface-2);
         border: 1px solid var(--line-strong);
@@ -597,6 +598,12 @@ def inject_global_css() -> None:
         cursor: pointer;
     }
     .ctx-item:hover { background: var(--surface); color: var(--text-1); }
+
+    /* stDialog（重命名弹窗）：Streamlit 给 sidebar 打 999991，而 stDialog 的
+       遮罩容器 z-index 更低 → 弹窗与侧栏内容视觉重叠。抬到侧栏之上。 */
+    [data-testid="stDialog"] {
+        z-index: 9999950 !important;
+    }
     [data-testid="stChatInput"] textarea, [data-testid="stChatInput"] > div {
         background: var(--surface-2) !important;
         border: 1px solid var(--line) !important;
