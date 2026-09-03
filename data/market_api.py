@@ -4,7 +4,6 @@
 使用 AkShare 稳定接口替代原始 HTTP 请求
 """
 
-import streamlit as st
 import akshare as ak
 import pandas as pd
 import time
@@ -14,7 +13,7 @@ from datetime import datetime, timedelta
 
 from config import CACHE_TTL
 from data.cache import cached, CACHE_QUOTE, CACHE_VALUATION, CACHE_SECTOR
-from utils.common import safe_float_convert, safe_get, safe_get_dict, call_akshare_with_retry, safe_request, fetch_with_timeout
+from utils.common import safe_float_convert, safe_get, safe_get_dict, call_akshare_with_retry, safe_request, fetch_with_timeout, is_safe_public_url
 
 
 _INDEX_MAP = {
@@ -30,7 +29,6 @@ _INDEX_MAP = {
 
 # 行情缓存 5 分钟：TUN 代理拦截数据源时，过短 TTL 会让每次页面 rerun 都重新
 # 等满超时（交互卡顿的主因）；指数/板块本就是低频变化数据
-@st.cache_data(ttl=300)
 @cached(CACHE_QUOTE, cache_failures=True, failure_ttl=300)
 def get_market_index():
     """获取大盘指数数据 - 使用 AkShare stock_zh_index_spot_em"""
@@ -87,9 +85,7 @@ def _get_market_index_fallback():
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
     try:
-        resp = call_akshare_with_retry(lambda: __import__('requests').get(url, params=params, headers=headers, timeout=3))
-        if resp is not None:
-            print("[DEBUG] fallback HTTP状态: {}, 内容前200字符: {}".format(resp.status_code, resp.text[:200] if resp.text else ''))
+        resp = safe_request(url, params=params, headers=headers, timeout=3, max_retries=1)
         if resp is None:
             return []
         data = resp.json()
@@ -114,16 +110,17 @@ def _get_market_index_fallback():
 def _get_market_index_tencent():
     """腾讯行情 fallback：东财不可达时切腾讯（2026-09-03 实测可用）
     返回与主函数同结构：[{name, code, price, change, change_percent}]
+    走 safe_request（内置出网安全校验 + 2 次重试，与蛋卷估值同一通道）
     """
     url = "https://qt.gtimg.cn/q=s_sh000001,s_sz399001,s_sz399006,s_sh000300,s_sh000016,s_sh000905"
     try:
-        import urllib.request
-        req = urllib.request.Request(url, headers={
+        resp = safe_request(url, headers={
             'Referer': 'https://weixin/',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        })
-        with urllib.request.urlopen(req, timeout=3) as r:
-            body = r.read().decode('gbk', errors='ignore')
+        }, timeout=3, max_retries=1)
+        if resp is None:
+            return []
+        body = resp.text
         result = []
         # 腾讯格式: v_s_sh000001="1~上证指数~000001~3942.09~0.70~..."
         # 字段: 1名字 2代码 3现价 4涨跌额(?) 5涨跌额 6涨跌幅... 按 ~ 分割
@@ -138,9 +135,9 @@ def _get_market_index_tencent():
                 continue
             # 腾讯字段（实测 2026-09-03）：[0]未知 [1]名字 [2]代码 [3]当前价 [4]涨跌额 [5]涨跌幅%
             name = fields[1] if len(fields) > 1 else code_part
-            price = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[3], default=0) if len(fields) > 3 else 0
-            change = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[4], default=0) if len(fields) > 4 else 0
-            change_pct = __import__('utils.common', fromlist=['safe_float_convert']).safe_float_convert(fields[5], default=0) if len(fields) > 5 else 0
+            price = safe_float_convert(fields[3], default=0) if len(fields) > 3 else 0
+            change = safe_float_convert(fields[4], default=0) if len(fields) > 4 else 0
+            change_pct = safe_float_convert(fields[5], default=0) if len(fields) > 5 else 0
             result.append({
                 'name': name,
                 'code': code_part,
@@ -295,7 +292,6 @@ def _get_valuation_fallback():
         return []
 
 
-@st.cache_data(ttl=300)
 @cached(CACHE_SECTOR, cache_failures=True, failure_ttl=300)
 def get_hot_sectors():
     """获取热门板块涨跌幅 - 使用 AkShare stock_board_industry_name_em"""

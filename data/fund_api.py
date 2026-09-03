@@ -151,6 +151,42 @@ def compare_funds(fund_code1, fund_code2):
     return result
 
 
+def compare_funds_structured(fund_code1, fund_code2):
+    """基金对比的结构化版本（M0：返 JSON-ready dict 给 React/API；Markdown 版保留给 agent 工具）。
+
+    返回 {"ok": bool, "error": str, "funds": [info1, info2], "metrics": [...]}；
+    metrics 行形如 {"key","label","value1","value2"}。
+    """
+    info1 = get_fund_info(fund_code1)
+    info2 = get_fund_info(fund_code2)
+    if not info1 or not info2:
+        missing = []
+        if not info1:
+            missing.append(fund_code1)
+        if not info2:
+            missing.append(fund_code2)
+        return {
+            "ok": False,
+            "error": "获取基金数据失败，请检查基金代码是否正确：{}".format(", ".join(missing)),
+            "funds": [info1, info2],
+            "metrics": [],
+        }
+
+    def _num(v, default=None):
+        try:
+            return round(float(v), 4)
+        except (TypeError, ValueError):
+            return default
+
+    metrics = [
+        {"key": "dwjz", "label": "最新净值", "value1": _num(info1.get('dwjz')), "value2": _num(info2.get('dwjz'))},
+        {"key": "gsz", "label": "估算净值", "value1": _num(info1.get('gsz')), "value2": _num(info2.get('gsz'))},
+        {"key": "gszzl", "label": "今日涨跌(%)", "value1": _num(info1.get('gszzl')), "value2": _num(info2.get('gszzl'))},
+        {"key": "gztime", "label": "更新时间", "value1": info1.get('gztime', ''), "value2": info2.get('gztime', '')},
+    ]
+    return {"ok": True, "error": "", "funds": [info1, info2], "metrics": metrics}
+
+
 def calc_fund_metrics(fund_code, days=365):
     """计算基金的各种指标（收益率、最大回撤、波动率、夏普比率等）"""
     dates, values = get_fund_history(fund_code, days)
@@ -281,9 +317,37 @@ def backtest_strategy(fund_code, total_amount, months, strategy='dca'):
     return None
 
 
+def dca_result(fund_code, monthly_amount, months):
+    """定投回测的纯计算层（M0 拆分：无 Streamlit/无 matplotlib，可直接服务 API/测试）。
+
+    返回 dict：
+        fund_code/fund_name/monthly_amount/months/total_invest/
+        final_value/profit/profit_rate + dates/values/invest_line（曲线序列）
+    数据不足或代码错误时返回 None。
+    """
+    backtest = backtest_strategy(fund_code, monthly_amount * months, months, 'dca')
+    if not backtest:
+        return None
+    fund_info = get_fund_info(fund_code)
+    fund_name = fund_info.get('name', '未知基金') if fund_info else fund_code
+    return {
+        'fund_code': fund_code,
+        'fund_name': fund_name,
+        'monthly_amount': monthly_amount,
+        'months': months,
+        'total_invest': monthly_amount * months,
+        'final_value': backtest['final_value'],
+        'profit': backtest['profit'],
+        'profit_rate': backtest['profit_rate'],
+        'dates': backtest['dates'],
+        'values': backtest['values'],
+        'invest_line': backtest['invest_line'],
+    }
+
+
 def calc_dca(fund_code, monthly_amount, months):
-    """计算定投收益"""
-    result = backtest_strategy(fund_code, monthly_amount * months, months, 'dca')
+    """计算定投收益（M0：渲染与计算分离，本函数保留 UI 侧 Streamlit 渲染）"""
+    result = dca_result(fund_code, monthly_amount, months)
     if not result:
         import streamlit as st
         st.error("定投计算失败，请检查基金代码是否正确")
@@ -295,8 +359,7 @@ def calc_dca(fund_code, monthly_amount, months):
     matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
     matplotlib.rcParams['axes.unicode_minus'] = False
 
-    fund_info = get_fund_info(fund_code)
-    fund_name = fund_info.get('name', '未知基金') if fund_info else fund_code
+    fund_name = result.get('fund_name', fund_code)
 
     st.subheader("📊 {} 定投回测结果".format(fund_name))
     st.caption("每月定投 {} 元，共 {} 个月（{} 年）".format(monthly_amount, months, months // 12))

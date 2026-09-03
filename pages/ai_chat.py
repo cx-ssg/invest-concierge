@@ -163,6 +163,12 @@ def _render_session_sidebar():
         help="开启后 Agent 将基于内置示例持仓（白酒/消费/沪深300）回答问题，"
              "适合还没有持仓数据的新人体验；不会写入真实数据库。",
     )
+    # M0：同步进程级开关（服务化后 _is_demo_mode 优先读模块 flag）
+    try:
+        from utils.ai_helper import set_demo_mode
+        set_demo_mode(bool(st.session_state.get("use_demo_funds", False)))
+    except Exception:
+        pass
     st.sidebar.caption("v1.0 · invest-concierge © 2026")
 
 

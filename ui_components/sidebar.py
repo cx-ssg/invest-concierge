@@ -33,85 +33,26 @@ import streamlit as st
 
 from config import API_KEY
 from data.market_api import get_market_index, get_hot_sectors
+from services.nav_service import (
+    PAGE_META,
+    TRACK_OPTIONS,
+    get_live_pages,
+    get_live_page_keys,
+)
+from services.nav_service import _TRACK_LABELS  # 侧栏轨道切换的显示名（唯一权威在 nav_service）
 from ui_components.holdings_card import render_holdings_card
 from ui_components.market_indicator import render_market_index, render_hot_sectors
 from utils.common import fetch_all_with_timeout
 
 logger = logging.getLogger(__name__)
 
+# ==================== 轨道归属结构（21 页全量 = ROADMAP 生成源） ====================
+# M0：PAGE_META/TRACK_OPTIONS/get_live_pages 已抽到 services/nav_service.py（唯一权威，
+# 服务端可独立 import）；本模块 re-export 保持旧引用兼容。
+
 # 侧边栏市场数据的最大等待秒数（超时即降级跳过，不阻塞整页——
 # 数据源被代理拦截/弱网时，否则首屏可能白等 1-2 分钟）
 SIDEBAR_FETCH_TIMEOUT = 8
-
-
-# ==================== 轨道归属结构（21 页全量 = ROADMAP 生成源） ====================
-
-_TRACK_ORDER = ("fund", "stock", "common")   # 结构顺序：基金轨 / 股票轨 / 两轨通用
-
-TRACK_OPTIONS = ("fund", "stock")            # 顶部双轨切换的可用轨道
-_TRACK_LABELS = {"fund": "📊 基金", "stock": "📈 股票"}
-
-# live 标志与轨道归属分离：轨道清单 = 全量 21 页；渲染集 = live=true 的页面
-PAGE_META = {
-    # 🟢 基金轨（10）
-    "fund": {
-        "label": "📊 基金",
-        "pages": [
-            {"key": "dashboard",        "label": "📊 资产总览", "live": True},
-            {"key": "portfolio",        "label": "💼 我的持仓", "live": True},
-            {"key": "diary",            "label": "📝 投资日记", "live": True},
-            {"key": "fund_search",      "label": "🔍 基金搜索", "live": False},
-            {"key": "market",           "label": "📉 市场行情", "live": False},
-            {"key": "compare",          "label": "📊 对比分析", "live": False},
-            {"key": "dingtou",          "label": "💰 定投管理", "live": False},
-            {"key": "dingtou_calc",     "label": "📐 定投计算器", "live": False},
-            {"key": "backtest",         "label": "⚡ 回测工具", "live": False},
-            {"key": "analysis",         "label": "📋 持仓分析", "live": False},
-        ],
-    },
-    # 🟢 股票轨（7）
-    "stock": {
-        "label": "📈 股票",
-        "pages": [
-            {"key": "stock_diagnosis",       "label": "🩺 综合诊断", "live": True},
-            {"key": "stock_search",          "label": "🔎 股票搜索", "live": False},
-            {"key": "stock_holdings",        "label": "📋 持仓股票", "live": False},
-            {"key": "watchlist",             "label": "⭐ 自选股", "live": False},
-            {"key": "stock_market_overview", "label": "🌡️ 市场全景", "live": False},
-            {"key": "stock_deep_analysis",   "label": "🩻 深度分析", "live": False},
-            {"key": "stock_tools",           "label": "🧰 投资工具箱", "live": False},
-        ],
-    },
-    # ⚙️ 两轨通用（4）
-    "common": {
-        "label": "⚙️ 通用",
-        "pages": [
-            {"key": "ai_chat",   "label": "💬 AI 对话", "live": True},
-            {"key": "settings",  "label": "⚙️ 系统设置", "live": True},
-            {"key": "profile",   "label": "👤 个人中心", "live": False},
-            {"key": "alert",     "label": "🔔 预警设置", "live": False},
-        ],
-    },
-}
-
-
-def get_live_pages(track=None):
-    """
-    返回 live 页面 [(key, label)]（v1.0 渲染集）。
-    track=None 时按轨道顺序（基金/股票/通用）返回全部。
-    """
-    tracks = (track,) if track else _TRACK_ORDER
-    pages = []
-    for t in tracks:
-        for page in PAGE_META[t]["pages"]:
-            if page.get("live"):
-                pages.append((page["key"], page["label"]))
-    return pages
-
-
-def get_live_page_keys(track=None):
-    """返回 live 页 key 列表（导航渲染与测试共用同一数据源）"""
-    return [key for key, _ in get_live_pages(track)]
 
 
 # ==================== 顶部双轨切换（主内容区右上角） ====================

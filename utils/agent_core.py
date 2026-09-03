@@ -14,6 +14,7 @@ Agent Core（UI 无关可测） - 声明式 Tool Registry + 带规划的 Agent �
 import importlib
 import json
 import sys
+import time
 from typing import Optional, List, Dict, Any
 
 from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
@@ -264,7 +265,7 @@ AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投�
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
               model=DEEPSEEK_REASONER_MODEL, temperature=0.7, max_tool_rounds=8,
-              continue_question=False, on_progress=None):
+              continue_question=False, on_progress=None, structured_progress=False):
     """带规划的 Agent 多轮执行循环（ai_chat / 诊断页"AI 追问"共用入口）。
 
     参数：
@@ -280,6 +281,9 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         on_progress: 进度回调 fn(stage, detail)——UI 实时思考链用，不传则无副作用。
             stage: "reasoning"（模型原生思考流文本）/ "tool"（工具调用）/
                    "writing"（组织最终回答）；detail 为人类可读描述
+        structured_progress: M0 纯增量开关——True 时额外发结构化事件：
+            ("tool_start", {"name", "arguments"}) / ("tool_end", {"name", "ok", "elapsed_ms"})
+            给 SSE/API 桥消费；默认 False 行为与旧版完全一致
 
     返回：
         {"type": "text", "content": "...", "tool_trace": [...], "session_id": id|None}
@@ -289,6 +293,13 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         if on_progress:
             try:
                 on_progress(stage, detail)
+            except Exception:  # noqa: BLE001 - 进度展示失败不影响主流程
+                pass
+
+    def _progress_structured(stage, payload):
+        if structured_progress and on_progress:
+            try:
+                on_progress(stage, payload)
             except Exception:  # noqa: BLE001 - 进度展示失败不影响主流程
                 pass
 
@@ -355,8 +366,16 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 args = {}
             _progress("tool", "{}({})".format(
                 name, ", ".join("{}={}".format(k, v) for k, v in list(args.items())[:2])))
+            _progress_structured("tool_start", {"name": name, "arguments": args})
             # 模块级名调用 → 测试可 patch agent_core.execute_ai_tool_v2
+            _t0 = time.time()
             output = execute_ai_tool_v2(name, args)
+            _ok = isinstance(output, str) and not output.startswith("工具执行失败")
+            _progress_structured("tool_end", {
+                "name": name,
+                "ok": _ok,
+                "elapsed_ms": int((time.time() - _t0) * 1000),
+            })
             tool_trace.append({"name": name, "arguments": args, "output": output})
             messages.append({
                 "role": "tool",

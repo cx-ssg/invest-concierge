@@ -5,7 +5,6 @@ AI 助手模块 - AI 调用、提示词、对话管理等
 """
 
 import json
-import streamlit as st
 from openai import OpenAI
 
 from config import DEEPSEEK_API_BASE, DEEPSEEK_MODEL, API_KEY
@@ -446,9 +445,23 @@ def seed_demo_funds():
     return dict(DEMO_FUNDS)
 
 
+# 演示模式进程级开关（M0：FastAPI 服务化后无 st.session_state，
+# Streamlit 端勾选时同步调 set_demo_mode；默认 False 与原行为一致）
+_demo_flag = False
+
+
+def set_demo_mode(enabled):
+    """设置演示模式（Streamlit 页面在开关变化时调用；服务层也可按请求头切换）"""
+    global _demo_flag
+    _demo_flag = bool(enabled)
+
+
 def _is_demo_mode():
-    """演示模式开关：ai_chat 侧边栏勾选 st.session_state.use_demo_funds"""
+    """演示模式开关：优先进程级 flag（服务层/测试），否则回落 st.session_state（Streamlit 兼容）"""
+    if _demo_flag:
+        return True
     try:
+        import streamlit as st
         return bool(st.session_state.get("use_demo_funds", False))
     except Exception:
         return False

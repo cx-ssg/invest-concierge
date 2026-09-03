@@ -115,6 +115,11 @@ def init_db():
         cursor.execute("ALTER TABLE fund_holdings ADD COLUMN cost_nav REAL DEFAULT 0")
     if "hold_shares" not in existing_cols:
         cursor.execute("ALTER TABLE fund_holdings ADD COLUMN hold_shares REAL DEFAULT 0")
+    if "note" not in existing_cols:
+        # save_fund_holding 写 note/added_date——老库实测缺这两列（M0 API 冒烟发现）
+        cursor.execute("ALTER TABLE fund_holdings ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+    if "added_date" not in existing_cols:
+        cursor.execute("ALTER TABLE fund_holdings ADD COLUMN added_date TEXT")
     if {"cost_nav", "buy_price"} <= existing_cols or "buy_price" in existing_cols:
         cursor.execute(
             "UPDATE fund_holdings "
@@ -406,27 +411,18 @@ def save_my_funds(funds):
 
 # ==================== 兼容旧接口 ====================
 
-import streamlit as st
-
-@st.cache_data(ttl=60)
 def load_funds():
-    """兼容旧接口：同 load_my_funds()"""
+    """兼容旧接口：同 load_my_funds()（M0：去 st.cache_data，内存缓存由调用方 data/cache 或服务层负责）"""
     return load_my_funds()
 
 
 def _invalidate_funds_cache():
     """评审修复 2026-09-03：写持仓后失效相关缓存，防 60s 缓存窗口丢首笔。
-    同时清 Streamlit 的 st.cache_data（若在 UI 环境）与 data/cache 的自建缓存。"""
+    M0：st.cache_data 已移除，只清 data/cache 的自建缓存。"""
     try:
         from data.cache import _cache
         _cache.clear_by_prefix('load_funds')
         _cache.clear_by_prefix('load_my_funds')
-    except Exception:
-        pass
-    try:
-        import streamlit as st
-        if hasattr(st, 'cache_data') and callable(getattr(load_funds, 'clear', None)):
-            load_funds.clear()
     except Exception:
         pass
 
@@ -507,6 +503,25 @@ def save_diary(entries):
         return True
     except Exception as e:
         print("保存投资日记失败：{}".format(e))
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def delete_diary_entry(entry_id):
+    """按 id 删除单条投资日记（M0：React 前端单条删除接口；参数绑定防注入）
+
+    返回 True=删到行，False=无此行或失败。
+    """
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM diary_entries WHERE id = ?", (entry_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print("删除投资日记失败：{}".format(e))
         conn.rollback()
         return False
     finally:

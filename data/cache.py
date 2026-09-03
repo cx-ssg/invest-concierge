@@ -5,6 +5,7 @@
 
 import time
 import functools
+import threading
 
 # ==================== 缓存时间常量（秒） ====================
 # 实时行情数据：60 秒
@@ -42,50 +43,57 @@ CACHE_MARKET = 60
 
 
 class MemoryCache:
-    """内存缓存类"""
+    """内存缓存类（线程安全：FastAPI 多线程并发下 dict 遍历期删除会抛 RuntimeError）"""
 
     def __init__(self):
         self._cache = {}
+        self._lock = threading.RLock()
 
     def get(self, key):
         """获取缓存"""
-        if key in self._cache:
-            item = self._cache[key]
-            if time.time() < item['expire_time']:
-                return item['value']
-            else:
-                # 过期删除
-                del self._cache[key]
+        with self._lock:
+            if key in self._cache:
+                item = self._cache[key]
+                if time.time() < item['expire_time']:
+                    return item['value']
+                else:
+                    # 过期删除
+                    del self._cache[key]
         return None
 
     def contains(self, key):
         """键是否存在（未过期）——区分'缓存 miss'与'缓存了 None'（评审修复 2026-09-03）"""
-        if key in self._cache:
-            item = self._cache[key]
-            return time.time() < item['expire_time']
+        with self._lock:
+            if key in self._cache:
+                item = self._cache[key]
+                return time.time() < item['expire_time']
         return False
 
     def set(self, key, value, ttl):
         """设置缓存"""
-        self._cache[key] = {
-            'value': value,
-            'expire_time': time.time() + ttl
-        }
+        with self._lock:
+            self._cache[key] = {
+                'value': value,
+                'expire_time': time.time() + ttl
+            }
 
     def clear(self):
         """清空所有缓存"""
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
 
     def clear_by_prefix(self, prefix):
         """按前缀清空缓存"""
-        keys_to_delete = [k for k in self._cache if k.startswith(prefix)]
-        for k in keys_to_delete:
-            del self._cache[k]
+        with self._lock:
+            keys_to_delete = [k for k in self._cache if k.startswith(prefix)]
+            for k in keys_to_delete:
+                del self._cache[k]
 
     @property
     def size(self):
         """当前缓存条目数"""
-        return len(self._cache)
+        with self._lock:
+            return len(self._cache)
 
 
 # 全局缓存实例
