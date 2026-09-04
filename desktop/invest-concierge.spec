@@ -21,6 +21,9 @@ if not os.path.isdir(DIST_DIR):
 
 datas = [
     (DIST_DIR, "frontend/dist"),
+    # akshare 自带数据文件（file_fold/calendar.json 等）——.py 之外的资源，
+    # hiddenimports 抓不到，漏收会让 exe 里行情/情绪全挂（M4b 实测踩坑）
+    (os.path.join(os.path.dirname(__import__("akshare").__file__), "file_fold"), "akshare/file_fold"),
     # 注意：不要把 ROOT/desktop 整目录打进去——含 .venv/pyinstaller_env 数十 MB
     # 会拖垮 analysis（曾致挂起）。desktop 下 py 脚本由 Analysis hiddenimports 收集。
 ]
