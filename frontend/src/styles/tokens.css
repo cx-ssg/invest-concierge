@@ -1,0 +1,57 @@
+/* ============================================================
+   invest-concierge 设计 token（唯一权威）
+   品牌定案（2026-09-03 拍板）：黑白浅/暗双主题先行——基础黑白画布看布局/层级，
+   强调色（金/青）后置；唯一保留的彩色 = A股涨跌语义色（红涨绿跌）。
+   Tailwind v4 桥接在 index.css 的 @theme 完成，色值不复制。
+   ============================================================ */
+
+:root {
+  /* 主题由 html[data-theme] 切换：dark（默认）/ light */
+  --bg: #141518;
+  --bg-sidebar: #101114;
+  --surface: #1d1e22;
+  --surface-2: #26272c;
+  --text-1: #e8e8ea;
+  --text-2: #9a9da3;
+  --text-3: #6b6e73;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.14);
+
+  /* A股语义色：红涨绿跌（唯一彩色，永不变品牌主题影响） */
+  --up: #f04438;
+  --down: #2dbe64;
+
+  /* 强调色后置位（M1 先用黑白画布；M2 若需要高亮态可启用，
+     当前默认 = 灰阶描边，不显彩色） */
+  --accent: var(--text-1);
+  --accent-soft: rgba(255, 255, 255, 0.08);
+
+  --radius: 8px;
+  --radius-sm: 4px;
+  --font-mono: Consolas, "Cascadia Mono", "JetBrains Mono", monospace;
+  --ease: cubic-bezier(0.2, 0.6, 0.3, 1);
+  --dur: 160ms;
+}
+
+html[data-theme="light"] {
+  --bg: #f7f7f8;
+  --bg-sidebar: #efeff1;
+  --surface: #ffffff;
+  --surface-2: #f0f0f2;
+  --text-1: #1a1b1e;
+  --text-2: #5c5f66;
+  --text-3: #9a9da3;
+  --line: rgba(0, 0, 0, 0.08);
+  --line-strong: rgba(0, 0, 0, 0.16);
+  --accent: var(--text-1);
+  --accent-soft: rgba(0, 0, 0, 0.06);
+  /* 涨跌色在浅底上加深一档保对比度 */
+  --up: #d92c20;
+  --down: #1e9e55;
+}
+
+/* 呼吸脉冲（状态栏"思考中"，克制动效唯一例外之一） */
+@keyframes engine-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

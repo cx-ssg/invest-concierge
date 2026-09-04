@@ -12,6 +12,7 @@ FastAPI 应用入口（M0）。
 """
 
 import os
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +42,9 @@ def create_app() -> FastAPI:
     app.include_router(settings.router)
 
     # M1：前端构建产物存在则托管（桌面壳/纯浏览器模式的 UI 入口）
-    _dist = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+    # 打包(exe)时 __file__ 指向 _MEIPASS 临时解包目录，dist 以 'frontend/dist' 打包在其中
+    _base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _dist = os.path.join(_base, "frontend", "dist")
     if os.path.isdir(_dist):
         from fastapi.staticfiles import StaticFiles
         app.mount("/", StaticFiles(directory=_dist, html=True), name="frontend")

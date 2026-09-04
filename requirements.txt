@@ -10,6 +10,8 @@ akshare>=1.18.0,<2
 openai>=1.0.0
 requests>=2.28.0
 matplotlib>=3.5.0
+# 根目录 .env 加载（复制 .env.example 为 .env 填 DEEPSEEK_API_KEY）
+python-dotenv>=1.0.0
 # ai_chat 消息气泡内渲染 Agent 的 Markdown 回复
 markdown>=3.4.0
 # M0 FastAPI 桥（React 前端 + 桌面壳的 API 层；uvicorn[standard] 带 windows 支持组件）
@@ -17,3 +19,7 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 # 路由层请求体校验（fastapi 强依赖，显式声明防单独安装环境缺件）
 pydantic>=2.6.0
+# M3 桌面壳：pywebview(WebView2 渲染 React) + pystray 托盘 + Pillow 托盘图标
+pywebview>=6.0
+pystray>=0.19
+pillow>=10.0

@@ -1,0 +1,174 @@
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+/* Tailwind v4 桥接：@theme 只做别名引用，色值唯一权威在 tokens.css */
+@theme {
+  --color-bg: var(--bg);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--text-1);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-hairline: var(--line);
+  --color-hairline-strong: var(--line-strong);
+  --color-rise: var(--up);
+  --color-fall: var(--down);
+  --color-accent: var(--accent);
+
+  --radius-card: 8px;
+  --radius-tile: 4px;
+}
+
+/* ===== 全局纪律（Reasonix 克制风）：零渐变 / 零阴影 / 数字等宽 ===== */
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+/* 数字一律等宽对齐（金额/涨跌/耗时） */
+.num,
+.tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 等宽小字（状态栏/日志/工具参数） */
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* 发丝线 */
+.hairline-b {
+  border-bottom: 1px solid var(--line);
+}
+.hairline-t {
+  border-top: 1px solid var(--line);
+}
+
+/* 滚动条：窄灰不抢戏（暗色主题下默认滚动条太亮） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Spinner 旋转（克制动效） */
+@keyframes engine-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 打字机光标脉冲 */
+.engine-caret {
+  display: inline-block;
+  width: 1px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--text-2);
+  animation: engine-pulse 1s var(--ease) infinite;
+}
+
+/* 输入中三点（呼吸错峰） */
+.engine-dot {
+  animation: engine-pulse 1.2s var(--ease) infinite;
+}
+
+/* Agent Markdown 渲染（表格/列表/引用，克制风） */
+.markdown-body {
+  font-size: 13px;
+  line-height: 1.75;
+}
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+.markdown-body p {
+  margin: 0.4em 0;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 0.8em 0 0.3em;
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--text-1);
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+.markdown-body li {
+  margin: 0.15em 0;
+}
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 12px;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--line);
+  padding: 3px 8px;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.markdown-body pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-x: auto;
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+}
+.markdown-body blockquote {
+  margin: 0.4em 0;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+  color: var(--text-2);
+}
+.markdown-body a {
+  color: var(--accent);
+}
