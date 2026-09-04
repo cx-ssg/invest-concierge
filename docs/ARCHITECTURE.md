@@ -1,59 +1,74 @@
 # 架构详解 · invest-concierge
 
-> 生成：2026-08-31（重写自旧 architecture_report.md，旧文档目录树已过时）
+> 生成：2026-09-08（M4 发布打磨同步为当前 FastAPI + React + 桌面壳架构；数据层/AI 引擎部分沿用原文档）
 
 ## 一、分层结构
 
 ```
-app.py                      入口（Streamlit 启动点）
- └─ web_agent.py            路由层：PAGES 字典 + 动态 importlib 加载
-     ├─ pages/              页面层（20 页，双轨导航渲染 live 集合）
-     ├─ ui_components/      UI 组件（sidebar 双轨 / holdings_card / data_table / styles）
-     ├─ utils/              工具（ai_helper AI 引擎 / common 安全 / chart / fund_utils）
-     └─ data/               数据层（14 模块：行情/财报/估值/资金/情绪/排雷/护城河）
+desktop/launcher.py          桌面壳入口（pywebview 原生窗口 + pystray 托盘）
+ ├─ desktop/backend.py       内嵌 uvicorn（127.0.0.1，优先 8000，被占自动换空闲端口/复用）
+ ├─ desktop/tray.py          系统托盘（关窗最小化，托盘「退出」结束）
+ └─ server/main.py           FastAPI 应用（REST + SSE + frontend/dist 静态托管）
+     ├─ server/routers/      core / holdings / diary / agent / diagnosis / settings
+     ├─ services/            业务服务层（diagnosis_service / agent_service / settings_service …）
+     ├─ utils/               ai_helper（LLM 入口）/ agent_core（工具注册表）/ agent_memory（会话记忆）
+     └─ data/                数据层（14 模块：行情/财报/估值/资金/情绪/排雷/护城河）
+         └─ SQLite (database.py) 持久化：持仓/自选/日记/预警
+
+frontend/                    React 19 单页前端（Vite + TypeScript + Tailwind v4）
+ ├─ src/pages/               6 个 live 页（ai_chat / settings / fund:dashboard,portfolio,diary / stock:stock_diagnosis）
+ ├─ src/features/            agent（SSE 状态机）/ diagnosis（6 tab）/ holdings
+ └─ dist/                    构建产物，由 server/main.py 挂载为静态根
 ```
 
-## 二、数据流
+## 二、请求流（前端 → 后端 → 数据）
 
 ```
-用户输入 → pages/ 页面 → data/ 模块 → (AkShare/新浪/天天基金 免费接口) → DataFrame
-                        ↓ 缓存
-                 SQLite (database.py) 持久化：持仓/自选/日记/预警
+React 页面 → REST/SSE(/api/*) → services/ → data/ 模块 → (AkShare/新浪/腾讯/东财 免费接口) → DataFrame
+                                  ↓ 缓存                        ↓ fallback
+                           data/cache.py TTL             弱网自动切备用源，失败降级显示「--」
+                           SQLite 持久化
 ```
 
-- 所有数据模块统一带**内存缓存**（cache.py TTL）与 **fallback**（接口失败降级），页面无原始接口调用。
-- 网络失败 → 显示友好提示而非崩溃（`is_safe_public_url` / `is_safe_write_path` 安全函数保证 URL/路径安全）。
+- FastAPI 只 bind 127.0.0.1（本机桌面壳/浏览器，不暴露局域网）；CORS 放行 Vite dev server 5173。
+- 前端按相对 `/api` 构建（VITE_API_BASE 默认空），FastAPI 同源托管，任意端口可用。
+- AI 对话走 SSE 流式事件契约：`status → reasoning×N → tool_start/tool_end → done`。
 
-## 三、AI 引擎（utils/ai_helper.py）
+## 三、AI 引擎（utils/ai_helper.py + agent_core.py）
 
 - `call_llm(prompt, tools, model)`：统一 LLM 入口，OpenAI SDK 兼容 DeepSeek API；支持工具调用；错误分级返回（timeout/connection/401/429）。
-- `multi_agent_stock_analysis(code, name, stock_data)`：**核心故事点**——
-  1. 4 位分析师独立分析（基本面📊 / 技术📈 / 情绪💬 / 风控🛡️）
-  2. 交易决策委员会主席组织辩论
-  3. 评级关键词抽取（强烈推荐/推荐/中性/谨慎/回避）
+- `agent_run(...)`：**规划循环**（默认最多 8 轮），Agent 通过 11 个工具（行情/财报/持仓/日记等）自主取数；每轮 error 回填须明说「数据不可得」。
+- `agent_memory`：会话消息持久化 + 满 8 轮摘要注入，最近 3 条摘要随对话带入。
+- 工具注册表晚绑定（importlib 按「模块.函数名」解析），存量数据函数无需改造即可被 Agent 调用。
 - 无 Key → 页面显示引导卡，不调用（避免空转）。
-- 输入 stock_data 为**字符串化摘要 dict**（规避 DataFrame/NaN 兼容问题）。
 
-## 四、双轨导航（ui_components/sidebar.py）
+## 四、双轨导航
 
-- `PAGE_META`：21 页**轨道归属**（基金轨10 / 股票轨7 / 通用4）——与渲染**解耦**，是 Roadmap 生成源。
-- 每页 `live` 标志决定是否进 **v1.0 渲染集**（基金3 + 股票1 + ai_chat + settings；占位页不渲染=不存在）。
-- 主页面右上角 `st.segmented_control`（📊基金/📈股票）切换 `session_state.track` → `st.rerun()`。
-- 侧边栏按轨渲染：当前轨 live 页 + ⚙️通用专区。
+- `utils`/`ui_components` 内的 `PAGE_META`：21 页轨道归属（基金轨 10 / 股票轨 7 / 通用 4）——与渲染解耦，是 Roadmap 生成源。
+- 新前端 6 页按 `/fund/*`、`/stock/*`、`/settings` 组织；旧 Streamlit 双轨导航（`ui_components/sidebar.py`）保留于 `pages/`（不参与新 UI）。
+- 占位页 live=false 不进导航（只隐藏不删除）。
 
-## 五、测试与质量
+## 五、桌面壳（desktop/）
 
-- `pytest`：44+ 用例（common 安全 / minefield 排雷 / valuation 估值 / multi_agent AI / navigation 双轨 / ai_tools）。
-- CI：GitHub Actions 双矩阵（Python 3.9 / 3.11），push 自动跑。
-- 发布前 `gitleaks detect` 防 key 泄露（`.env` / `local_env.bat` 已 gitignore）。
+- 端口策略：优先 8000（空闲则自起）→ 8000 上是本应用且已托管 dist 则复用 → 否则挑空闲端口。
+- 任何 GUI 环节不可用（缺 pywebview / 无 WebView2 / 窗口起不来）→ 提示 + 自动浏览器回退，后端继续跑，功能零损失。
+- 双击入口：`desktop/start.bat`（依赖自检 + 兼容 local_env.bat / .env 读 Key）。
 
-## 六、数据源说明
+## 六、测试与质量
+
+- `pytest tests/`：110 用例（工具注册表 / Agent 规划 / 记忆 / M0 桥 / 排雷 / 估值 / 导航），全绿。
+- 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）。
+- 桌面壳：`python desktop/smoke_test.py`（依赖 / dist 产物相对化 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）。
+- CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）pytest + gitleaks 密钥扫描。
+- 发布前 `gitleaks detect` 防 key 泄露（`.env` / `local_env.bat` 已 gitignore；`.env.example` 为无密钥模板）。
+
+## 七、数据源说明
 
 | 数据源 | 用途 | 性质 |
 |---|---|---|
 | AkShare | A 股行情/财报/资金/情绪 | 免费公开 |
 | 天天基金 | 基金净值/估值 | 免费公开 |
-| 新浪财经 | 股票行情 | 免费公开 |
+| 新浪/腾讯/百度 | 股票行情 fallback | 免费公开 |
 | DeepSeek API | AI 对话/辩论（可选） | 需 Key |
 
 *备注：akshare 接口可能随时间变动（如 v1.18.64 移除部分旧接口），页面已做优雅降级显示「数据缺失」，详见 docs/verification.md。*
