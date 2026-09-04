@@ -39,7 +39,26 @@ DB_FILE = "fund_agent.db"
 
 # ==================== API Key ====================
 def get_api_key():
-    """获取 DeepSeek API Key"""
-    return os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    """获取 DeepSeek API Key
+
+    优先级：系统环境变量 > 根目录 .env（load_dotenv 已并入环境变量）>
+    旧式 local_env.bat 兜底（bat 里 `set DEEPSEEK_API_KEY=...` 行）。
+    local_env.bat 用 Python 读而非 cmd call——bat 若含 UTF-8 中文注释，
+    cmd 以 GBK 解析会报"'xxx' 不是内部或外部命令"（2026-09-04 实测）。
+    """
+    key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if key:
+        return key
+    bat = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_env.bat")
+    if os.path.exists(bat):
+        try:
+            with open(bat, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.lower().startswith("set deepseek_api_key="):
+                        return line.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+    return ""
 
 API_KEY = get_api_key()
