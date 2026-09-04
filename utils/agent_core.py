@@ -83,8 +83,13 @@ TOOL_REGISTRY = {
     "load_funds": ToolDef(
         name="load_funds",
         module="utils.ai_helper",
-        fn="_load_funds_from_store",
-        description="查询用户当前的基金持仓列表（基金代码、名称、成本净值、市值、持有份额）。演示模式下返回内置示例持仓。",
+        fn="load_funds_snapshot",
+        description=(
+            "查询用户当前的基金持仓快照：每只基金的代码、名称、投入金额、成本净值、持有份额，"
+            "并附量化指标（近1周/1月/3月/6月/1年收益率、最大回撤、年化波动率、夏普比率，"
+            "前 6 只带指标，其余仅基础字段）。演示模式下返回内置示例持仓。"
+            "用户问\u201c我的持仓怎么样、帮我分析下我的基金\u201d时先用它。"
+        ),
         params={},
     ),
     # --- P0 诊断闭环 ---
@@ -133,10 +138,10 @@ TOOL_REGISTRY = {
     "compare_funds": ToolDef(
         name="compare_funds",
         module="data.fund_api",
-        fn="compare_funds",
+        fn="compare_funds_structured",
         description=(
-            "对比两只基金的基本情况（名称、最新净值、估算净值、今日涨跌幅）。"
-            "注意：本工具返回的是 Markdown 文本或错误提示字符串，不是 JSON 对象。"
+            "对比两只基金的基本情况：返回结构化对比（ok/error + funds 信息 + 指标行），"
+            "指标含最新净值、估算净值、今日涨跌幅、更新时间。"
         ),
         params={
             "fund_code1": {"type": "string", "description": "第一只基金 6 位代码，如 161725"},
@@ -180,6 +185,123 @@ TOOL_REGISTRY = {
         fn="load_diary",
         description="查询投资日记列表（按日期倒序）：日期、基金代码/名称、操作、金额、备注。",
         params={},
+    ),
+    # --- P1 对话能力升级（2026-09-04 拍板：21 页收敛为工具；全部晚绑定现成引擎函数）---
+    "search_fund": ToolDef(
+        name="search_fund",
+        module="data.fund_api",
+        fn="search_fund",
+        description="按关键词搜索基金（代码/名称/拼音缩写均可，如“白酒”、“161725”）。返回最多 50 条：代码、名称、类型。用户问“帮我找某类基金”时先用它。",
+        params={"keyword": {"type": "string", "description": "搜索关键词：基金代码/名称/拼音，如 白酒、161725、bb"}},
+        required=["keyword"],
+    ),
+    "search_stock": ToolDef(
+        name="search_stock",
+        module="data.stock_api",
+        fn="search_stock",
+        description="按关键词搜索 A 股股票（代码或名称，如“宁德”、“600519”）。返回最多 20 条：代码、名称。用户给出股票名而非代码时先用它换成代码。",
+        params={"keyword": {"type": "string", "description": "搜索关键词：股票代码或名称，如 宁德时代、600519"}},
+        required=["keyword"],
+    ),
+    "get_fund_metrics": ToolDef(
+        name="get_fund_metrics",
+        module="data.fund_api",
+        fn="calc_fund_metrics",
+        description="计算基金的量化指标：近1周/1月/3月/6月/1年各期收益率、最大回撤、年化波动率、夏普比率（无风险利率按2%）。评估“这只基金表现怎么样”时用。",
+        params={
+            "fund_code": {"type": "string", "description": "6 位基金代码，如 161725"},
+            "days": {"type": "integer", "description": "回看天数，默认 365（近1年）"},
+        },
+        required=["fund_code"],
+        none_error="未找到基金 {fund_code} 或历史数据不足",
+    ),
+    "get_fund_history": ToolDef(
+        name="get_fund_history",
+        module="data.fund_api",
+        fn="get_fund_history",
+        description="查询基金历史单位净值序列（返回日期+净值数组，可用于描述净值走势）。",
+        params={
+            "fund_code": {"type": "string", "description": "6 位基金代码，如 161725"},
+            "days": {"type": "integer", "description": "回看天数，默认 365"},
+        },
+        required=["fund_code"],
+        none_error="未找到基金 {fund_code} 的历史净值",
+    ),
+    "backtest_dca": ToolDef(
+        name="backtest_dca",
+        module="data.fund_api",
+        fn="dca_result",
+        description="基金定投回测：给定每月定投金额与月数，基于真实历史净值模拟，返回总投入、最终市值、盈亏与收益率。用户问“定投某基金能赚多少”时用（一次性买入请说明用回测工具的 lump_sum 思路，当前只支持定投）。",
+        params={
+            "fund_code": {"type": "string", "description": "6 位基金代码，如 161725"},
+            "monthly_amount": {"type": "number", "description": "每月定投金额（元），如 1000"},
+            "months": {"type": "integer", "description": "定投总月数，如 36"},
+        },
+        required=["fund_code", "monthly_amount", "months"],
+        none_error="基金 {fund_code} 历史数据不足，无法回测",
+    ),
+    "get_stock_info": ToolDef(
+        name="get_stock_info",
+        module="data.stock_api",
+        fn="get_stock_info",
+        description="查询个股实时行情：现价、今开/昨收/最高/最低、涨跌额与涨跌幅、成交量额、换手率、振幅、PE/PB。用户问“某股票现在多少钱”时用。",
+        params=_stock_code_param(),
+        required=["stock_code"],
+        none_error="未找到股票 {stock_code}（可能停牌或代码有误）",
+    ),
+    "get_stock_kline": ToolDef(
+        name="get_stock_kline",
+        module="data.stock_api",
+        fn="get_stock_kline",
+        description="查询个股 K 线数据（前复权 OHLC + 成交量，日/周/月线）。分析“最近走势是什么形态”时用；数据点较多时只描述趋势特征（如高低点、连续阳/阴线），不要逐日罗列。",
+        params={
+            "stock_code": {"type": "string", "description": "6 位股票代码，如 600519"},
+            "days": {"type": "integer", "description": "取最近 N 个交易日的数据，默认 60"},
+            "ktype": {"type": "string", "description": "K 线周期：daily=日K（默认）/ weekly=周K / monthly=月K"},
+        },
+        required=["stock_code"],
+        none_error="未找到股票 {stock_code} 的 K 线数据",
+    ),
+    "get_stock_moneyflow": ToolDef(
+        name="get_stock_moneyflow",
+        module="data.stock_api",
+        fn="get_stock_moneyflow",
+        description="查询个股最新资金流向：主力/大单/中单/小单净流入（元）与主力净流入占比。回答“主力资金在流入还是流出某股票”时用。",
+        params=_stock_code_param(),
+        required=["stock_code"],
+        none_error="未查询到 {stock_code} 的资金流向数据",
+    ),
+    "get_market_moneyflow": ToolDef(
+        name="get_market_moneyflow",
+        module="data.moneyflow_api",
+        fn="get_market_moneyflow",
+        description="查询大盘资金全景：主力/超大单/大单/中单/小单净流入（亿元）、北向与南向资金净流入。回答“今天大盘资金面怎么样”时用。",
+        params={},
+        none_error="大盘资金流向数据不可得",
+    ),
+    "get_hot_sectors": ToolDef(
+        name="get_hot_sectors",
+        module="data.market_api",
+        fn="get_hot_sectors",
+        description="查询今日热门行业板块涨幅榜（前 10：板块名、代码、涨跌幅）。回答“今天哪个板块最强/最热”时用。",
+        params={},
+        none_error="板块行情数据不可得",
+    ),
+    "get_limit_up_review": ToolDef(
+        name="get_limit_up_review",
+        module="data.limit_up_api",
+        fn="get_limit_up_review_data",
+        description="查询今日涨停板复盘：涨停/跌停概览、连板天梯、板块分布、涨停原因分类、首板列表。回答“今天涨停复盘/连板情况”时用（数据量大，重点提炼概览与天梯）。",
+        params={},
+        none_error="涨停复盘数据不可得",
+    ),
+    "get_index_valuation": ToolDef(
+        name="get_index_valuation",
+        module="data.market_api",
+        fn="get_valuation_data",
+        description="查询主要宽基指数（沪深300/上证50/创业板指/中证500）的估值：PE/PB 及历史分位与估值状态（低估/合理/高估）。回答“某指数现在贵不贵、能不能定投”时用。",
+        params={},
+        none_error="指数估值数据不可得",
     ),
 }
 

@@ -37,11 +37,20 @@ def test_execute_get_market_index_returns_json():
 
 
 def test_execute_load_funds_demo_mode():
-    """演示模式：load_funds 工具返回内置示例持仓"""
-    with patch.object(ai_helper, "_is_demo_mode", return_value=True):
+    """演示模式：load_funds 工具返回内置示例持仓快照（P1：{count, funds: [...]}）"""
+    with patch.object(ai_helper, "_is_demo_mode", return_value=True), \
+         patch.object(ai_helper, "calc_fund_metrics",
+                      return_value={"returns": {"近1年": 12.3}, "max_drawdown": 5.0,
+                                    "volatility": 18.0, "sharpe": 0.8}):
         out = json.loads(ai_helper.execute_ai_tool("load_funds", {}))
-    assert "161725" in out
-    assert "cost_nav" in out["161725"]
+    assert out["count"] == "3"  # _truncate 标量统一 str()
+    codes = [f["code"] for f in out["funds"]]
+    assert codes == ["161725", "110022", "000961"]
+    demo_row = out["funds"][0]
+    assert float(demo_row["cost_nav"]) > 0 and float(demo_row["hold_shares"]) > 0
+    # 快照附量化指标（净值序列已剔除）
+    assert float(demo_row["metrics"]["returns"]["近1年"]) == 12.3
+    assert "dates" not in demo_row["metrics"] and "values" not in demo_row["metrics"]
 
 
 def test_execute_load_funds_real_mode():
@@ -50,7 +59,8 @@ def test_execute_load_funds_real_mode():
          patch.object(ai_helper, "load_funds",
                       return_value={"110022": {"name": "x", "code": "110022"}}):
         out = json.loads(ai_helper.execute_ai_tool("load_funds", {}))
-    assert "110022" in out
+    assert out["count"] == "1"  # _truncate 标量统一 str()
+    assert out["funds"][0]["code"] == "110022"
 
 
 def test_execute_unknown_tool():

@@ -474,6 +474,33 @@ def _load_funds_from_store():
     return load_funds()
 
 
+def load_funds_snapshot(max_funds_with_metrics=6, metrics_days=365):
+    """P1（2026-09-04）：持仓快照 = 持仓列表 + 逐只量化指标。
+
+    在 _load_funds_from_store 基础上附加每只基金的 calc_fund_metrics 结果
+    （各期收益率/最大回撤/年化波动率/夏普），指标缺 None 不带键、单只失败不影响整体。
+    网络成本控制：带指标的持仓最多 max_funds_with_metrics 只（历史净值是逐只网络请求），
+    其余持仓只带基础字段；净值序列（dates/values）太长对 LLM 无意义，剔除。
+    """
+    funds = _load_funds_from_store()
+    result = {"count": len(funds), "funds": []}
+    items = list(funds.values())
+    for i, fund in enumerate(items):
+        row = dict(fund)
+        if i < max_funds_with_metrics:
+            try:
+                m = calc_fund_metrics(row.get("code", ""), days=metrics_days)
+                if m:
+                    m = dict(m)
+                    m.pop("dates", None)
+                    m.pop("values", None)
+                    row["metrics"] = m
+            except Exception:
+                pass  # 单只指标失败不影响整体快照
+        result["funds"].append(row)
+    return result
+
+
 # ==================== OpenAI tools schema ====================
 # Agent MVP：AI_TOOLS 由 utils.agent_core.TOOL_REGISTRY 派生（11 个声明式工具），
 # 对外 shape 不变（{"type":"function","function":{...}}），ai_chat 无感知。
