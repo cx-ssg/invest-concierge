@@ -73,3 +73,4 @@ Thumbs.db
 /scripts/acceptance_p1*.json
 /scripts/ui_verify.cjs
 /scripts/ui_shots/
+/desktop/_pkg_env/
