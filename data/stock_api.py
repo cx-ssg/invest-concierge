@@ -30,24 +30,34 @@ def _get_market_name(stock_code):
 
 
 # 缓存全市场行情数据，避免每次查询都重新下载
+# 2026-09-04 优化：TTL 60→300s + 失败负缓存 5 分钟。
+# 实测教训：东财 clist 反爬按 IP 限流（本机曾整日被掐），全市场列表 ~59 页分页拉取，
+# 60s TTL 下工具连续调用/agent 重试会高频重拉整表，正是触发封禁的元凶；
+# 失败必须负缓存，否则每个 search_stock/get_stock_info 调用都重付 59 页超时成本。
 _akshare_spot_cache = None
 _akshare_spot_cache_time = 0
-_AKSHARE_SPOT_CACHE_TTL = 60  # 缓存60秒
+_akshare_spot_fail_time = 0
+_AKSHARE_SPOT_CACHE_TTL = 300  # 行情快照缓存 5 分钟
+_AKSHARE_SPOT_FAIL_TTL = 300   # 拉取失败负缓存 5 分钟
 
 
 def _get_akshare_spot_df():
-    """获取全市场实时行情 DataFrame（带缓存）"""
-    global _akshare_spot_cache, _akshare_spot_cache_time
+    """获取全市场实时行情 DataFrame（成功缓存 5 分钟，失败负缓存 5 分钟）"""
+    global _akshare_spot_cache, _akshare_spot_cache_time, _akshare_spot_fail_time
     import time
     now = time.time()
-    if _akshare_spot_cache is None or (now - _akshare_spot_cache_time) > _AKSHARE_SPOT_CACHE_TTL:
-        df = call_akshare_with_retry(ak.stock_zh_a_spot_em)
-        if df is not None and not df.empty:
-            _akshare_spot_cache = df
-            _akshare_spot_cache_time = now
-        else:
-            return None
-    return _akshare_spot_cache
+    if _akshare_spot_cache is not None and (now - _akshare_spot_cache_time) <= _AKSHARE_SPOT_CACHE_TTL:
+        return _akshare_spot_cache
+    if (now - _akshare_spot_fail_time) <= _AKSHARE_SPOT_FAIL_TTL:
+        return None  # 负缓存窗口内不再重试（防连续失败打爆数据源）
+    df = call_akshare_with_retry(ak.stock_zh_a_spot_em)
+    if df is not None and not df.empty:
+        _akshare_spot_cache = df
+        _akshare_spot_cache_time = now
+        _akshare_spot_fail_time = 0
+        return df
+    _akshare_spot_fail_time = now
+    return None
 
 
 @cached(CACHE_QUOTE)

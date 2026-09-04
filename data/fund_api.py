@@ -70,13 +70,28 @@ def get_fund_info(fund_code):
         return None
 
 
-@cached(CACHE_QUOTE)
 def get_fund_history(fund_code, days=365):
-    """获取基金历史净值数据"""
+    """获取基金历史净值数据（公开契约不变：返回 (dates, values)，空为 ([], [])）。
+
+    2026-09-04 优化：实际拉取走 _fetch_fund_history 缓存（成功 1 小时——净值日更粒度，
+    失败/空数据负缓存 5 分钟）。此前无缓存：load_funds_snapshot 每次逐只重拉历史净值，
+    同会话重复问同一只基金每次都付全量网络成本。
+    """
+    res = _fetch_fund_history(fund_code, days=days)
+    return res if res is not None else ([], [])
+
+
+@cached(3600, cache_failures=True, failure_ttl=300)
+def _fetch_fund_history(fund_code, days=365):
+    """真实拉取基金历史净值（供 get_fund_history 的缓存层）。
+
+    缓存语义：有数据 → (dates, values) 缓存 1h；None（拉取失败或空）负缓存 5 分钟
+    （cached 的 cache_failures 只认 None，空数据在此归一为 None）。
+    """
     try:
         df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
         if df is None or df.empty:
-            return [], []
+            return None
         df = df.sort_index()
         dates = []
         values = []
@@ -92,10 +107,10 @@ def get_fund_history(fund_code, days=365):
         if len(dates) > days:
             dates = dates[-days:]
             values = values[-days:]
-        return dates, values
+        return (dates, values) if dates else None
     except Exception as e:
         print("获取基金 {} 历史数据失败：{}".format(fund_code, e))
-        return [], []
+        return None
 
 
 @cached(CACHE_QUOTE)
