@@ -15,6 +15,7 @@
   --color-rise: var(--up);
   --color-fall: var(--down);
   --color-accent: var(--accent);
+  --color-warn: var(--warning, #9a6700);
 
   --radius-card: 8px;
   --radius-tile: 4px;

@@ -20,6 +20,8 @@
   /* A股语义色：红涨绿跌（唯一彩色，永不变品牌主题影响） */
   --up: #f04438;
   --down: #2dbe64;
+  /* 警示语义色（UI_POLISH_PLAN §3：浅底降饱和 #9a6700，暗底提亮一档保对比） */
+  --warning: #d4a72c;
 
   /* 强调色后置位（M1 先用黑白画布；M2 若需要高亮态可启用，
      当前默认 = 灰阶描边，不显彩色） */
@@ -34,20 +36,24 @@
 }
 
 html[data-theme="light"] {
-  --bg: #f7f7f8;
-  --bg-sidebar: #efeff1;
+  /* 四级中性灰（UI_POLISH_PLAN §3 · luna 定值 2026-09-04）：
+     bg 外框 < surface-2 抽屉/工具区 < surface 卡片白，四级建立层级；
+     避免纯白叠灰底发糊，文本三级 17191c/4f555c/8a9199。 */
+  --bg: #f6f7f8;
+  --bg-sidebar: #eef0f2;
   --surface: #ffffff;
-  --surface-2: #f0f0f2;
-  --text-1: #1a1b1e;
-  --text-2: #5c5f66;
-  --text-3: #9a9da3;
-  --line: rgba(0, 0, 0, 0.08);
-  --line-strong: rgba(0, 0, 0, 0.16);
+  --surface-2: #eef0f2;
+  --text-1: #17191c;
+  --text-2: #4f555c;
+  --text-3: #8a9199;
+  --line: #dfe2e5;
+  --line-strong: #c9cdd2;
   --accent: var(--text-1);
   --accent-soft: rgba(0, 0, 0, 0.06);
-  /* 涨跌色在浅底上加深一档保对比度 */
-  --up: #d92c20;
-  --down: #1e9e55;
+  /* 涨跌色在浅底上降饱和保对比度（红涨绿跌语义不变） */
+  --up: #c43d3d;
+  --down: #198754;
+  --warning: #9a6700;
 }
 
 /* 呼吸脉冲（状态栏"思考中"，克制动效唯一例外之一） */

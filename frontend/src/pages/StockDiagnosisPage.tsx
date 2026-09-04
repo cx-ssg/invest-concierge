@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { DiagnosisPayload } from '../types/api'
 import { fmtNum } from '../lib/format'
 import { Btn, Card, Spinner, Tabs } from '../components/ui/primitives'
+import { PageHeader } from '../components/layout/PageHeader'
 import { FundamentalTab, MinefieldTab, MoatTab, ValuationTab, ReportsTab } from '../features/diagnosis/DataTabs'
 import { AiTab } from '../features/diagnosis/AiTab'
 import { MetricGrid } from '../features/diagnosis/ui'
@@ -64,13 +65,11 @@ export function StockDiagnosisPage() {
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <div className="px-1 text-[11px] tracking-[1.5px] text-ink-3 select-none">INVEST CONCIERGE</div>
-        <h1 className="px-1 text-lg font-semibold text-ink">综合诊断</h1>
-        <p className="px-1 text-[13px] text-ink-2">
-          输入股票代码，一键体检基本面 / 排雷 / 护城河 / 估值 / 财报三表，可选 AI 辩论与追问
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="INVEST CONCIERGE"
+        title="综合诊断"
+        desc="输入股票代码，一键体检基本面 / 排雷 / 护城河 / 估值 / 财报三表，可选 AI 辩论与追问"
+      />
 
       {/* 输入区 */}
       <div className="flex flex-wrap items-center gap-2">

@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { DiaryIn } from '../types/api'
 import { fmtMoney } from '../lib/format'
 import { Btn, Card, Field, Spinner, TextInput } from '../components/ui/primitives'
+import { PageHeader } from '../components/layout/PageHeader'
 
 function today(): string {
   const d = new Date()
@@ -69,18 +70,18 @@ export function DiaryPage() {
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-3">
-      <div className="flex items-end justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <div className="px-1 text-[11px] tracking-[1.5px] text-ink-3 select-none">INVEST CONCIERGE</div>
-          <h1 className="px-1 text-lg font-semibold text-ink">投资日记</h1>
-          <p className="px-1 text-[13px] text-ink-2">交易记录与心得（增删直接写 SQLite）</p>
-        </div>
-        {!open ? (
-          <Btn variant="primary" onClick={() => setOpen(true)}>
-            <Plus size={13} /> 记一笔
-          </Btn>
-        ) : null}
-      </div>
+      <PageHeader
+        eyebrow="INVEST CONCIERGE"
+        title="投资日记"
+        desc="记录每笔交易与投资心得"
+        actions={
+          !open ? (
+            <Btn variant="primary" onClick={() => setOpen(true)}>
+              <Plus size={13} /> 记一笔
+            </Btn>
+          ) : null
+        }
+      />
 
       {open ? (
         <Card className="p-3">

@@ -101,7 +101,7 @@ export function FundForm({
       {err ? <p className="mt-2 text-[12px] text-fall">{err}</p> : null}
       <div className="mt-2 flex gap-2">
         <Btn variant="primary" onClick={submit} disabled={submitting}>
-          {submitting ? '提交中…' : mode === 'add' ? '保存（写入 SQLite）' : '保存修改'}
+          {submitting ? '提交中…' : mode === 'add' ? '保存持仓' : '保存修改'}
         </Btn>
         <Btn onClick={onCancel}>取消</Btn>
       </div>

@@ -1,24 +1,45 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { Plus, RefreshCw, Search } from 'lucide-react'
 import { api } from '../lib/api'
 import type { FundHolding, FundIn } from '../types/api'
 import { HoldingsTable } from '../features/holdings/HoldingsTable'
 import { FundForm } from '../features/holdings/FundForm'
 import { Btn, Card, Spinner } from '../components/ui/primitives'
+import { PageHeader } from '../components/layout/PageHeader'
 
-/** 我的持仓（M2）：列表 / 新增 / 编辑 / 删除 —— 全部写后端 SQLite */
+/** 我的持仓：筛选（全部/盈利/亏损）+ 搜索 + 增删改（UI_POLISH_PLAN §2.5） */
 export function PortfolioPage() {
   const qc = useQueryClient()
   const [formMode, setFormMode] = useState<'add' | 'edit' | null>(null)
   const [editing, setEditing] = useState<FundHolding | null>(null)
   const [deletingCode, setDeletingCode] = useState<string | null>(null)
+  const [filter, setFilter] = useState<'all' | 'gain' | 'loss'>('all')
+  const [search, setSearch] = useState('')
 
   const { data: funds, isFetching, isError } = useQuery({
     queryKey: ['holdings'],
     queryFn: api.holdings.list,
     staleTime: 15_000,
   })
+
+  // 筛选 + 搜索（代码/名称模糊，大小写不敏感）
+  const visible = useMemo(() => {
+    let list = funds ?? []
+    if (filter !== 'all') {
+      list = list.filter((f) => {
+        if (f.gszzl == null) return false
+        return filter === 'gain' ? f.gszzl > 0 : f.gszzl < 0
+      })
+    }
+    const kw = search.trim().toLowerCase()
+    if (kw) {
+      list = list.filter(
+        (f) => f.code.toLowerCase().includes(kw) || (f.name ?? '').toLowerCase().includes(kw),
+      )
+    }
+    return list
+  }, [funds, filter, search])
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ['holdings'] })
@@ -86,19 +107,67 @@ export function PortfolioPage() {
     }
   }
 
+  const FILTERS: { key: 'all' | 'gain' | 'loss'; label: string }[] = [
+    { key: 'all', label: '全部' },
+    { key: 'gain', label: '盈利' },
+    { key: 'loss', label: '亏损' },
+  ]
+
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-3">
-      <div className="flex items-end justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <div className="px-1 text-[11px] tracking-[1.5px] text-ink-3 select-none">INVEST CONCIERGE</div>
-          <h1 className="px-1 text-lg font-semibold text-ink">我的持仓</h1>
-          <p className="px-1 text-[13px] text-ink-2">基金持仓列表与盈亏（增删改直接写 SQLite）</p>
+      <PageHeader
+        eyebrow="INVEST CONCIERGE"
+        title="我的持仓"
+        desc="管理持仓标的、成本与实时盈亏"
+        actions={
+          formMode == null ? (
+            <>
+              <Btn
+                onClick={() => void qc.invalidateQueries({ queryKey: ['holdings'] })}
+                title="刷新持仓与最新净值"
+              >
+                <RefreshCw size={13} className={isFetching ? 'animate-spin' : undefined} /> 刷新
+              </Btn>
+              <Btn variant="primary" onClick={() => setFormMode('add')}>
+                <Plus size={13} /> 添加持仓
+              </Btn>
+            </>
+          ) : null
+        }
+      />
+
+      {/* 筛选工具条（40px：分段筛选 + 搜索，UI_POLISH_PLAN §2.5） */}
+      <div className="flex h-10 items-center gap-3">
+        <div className="flex rounded-tile border border-hairline bg-surface-2 p-0.5">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              className={`cursor-pointer rounded-tile px-3 py-1 text-[12px] transition-colors ${
+                filter === f.key ? 'bg-surface font-medium text-ink' : 'text-ink-3 hover:text-ink'
+              }`}
+              style={{ transitionDuration: 'var(--dur)' }}
+            >
+              {f.label}
+            </button>
+          ))}
         </div>
-        {formMode == null ? (
-          <Btn variant="primary" onClick={() => setFormMode('add')}>
-            <Plus size={13} /> 新增持仓
-          </Btn>
-        ) : null}
+        <div className="flex w-[220px] items-center gap-1.5 rounded-tile border border-hairline bg-surface px-2 py-1.5">
+          <Search size={13} className="shrink-0 text-ink-3" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索证券代码或名称"
+            className="w-full bg-transparent text-[12.5px] text-ink outline-none placeholder:text-ink-3"
+          />
+        </div>
+        <div className="flex-1" />
+        <span className="text-[11px] text-ink-3">
+          {visible.length === (funds ?? []).length
+            ? `共 ${(funds ?? []).length} 只`
+            : `${visible.length} / ${(funds ?? []).length} 只`}
+        </span>
       </div>
 
       {formMode ? (
@@ -123,18 +192,11 @@ export function PortfolioPage() {
 
       {isError && !funds ? (
         <Card className="p-4 text-[13px] text-ink-2">
-          持仓列表加载失败（后端不可达？）—— 页面降级展示，请启动 FastAPI 后重试。
+          持仓列表加载失败——页面降级展示，请启动后端后重试。
         </Card>
       ) : null}
 
-      {funds ? (
-        <HoldingsTable
-          funds={funds}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          deletingCode={deletingCode}
-        />
-      ) : null}
+      {funds ? <HoldingsTable funds={visible} onEdit={onEdit} onDelete={onDelete} deletingCode={deletingCode} /> : null}
     </section>
   )
 }

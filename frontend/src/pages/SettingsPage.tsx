@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Server, ToggleRight } from 'lucide-react'
 import { api } from '../lib/api'
 import { Btn, Card, Kicker, Spinner } from '../components/ui/primitives'
+import { PageHeader } from '../components/layout/PageHeader'
 
 /** 系统设置（M2）：/api/settings + /api/agent/config 只读展示 + 演示模式开关 */
 export function SettingsPage() {
@@ -27,11 +28,11 @@ export function SettingsPage() {
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <div className="px-1 text-[11px] tracking-[1.5px] text-ink-3 select-none">INVEST CONCIERGE</div>
-        <h1 className="px-1 text-lg font-semibold text-ink">系统设置</h1>
-        <p className="px-1 text-[13px] text-ink-2">API 配置与数据服务状态（只读展示，Key 只从环境变量读取）</p>
-      </div>
+      <PageHeader
+        eyebrow="INVEST CONCIERGE"
+        title="系统设置"
+        desc="数据引擎配置与服务状态"
+      />
 
       {isFetching && !settings ? (
         <Card className="flex items-center gap-2 p-4 text-[13px] text-ink-2">

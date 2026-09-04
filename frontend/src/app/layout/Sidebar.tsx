@@ -3,7 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { BarChart3, ChartLine, MessageSquare, Notebook, Settings, Wallet } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { NavTrack } from '../../types/api'
-import { Kicker, Num } from '../../components/ui/primitives'
+import { Num } from '../../components/ui/primitives'
 import { api } from '../../lib/api'
 import { pagePath } from '../../lib/nav'
 import { useUiStore, type Track } from '../../stores/ui'
@@ -52,6 +52,15 @@ const TRACK_HOME: Record<Track, string> = {
   stock: '/stock/stock_diagnosis',
 }
 
+/** 侧栏分组标题（UI_POLISH_PLAN §4：11px --text-3，上距 20px 下距 6px） */
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-1.5 mt-5 px-1 text-[11px] tracking-[1.5px] text-ink-3 select-none first:mt-0">
+      {children}
+    </div>
+  )
+}
+
 export function Sidebar() {
   const track = useUiStore((s) => s.track)
   const setTrack = useUiStore((s) => s.setTrack)
@@ -87,20 +96,22 @@ export function Sidebar() {
   // 会话列表收进主侧栏「对话」下方，「设置」排在历史会话下方——替代页内 230px 侧栏）
   const isChatPage = location.pathname === '/' || location.pathname.startsWith('/#')
 
+  // 导航项规格（UI_POLISH_PLAN §4）：36px 高 / 左右 10px / 间距 9px；
+  // 当前项 = --surface 背景 + 左侧 2px 强调线
   const navCls = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-2 rounded-tile px-2 py-1.5 text-[13px] transition-colors ${
+    `flex h-9 items-center gap-2.5 rounded-tile border-l-2 px-2.5 text-[13px] transition-colors ${
       isActive
-        ? 'bg-surface-2 font-medium text-ink'
-        : 'text-ink-2 hover:bg-surface hover:text-ink'
+        ? 'border-l-ink bg-surface font-medium text-ink'
+        : 'border-l-transparent text-ink-2 hover:bg-surface hover:text-ink'
     }`
 
   return (
     <aside
-      className="flex w-[200px] shrink-0 flex-col gap-3 overflow-y-auto p-2"
+      className="flex w-[200px] shrink-0 flex-col gap-2 overflow-y-auto p-2"
       style={{ background: 'var(--bg-sidebar)' }}
     >
-      {/* 轨道切换（基金/股票） */}
-      <div className="flex rounded-tile border border-hairline bg-surface p-0.5">
+      {/* 域切换（基金/股票）：32px 高，外层 --surface-2（UI_POLISH_PLAN §4） */}
+      <div className="flex h-8 rounded-tile bg-surface-2 p-0.5">
         {(['fund', 'stock'] as Track[]).map((t) => {
           const label = t === 'fund' ? '基金' : '股票'
           const active = track === t
@@ -112,8 +123,8 @@ export function Sidebar() {
                 setTrack(t)
                 navigate(TRACK_HOME[t])
               }}
-              className={`flex-1 cursor-pointer rounded-tile py-1 text-[12px] transition-colors ${
-                active ? 'bg-surface-2 font-medium text-ink' : 'text-ink-3 hover:text-ink'
+              className={`flex-1 cursor-pointer rounded-tile text-[12px] transition-colors ${
+                active ? 'bg-surface font-medium text-ink' : 'text-ink-3 hover:text-ink'
               }`}
               style={{ transitionDuration: 'var(--dur)' }}
             >
@@ -126,7 +137,8 @@ export function Sidebar() {
       {isChatPage ? (
         /* ===== 聊天页侧栏：对话 → 历史会话 → 设置 ===== */
         <>
-          <div className="flex flex-col gap-1">
+          <GroupLabel>通用</GroupLabel>
+          <div className="flex flex-col gap-0.5">
             <NavLink
               to="/"
               end
@@ -146,7 +158,7 @@ export function Sidebar() {
               if (location.pathname !== '/') navigate('/')
             }}
           />
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5">
             <NavLink to="/settings" end className={navCls}>
               <Settings size={15} />
               <span>系统设置</span>
@@ -156,8 +168,8 @@ export function Sidebar() {
       ) : (
         <>
           {/* 当前轨 live 导航 */}
-          <div className="flex flex-col gap-1">
-            <Kicker>{current?.label?.replace(/^[^\u4e00-\u9fa5]+/, '') || '导航'}</Kicker>
+          <div className="flex flex-col gap-0.5">
+            <GroupLabel>{current?.label?.replace(/^[^\u4e00-\u9fa5]+/, '') || '导航'}</GroupLabel>
             {(current?.pages ?? []).map((p) => {
               const Icon = PAGE_ICONS[p.key]
               return (
@@ -170,8 +182,8 @@ export function Sidebar() {
           </div>
 
           {/* 两轨通用 */}
-          <div className="flex flex-col gap-1">
-            <Kicker>通用</Kicker>
+          <div className="flex flex-col gap-0.5">
+            <GroupLabel>通用</GroupLabel>
             {(commonTrack?.pages ?? []).map((p) => {
               const Icon = PAGE_ICONS[p.key]
               return (
@@ -185,15 +197,19 @@ export function Sidebar() {
         </>
       )}
 
-      {/* 持仓迷你（沉底） */}
+      {/* 持仓迷你（空持仓给引导文案，UI_POLISH_PLAN §6） */}
       <div className="mt-auto flex flex-col gap-2">
         {summary ? (
           <div className="rounded-tile border border-hairline bg-surface px-2 py-1.5">
             <div className="text-[11px] text-ink-3">持仓概览</div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-[11px] text-ink-2">{summary.fund_count} 只</span>
-              <Num value={`¥${Math.round(summary.total_invest).toLocaleString()}`} />
-            </div>
+            {summary.fund_count > 0 ? (
+              <div className="flex items-baseline justify-between">
+                <span className="text-[11px] text-ink-2">{summary.fund_count} 只</span>
+                <Num value={`¥${Math.round(summary.total_invest).toLocaleString()}`} />
+              </div>
+            ) : (
+              <div className="text-[11px] text-ink-3">尚未添加持仓</div>
+            )}
           </div>
         ) : null}
 

@@ -71,3 +71,5 @@ Thumbs.db
 # ===== 本地验收脚本（真实 SSE 走环回，含一次性驱动/结果，不入库） =====
 /scripts/acceptance_p1*.py
 /scripts/acceptance_p1*.json
+/scripts/ui_verify.cjs
+/scripts/ui_shots/
