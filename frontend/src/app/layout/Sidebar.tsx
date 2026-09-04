@@ -7,6 +7,8 @@ import { Kicker, Num } from '../../components/ui/primitives'
 import { api } from '../../lib/api'
 import { pagePath } from '../../lib/nav'
 import { useUiStore, type Track } from '../../stores/ui'
+import { useSessionStore } from '../../stores/session'
+import { SessionList } from '../../features/agent/SessionList'
 
 /** 页面 key → 图标（live 6 页） */
 const PAGE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
@@ -53,6 +55,7 @@ const TRACK_HOME: Record<Track, string> = {
 export function Sidebar() {
   const track = useUiStore((s) => s.track)
   const setTrack = useUiStore((s) => s.setTrack)
+  const setActiveId = useSessionStore((s) => s.setActiveId)
   const navigate = useNavigate()
   const location = useLocation()
   const { data: nav } = useQuery({ queryKey: ['nav'], queryFn: api.nav, staleTime: 5 * 60_000 })
@@ -79,6 +82,10 @@ export function Sidebar() {
   const current = track === 'fund' ? tracks[0] : tracks[1]
   const commonTrack = tracks[2]
   const indices = (status?.data_source?.indices ?? []).slice(0, 3)
+
+  // 聊天页专属导航块：对话 + 历史会话列表 + 设置（用户拍板 2026-09-04：
+  // 会话列表收进主侧栏「对话」下方，「设置」排在历史会话下方——替代页内 230px 侧栏）
+  const isChatPage = location.pathname === '/' || location.pathname.startsWith('/#')
 
   const navCls = ({ isActive }: { isActive: boolean }) =>
     `flex items-center gap-2 rounded-tile px-2 py-1.5 text-[13px] transition-colors ${
@@ -116,35 +123,69 @@ export function Sidebar() {
         })}
       </div>
 
-      {/* 当前轨 live 导航 */}
-      <div className="flex flex-col gap-1">
-        <Kicker>{current?.label?.replace(/^[^\u4e00-\u9fa5]+/, '') || '导航'}</Kicker>
-        {(current?.pages ?? []).map((p) => {
-          const Icon = PAGE_ICONS[p.key]
-          return (
-            <NavLink key={p.key} to={pagePath(track, p.key)} end className={navCls}>
-              {Icon ? <Icon size={15} /> : null}
-              <span>{p.label.replace(/^[^\u4e00-\u9fa5]+/, '')}</span>
+      {isChatPage ? (
+        /* ===== 聊天页侧栏：对话 → 历史会话 → 设置 ===== */
+        <>
+          <div className="flex flex-col gap-1">
+            <NavLink
+              to="/"
+              end
+              className={navCls}
+              onClick={() => {
+                // 点「对话」= 开新会话（清掉历史会话选中态）
+                setActiveId(null)
+              }}
+            >
+              <MessageSquare size={15} />
+              <span>对话</span>
             </NavLink>
-          )
-        })}
-      </div>
-
-      {/* 两轨通用 */}
-      <div className="flex flex-col gap-1">
-        <Kicker>通用</Kicker>
-        {(commonTrack?.pages ?? []).map((p) => {
-          const Icon = PAGE_ICONS[p.key]
-          return (
-            <NavLink key={p.key} to={pagePath(track, p.key)} end className={navCls}>
-              {Icon ? <Icon size={15} /> : null}
-              <span>{p.label.replace(/^[^\u4e00-\u9fa5]+/, '')}</span>
+          </div>
+          <SessionList
+            onOpenChat={() => {
+              // 在设置页等非聊天路由点会话 → 回到对话页（activeId 已由 SessionList 写入 store）
+              if (location.pathname !== '/') navigate('/')
+            }}
+          />
+          <div className="flex flex-col gap-1">
+            <NavLink to="/settings" end className={navCls}>
+              <Settings size={15} />
+              <span>系统设置</span>
             </NavLink>
-          )
-        })}
-      </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* 当前轨 live 导航 */}
+          <div className="flex flex-col gap-1">
+            <Kicker>{current?.label?.replace(/^[^\u4e00-\u9fa5]+/, '') || '导航'}</Kicker>
+            {(current?.pages ?? []).map((p) => {
+              const Icon = PAGE_ICONS[p.key]
+              return (
+                <NavLink key={p.key} to={pagePath(track, p.key)} end className={navCls}>
+                  {Icon ? <Icon size={15} /> : null}
+                  <span>{p.label.replace(/^[^\u4e00-\u9fa5]+/, '')}</span>
+                </NavLink>
+              )
+            })}
+          </div>
 
-      {/* 持仓迷你 */}
+          {/* 两轨通用 */}
+          <div className="flex flex-col gap-1">
+            <Kicker>通用</Kicker>
+            {(commonTrack?.pages ?? []).map((p) => {
+              const Icon = PAGE_ICONS[p.key]
+              return (
+                <NavLink key={p.key} to={pagePath(track, p.key)} end className={navCls}>
+                  {Icon ? <Icon size={15} /> : null}
+                  <span>{p.label.replace(/^[^\u4e00-\u9fa5]+/, '')}</span>
+                </NavLink>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* 持仓迷你（沉底） */}
       <div className="mt-auto flex flex-col gap-2">
         {summary ? (
           <div className="rounded-tile border border-hairline bg-surface px-2 py-1.5">

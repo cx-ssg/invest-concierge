@@ -20,8 +20,9 @@ export default function App() {
       <TitleBar />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full max-w-[1100px] flex-col p-4">
+        {/* 聊天页需要高度链贯通（min-h-0 + flex-1）让输入框贴底；其他页内容自然滚动 */}
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+          <div className="mx-auto flex min-h-0 w-full max-w-[1100px] flex-1 flex-col p-4">
             <Routes>
               <Route path="/" element={<AiChatPage />} />
               <Route path="/settings" element={<SettingsPage />} />
