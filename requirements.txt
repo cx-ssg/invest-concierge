@@ -19,6 +19,9 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 # 路由层请求体校验（fastapi 强依赖，显式声明防单独安装环境缺件）
 pydantic>=2.6.0
+# ASGI 流式测试/客户端（tests/test_m0_api.py 的 SSE 逐块读取用 ASGITransport；
+# fastapi 不自动带上——CI 干净环境曾因缺件 collection 崩，2026-09-05 补）
+httpx>=0.27.0
 # M3 桌面壳：pywebview(WebView2 渲染 React) + pystray 托盘 + Pillow 托盘图标
 pywebview>=6.0
 pystray>=0.19

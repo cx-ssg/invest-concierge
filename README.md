@@ -155,7 +155,7 @@ invest-concierge/
 ├─ data/              数据层（AkShare 等免费数据源 + SQLite 持久化 + 缓存/降级）
 ├─ utils/             AI 引擎与 Agent（ai_helper / agent_core 工具注册表 / agent_memory）
 ├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
-├─ tests/             110 个 pytest 用例（含 M0 桥 / 工具注册表 / 记忆 / 排雷 / 估值）
+├─ tests/             130 个 pytest 用例（含 M0 桥 / 工具注册表 / 记忆 / 排雷 / 估值 / P1 工具与缓存）
 ├─ assets/            设计素材（mockups）
 ├─ .env.example       环境变量模板（复制为 .env 使用）
 ├─ requirements.txt   Python 依赖
