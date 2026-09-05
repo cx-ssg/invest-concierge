@@ -87,8 +87,14 @@ def decide_close(quit_flag, has_tray, hide):
     return False
 
 
-def run_desktop(url, args):
-    """创建 pywebview 窗口 + 托盘；阻塞直到退出。返回退出码。"""
+def run_desktop(url, backend=None, external=False, args=None):
+    """创建 pywebview 窗口 + 托盘；阻塞直到退出。返回退出码。
+
+    参数序对齐 main() 的位置调用 run_desktop(url, backend, external, args)——
+    d5c14b1 定义侧漏了后三参（TypeError 必炸回退浏览器），2026-09-05 安装器
+    实装实测抓到；首轮修复曾按 (url, args, ...) 排序导致 backend 错位到 args
+    （AttributeError no_tray），本版按调用点顺序对齐。
+    """
     import webview
 
     quit_flag = {"quit": False}
