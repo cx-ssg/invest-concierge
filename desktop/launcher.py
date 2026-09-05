@@ -42,6 +42,11 @@ def parse_args(argv):
     p.add_argument("--port", type=int, default=None, help="强制后端端口（默认优先 8000，被占用自动找空闲）")
     p.add_argument("--browser", action="store_true", help="不起 GUI，只起后端并打开浏览器")
     p.add_argument("--no-tray", action="store_true", help="不驻留托盘：关窗直接退出（调试用）")
+    p.add_argument("--frameless", action="store_true",
+                   help="无边框自绘标题栏（SHELL_UPGRADE ②）：窗口无系统边框，拖动/最小化/最大化/关闭"
+                        "由 React TitleBar 承担（.pywebview-drag-region 类）；默认关=v1.0 原生边框")
+    p.add_argument("--print-port", action="store_true",
+                   help="后端就绪后打印一行 PORT=<port> 到 stdout（Electron 壳 spawn 解析用，SHELL_UPGRADE ③）")
     p.add_argument("--debug", action="store_true", help="pywebview debug 模式（开发者工具可见）")
     return p.parse_args(argv)
 
@@ -87,6 +92,35 @@ def decide_close(quit_flag, has_tray, hide):
     return False
 
 
+def make_window_api(window_holder):
+    """frameless 窗口控制桥（SHELL_UPGRADE ②）。
+
+    pywebview 的 window.pywebview.api.<method> 只暴露 create_window(js_api=...)
+    传入对象上的公开方法（util.get_functions 按 dir() 收集、下划线开头跳过）；
+    不传 js_api 时 api 为空对象——TitleBar 三枚自绘按钮将静默无效。
+    这里把 Window 的 minimize/maximize/destroy 包成 js_api 类：
+    - destroy() 走 gui.destroy_window → Form.Close() → FormClosing → closing 事件
+      → decide_close（有托盘=hide 取消关闭、无托盘/--no-tray=真退出），
+      与系统标题栏点 X 的链路完全一致，托盘语义不丢；
+    - window 引用经 holder 延迟解析（js_api 对象在 create_window 之前构造，
+      而方法调用发生在窗口创建之后，时序天然安全）。
+    """
+    class WindowApi:
+        def minimize(self):
+            window_holder["window"].minimize()
+
+        def maximize(self):
+            window_holder["window"].maximize()
+
+        def restore(self):
+            window_holder["window"].restore()
+
+        def destroy(self):
+            window_holder["window"].destroy()
+
+    return WindowApi()
+
+
 def run_desktop(url, backend=None, external=False, args=None):
     """创建 pywebview 窗口 + 托盘；阻塞直到退出。返回退出码。
 
@@ -94,6 +128,10 @@ def run_desktop(url, backend=None, external=False, args=None):
     d5c14b1 定义侧漏了后三参（TypeError 必炸回退浏览器），2026-09-05 安装器
     实装实测抓到；首轮修复曾按 (url, args, ...) 排序导致 backend 错位到 args
     （AttributeError no_tray），本版按调用点顺序对齐。
+
+    --frameless（SHELL_UPGRADE ②）：无边框 + easy_drag 由 .pywebview-drag-region
+    承担拖动（pywebview 内置 JS 机制），DRAG_REGION_DIRECT_TARGET_ONLY=True 让
+    命中判定只看直接目标（拖动区域内点按钮不会带着窗口跑）。
     """
     import webview
 
@@ -115,14 +153,30 @@ def run_desktop(url, backend=None, external=False, args=None):
         except Exception as exc:
             print(f"[desktop] 退出时销毁窗口异常：{exc}")
 
-    window = webview.create_window(
-        WINDOW_TITLE,
-        url,
+    window_kwargs = dict(
         width=1440,
         height=900,
         min_size=(1100, 700),
         background_color=BG_COLOR,
     )
+    window_holder = {"window": None}
+    if getattr(args, "frameless", False):
+        webview.settings["DRAG_REGION_DIRECT_TARGET_ONLY"] = True
+        window_kwargs["frameless"] = True
+        window_kwargs["easy_drag"] = True
+        window_kwargs["js_api"] = make_window_api(window_holder)
+        # 前端凭 ?shell=frameless 渲染三枚窗口按钮（默认模式下 window.pywebview
+        # 同样存在，若只探测 pywebview 会把死按钮画到原生标题栏旁边）
+        url = url + ("&" if "?" in url else "?") + "shell=frameless"
+        print("[desktop] frameless 模式：拖动区=TitleBar（.pywebview-drag-region），"
+              "窗口控制=右上三枚自绘按钮（js_api 桥）。")
+
+    window = webview.create_window(
+        WINDOW_TITLE,
+        url,
+        **window_kwargs,
+    )
+    window_holder["window"] = window
     window.events.closing += on_closing
 
     if not args.no_tray:
@@ -182,6 +236,10 @@ def main(argv=None):
         else:
             url = base_url
             print(f"[desktop] 前端由 FastAPI 托管（同源相对 /api，可用任意端口）：{url}")
+
+        # ---------- 2.5 端口上报（Electron 壳 spawn 解析用，SHELL_UPGRADE ③）----------
+        if args.print_port:
+            print(f"PORT={port}", flush=True)
 
         # ---------- 3. GUI / 回退 ----------
         if args.browser:

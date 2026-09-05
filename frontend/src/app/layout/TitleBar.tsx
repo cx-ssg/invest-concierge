@@ -1,15 +1,89 @@
-import { Moon, Settings, Sun } from 'lucide-react'
+import { Copy, Minus, Moon, Settings, Square, Sun, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { StatusDot } from '../../components/ui/primitives'
 import { api } from '../../lib/api'
 import { useUiStore } from '../../stores/ui'
 
-/** 顶栏：品牌左 + 引擎状态点（真数据）+ 主题切换 + 设置（44px，发丝线下边） */
+/** 桌面壳探测：pywebview 注入 window.pywebview 桥（浏览器模式无此对象） */
+function isDesktopShell(): boolean {
+  return typeof window !== 'undefined' && 'pywebview' in window
+}
+
+/** frameless 探测：壳启动时在 URL 带 ?shell=frameless（launcher --frameless）。
+ *  不能只看 window.pywebview——默认原生边框模式同样有桥，会把死按钮画到
+ *  系统标题栏旁边；两个条件同时满足才渲染自绘窗口控制。 */
+function isFramelessShell(): boolean {
+  return (
+    isDesktopShell() &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('shell') === 'frameless'
+  )
+}
+
+/** 窗口控制（--frameless 自绘，SHELL_UPGRADE ②）：
+ *  走 pywebview 桥（launcher js_api 注入）调窗口原生方法；失败静默。
+ *  destroy 走 closing 事件链：有托盘=收进托盘、--no-tray=直接退出。 */
+function winMinimize() {
+  try {
+    void window.pywebview?.api?.minimize?.()
+  } catch {
+    /* noop */
+  }
+}
+function winMaximize() {
+  try {
+    void window.pywebview?.api?.maximize?.()
+  } catch {
+    /* noop */
+  }
+}
+function winRestore() {
+  try {
+    void window.pywebview?.api?.restore?.()
+  } catch {
+    /* noop */
+  }
+}
+function winClose() {
+  try {
+    void window.pywebview?.api?.destroy?.()
+  } catch {
+    /* noop */
+  }
+}
+
+/** 顶栏：品牌左 + 引擎状态点（真数据）+ 主题切换 + 设置（44px，发丝线下边）。
+ *  桌面 frameless 模式追加：中段拖动区（.pywebview-drag-region）+ 右上三枚窗口按钮。 */
 export function TitleBar() {
   const theme = useUiStore((s) => s.theme)
   const toggleTheme = useUiStore((s) => s.toggleTheme)
   const navigate = useNavigate()
+  // pywebview 桥在页面加载完成后才注入（NavigationCompleted → inject_pywebview），
+  // React 挂载时刻 window.pywebview 尚不存在——探测必须是事件驱动的：
+  // 注入完成会派发 pywebviewready CustomEvent（api.js finish 脚本），届时置真重渲染。
+  const [shellReady, setShellReady] = useState(isDesktopShell())
+  useEffect(() => {
+    if (shellReady) return
+    const onReady = () => setShellReady(true)
+    window.addEventListener('pywebviewready', onReady)
+    // 兜底轮询：万一事件早于本监听器已派发（理论上不会，注入晚于 React 挂载）
+    const timer = window.setInterval(() => {
+      if (isDesktopShell()) {
+        window.clearInterval(timer)
+        setShellReady(true)
+      }
+    }, 300)
+    const stop = window.setTimeout(() => window.clearInterval(timer), 10_000)
+    return () => {
+      window.removeEventListener('pywebviewready', onReady)
+      window.clearInterval(timer)
+      window.clearTimeout(stop)
+    }
+  }, [shellReady])
+  const frameless = shellReady && isFramelessShell()
+  const [maximized, setMaximized] = useState(false)
   const { data: status } = useQuery({
     queryKey: ['status'],
     queryFn: api.status,
@@ -31,7 +105,10 @@ export function TitleBar() {
         <span className="text-[11px] text-ink-3">A股投研工作台</span>
       </div>
 
-      <div className="flex-1" />
+      {/* frameless 拖动区：pywebview easy_drag 只认 .pywebview-drag-region
+          （DIRECT_TARGET_ONLY=True——区域内点按钮不会带窗口跑）；
+          浏览器模式无副作用（类存在但不生效） */}
+      <div className="pywebview-drag-region min-w-0 flex-1" style={{ height: '100%' }} />
 
       {/* 引擎状态点：/api/status 每 30s 驱动（未配 Key 显示引导态） */}
       <button
@@ -69,6 +146,48 @@ export function TitleBar() {
       >
         <Settings size={14} />
       </button>
+
+      {/* 桌面 frameless：右上三枚窗口按钮（浏览器/原生边框模式自动隐藏） */}
+      {frameless ? (
+        <div className="ml-1 flex items-center" data-window-controls>
+          <button
+            type="button"
+            aria-label="最小化"
+            onClick={winMinimize}
+            className="flex size-8 cursor-pointer items-center justify-center text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+            style={{ transitionDuration: 'var(--dur)' }}
+          >
+            <Minus size={13} />
+          </button>
+          <button
+            type="button"
+            aria-label={maximized ? '还原窗口' : '最大化窗口'}
+            title={maximized ? '还原' : '最大化'}
+            onClick={() => {
+              if (maximized) {
+                winRestore()
+                setMaximized(false)
+              } else {
+                winMaximize()
+                setMaximized(true)
+              }
+            }}
+            className="flex size-8 cursor-pointer items-center justify-center text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+            style={{ transitionDuration: 'var(--dur)' }}
+          >
+            {maximized ? <Copy size={11} /> : <Square size={11} />}
+          </button>
+          <button
+            type="button"
+            aria-label="关闭（有托盘时最小化到托盘）"
+            onClick={winClose}
+            className="flex size-8 cursor-pointer items-center justify-center text-ink-2 transition-colors hover:bg-fall hover:text-ink"
+            style={{ transitionDuration: 'var(--dur)' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      ) : null}
     </header>
   )
 }
