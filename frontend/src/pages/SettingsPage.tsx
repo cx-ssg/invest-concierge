@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Server, ToggleRight } from 'lucide-react'
+import { KeyRound, Server, ShieldCheck, ToggleRight } from 'lucide-react'
 import { api } from '../lib/api'
 import { Btn, Card, Kicker, Spinner } from '../components/ui/primitives'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -21,6 +21,17 @@ export function SettingsPage() {
       void qc.invalidateQueries({ queryKey: ['agent-config'] })
     },
   })
+
+  // v1.1 隐私开关（记忆显性化 C-4）：默认开，持久化在本地库
+  const [holdingsSwitch, setHoldingsSwitch] = useState<boolean | null>(null)
+  const holdingsMut = useMutation({
+    mutationFn: (enabled: boolean) => api.settings.setAiReadHoldings(enabled),
+    onSuccess: (r) => {
+      setHoldingsSwitch(r.ai_read_holdings ?? false)
+      void qc.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+  const currentHoldings = holdingsSwitch ?? settings?.ai_read_holdings ?? true
 
   const keyOk = settings?.api_key_configured ?? config?.api_key_configured ?? false
   // 演示模式状态：后端 /api/settings 不返回当前值（进程级开关），以本地切换为准
@@ -79,6 +90,41 @@ export function SettingsPage() {
             <div className="mono mt-1 text-[13px] text-ink-2">v{settings?.version ?? '--'}</div>
           </div>
         </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
+          <ShieldCheck size={14} className="text-ink-2" /> 隐私
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void holdingsMut.mutate(!currentHoldings)}
+            className={`relative h-5 w-9 cursor-pointer rounded-full border transition-colors ${
+              currentHoldings ? 'border-hairline-strong' : 'border-hairline'
+            }`}
+            style={{ background: currentHoldings ? 'var(--accent-soft)' : 'var(--surface-2)' }}
+            aria-pressed={currentHoldings}
+            aria-label="允许 AI 读取我的持仓"
+          >
+            <span
+              className="absolute top-0.5 size-3.5 rounded-full transition-all"
+              style={{
+                left: currentHoldings ? 19 : 3,
+                background: currentHoldings ? 'var(--accent)' : 'var(--text-3)',
+                transitionDuration: 'var(--dur)',
+              }}
+            />
+          </button>
+          <span className="text-[12.5px] text-ink-2">
+            允许 AI 读取我的持仓{currentHoldings ? '（回答可结合持仓个性化）' : '（已关闭）'}
+          </span>
+          {holdingsMut.isPending ? <Spinner size={12} /> : null}
+        </div>
+        <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">
+          开启后，对话时会把持仓快照（名称/代码/金额/指标）随提问一并发送给 DeepSeek 用于个性化回答；
+          关闭后 AI 不会读取持仓，也不会暗示知道你的持仓。数据仅在本机存储，关断即时生效。
+        </p>
       </Card>
 
       <Card className="p-4">
