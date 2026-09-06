@@ -437,18 +437,34 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         if parts:
             system += "\n\n## 本次上下文\n" + "\n".join(parts)
 
+    # v1.1 记忆显性化（粘性三件套 C）：memory 会话注入紧凑持仓快照（隐私开关可关），
+    # 并向 UI 发 memory_used 事件——感知到的智能才产生粘性；无注入不发事件（不撒谎）。
+    memory_sources = []
+    prior = []
+    if memory and session_id and continue_question:
+        prior = get_agent_messages(session_id, limit=6)
+        if any(m.get("role") in ("user", "assistant") and str(m.get("content") or "").strip()
+               for m in prior):
+            memory_sources.append("history")
+    if memory and _ai_read_holdings_enabled() and not _demo_mode_on():
+        brief = holdings_context_brief()
+        if brief:
+            system += ("\n\n## 已知用户上下文（来自用户本地持仓快照，仅供个性化引用；"
+                       "引用时自然说明依据，禁止编造未提供的持仓事实）\n" + brief)
+            memory_sources.append("holdings")
+    if memory_sources:
+        _progress_structured("memory_used", {"sources": memory_sources})
+
     messages = [{"role": "system", "content": system}]
 
     # 追问链：复用同一会话的最近对话（只重放 user/assistant 文本——
     # tool 消息缺 tool_call_id/前置 assistant.tool_calls 会被 DeepSeek 400 拒掉；
     # 工具结论已含在 assistant 回复里，落库仅作审计）
-    if memory and session_id and continue_question:
-        prior = get_agent_messages(session_id, limit=6)
-        for m in prior:
-            role = m.get("role")
-            content = str(m.get("content") or "")
-            if role in ("user", "assistant") and content:
-                messages.append({"role": role, "content": content})
+    for m in prior:
+        role = m.get("role")
+        content = str(m.get("content") or "")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
 
     messages.append({"role": "user", "content": str(task)})
 
@@ -517,3 +533,62 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
 def build_tool_schemas():
     """对外 schema 列表（AI_TOOLS 的构建源，保持旧 shape：{"type":"function","function":{...}}）"""
     return [t.schema for t in TOOL_REGISTRY.values()]
+
+
+# ==================== v1.1 记忆显性化：持仓快照注入 ====================
+
+def _demo_mode_on():
+    try:
+        from utils.ai_helper import _is_demo_mode
+        return bool(_is_demo_mode())
+    except Exception:  # noqa: BLE001 - 判定失败按非演示处理
+        return False
+
+
+def _ai_read_holdings_enabled():
+    """隐私开关「允许 AI 读取我的持仓」（默认开）；设置层不可用按默认。"""
+    try:
+        from services.settings_service import get_ai_read_holdings
+        return bool(get_ai_read_holdings())
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def holdings_context_brief(max_rows=6):
+    """紧凑持仓快照文本（LLM 友好，附量化指标数值）；无持仓/读取失败返回空串（调用方不注入）。
+
+    网络成本说明：load_funds_snapshot 对前 max_rows 只拉历史净值算指标（各 ~1 请求），
+    走 get_fund_history 的 TTL 缓存；冷启动首问 + 数秒可接受，换隐私收益值得。
+    """
+    try:
+        from utils.ai_helper import load_funds_snapshot
+        snap = load_funds_snapshot(max_funds_with_metrics=max_rows)
+        funds = [dict(f) for f in (snap.get("funds") or [])]
+    except Exception:  # noqa: BLE001 - 注入失败静默降级（无记忆≠错误）
+        return ""
+    if not funds:
+        return ""
+    lines = []
+    for f in funds[:max_rows]:
+        parts = ["{}({})".format(f.get("name") or "未命名基金", f.get("code", ""))]
+        for label, key in (("金额", "amount"), ("成本净值", "cost_nav"), ("持有份额", "hold_shares")):
+            try:
+                v = float(f.get(key))
+                if v > 0:
+                    parts.append("{}={:g}".format(label, v))
+            except (TypeError, ValueError):
+                pass
+        m = f.get("metrics")
+        if isinstance(m, dict):
+            nums = {}
+            for k, v in m.items():
+                try:
+                    if isinstance(v, bool) or v is None:
+                        continue
+                    nums[k] = round(float(v), 4)
+                except (TypeError, ValueError):
+                    continue
+            if nums:
+                parts.append("指标=" + json.dumps(nums, ensure_ascii=False))
+        lines.append("- " + "，".join(parts))
+    return "共{}只持仓：\n".format(len(funds)) + "\n".join(lines)

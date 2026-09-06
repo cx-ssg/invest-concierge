@@ -106,6 +106,13 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # ===== 旧表迁移：fund_holdings 老结构（buy_price/shares）补列并回填 =====
     # （CREATE TABLE IF NOT EXISTS 不会迁移已存在的旧表；老用户的 6 月库缺 cost_nav/hold_shares）
@@ -553,6 +560,41 @@ def save_alert_settings(settings):
         )
         return True
     except (OSError, TypeError):
+        return False
+
+
+# ==================== 应用级键值设置（v1.1：隐私开关等） ====================
+
+def get_setting(key, default=""):
+    """读应用级设置；表不存在/库异常时返回 default（调用方无需建表前置）。"""
+    try:
+        conn = get_conn()
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = ?", (str(key),)
+            ).fetchone()
+            return row[0] if row else default
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return default
+
+
+def set_setting(key, value):
+    """写应用级设置（upsert）；返回是否成功。"""
+    try:
+        conn = get_conn()
+        try:
+            conn.execute(
+                "INSERT INTO app_settings(key, value, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+                (str(key), str(value)),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except sqlite3.Error:
         return False
 
 

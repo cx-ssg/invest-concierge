@@ -90,6 +90,7 @@ export type SSEEvent =
   | { type: 'tool'; text: string }
   | { type: 'tool_start'; name: string; arguments: Record<string, unknown> }
   | { type: 'tool_end'; name: string; ok: boolean; elapsed_ms: number }
+  | { type: 'memory_used'; sources: string[] }
   | { type: 'done'; session_id: number | null; content: string; tool_trace: ToolTraceEntry[] }
   | { type: 'error'; message: string }
 

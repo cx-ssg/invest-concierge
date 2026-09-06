@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Send, Square } from 'lucide-react'
+import { ArrowRight, Send, Sparkles, Square } from 'lucide-react'
 import { api } from '../../lib/api'
 import type { SessionMessage } from '../../types/api'
 import { MarkdownContent } from '../../components/engine/MarkdownContent'
@@ -239,6 +239,13 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
   const streaming = phase.status === 'streaming'
   const error = phase.status === 'error'
   const cancelled = phase.status === 'cancelled'
+  // 记忆显性化 chip（v1.1）：按服务端实际注入的 sources 动态显示（无注入不显示）
+  const memLabel = [
+    phase.memorySources.includes('holdings') ? '你的持仓' : '',
+    phase.memorySources.includes('history') ? '历史对话' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -249,6 +256,12 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
           <div className="mt-1">
             <ToolTimeline steps={phase.toolSteps} />
           </div>
+        </div>
+      ) : null}
+      {memLabel ? (
+        <div className="flex items-center gap-1 px-1 text-[11px] text-ink-3">
+          <Sparkles size={11} className="text-accent" />
+          <span>已结合{memLabel}</span>
         </div>
       ) : null}
       <div className="max-w-[92%] rounded-card border border-hairline bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink">

@@ -13,6 +13,8 @@ export interface AgentRunPhase {
   writing: string
   /** 工具链时间线（tool_start/tool_end 维护） */
   toolSteps: ToolStep[]
+  /** 记忆显性化（v1.1）：memory_used 事件带来的注入来源（holdings/history），无注入为空 */
+  memorySources: string[]
   /** 最终回答（done.content，经打字机流式渲染） */
   content: string
   /** 本运行落库的会话 id（done 事件带回） */
@@ -26,6 +28,7 @@ const IDLE: AgentRunPhase = {
   reasoning: '',
   writing: '',
   toolSteps: [],
+  memorySources: [],
   content: '',
   sessionId: null,
   toolTrace: null,
@@ -68,6 +71,9 @@ function applyEvent(p: AgentRunPhase, ev: SSEEvent): AgentRunPhase {
       }
       return { ...p, toolSteps: steps }
     }
+    case 'memory_used':
+      // v1.1 记忆显性化：服务端只在真实注入时发；无注入不发（不撒谎）
+      return { ...p, memorySources: ev.sources?.length ? ev.sources : p.memorySources }
     case 'done':
       return {
         ...p,
