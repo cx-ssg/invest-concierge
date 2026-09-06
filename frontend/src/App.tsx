@@ -3,6 +3,7 @@ import { TitleBar } from './app/layout/TitleBar'
 import { Sidebar } from './app/layout/Sidebar'
 import { StatusBar } from './app/layout/StatusBar'
 import { AiChatPage } from './pages/AiChatPage'
+import { AlertsPage } from './pages/AlertsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DiaryPage } from './pages/DiaryPage'
 import { PortfolioPage } from './pages/PortfolioPage'
@@ -12,7 +13,7 @@ import { StockDiagnosisPage } from './pages/StockDiagnosisPage'
 /**
  * 三区壳：行 = [TitleBar 44px | 内容 1fr | StatusBar 28px]；
  * 列 = [Sidebar 200px | 主区 1fr]。主内容 max-w 1120px 居中（UI_POLISH_PLAN §5）。
- * 路由骨架 = live 6 页（dashboard/portfolio/diary / stock_diagnosis / ai_chat/settings）。
+ * 路由骨架 = v1.0 live 6 页 + v1.1 价格预警 /alerts（粘性三件套 A）。
  */
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Routes>
               <Route path="/" element={<AiChatPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/fund/dashboard" element={<DashboardPage />} />
               <Route path="/fund/portfolio" element={<PortfolioPage />} />
               <Route path="/fund/diary" element={<DiaryPage />} />

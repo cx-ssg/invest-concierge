@@ -1,4 +1,4 @@
-import { Copy, Minus, Moon, Settings, Square, Sun, X } from 'lucide-react'
+import { Bell, Copy, Minus, Moon, Settings, Square, Sun, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -107,6 +107,14 @@ export function TitleBar() {
     refetchInterval: 30_000,
     retry: 1,
   })
+  // 预警未读角标（v1.1 A）：60s 轮询，失败静默（预警不可用不干扰顶栏）
+  const { data: alertEvents } = useQuery({
+    queryKey: ['alert-events'],
+    queryFn: api.alerts.events,
+    refetchInterval: 60_000,
+    retry: false,
+  })
+  const unreadAlerts = alertEvents?.unread ?? 0
 
   const engineReady = status?.engine.api_key_configured ?? false
 
@@ -144,6 +152,28 @@ export function TitleBar() {
       >
         <StatusDot state={engineReady ? 'ready' : 'off'} />
         {engineReady ? '引擎就绪' : '引擎未配置'}
+      </button>
+
+      {/* 预警角标（v1.1 A）：点击进预警页；未读>0 金色圆点 */}
+      <button
+        type="button"
+        aria-label="价格预警"
+        title="价格预警"
+        onClick={() => navigate('/alerts')}
+        className="relative flex size-7 cursor-pointer items-center justify-center rounded-tile border border-hairline text-ink-2 transition-colors"
+        style={{ transitionDuration: 'var(--dur)' }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-2)')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+      >
+        <Bell size={14} />
+        {unreadAlerts > 0 ? (
+          <span
+            className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-0.5 text-[9px] font-medium leading-none text-ink"
+            style={{ background: 'var(--accent)' }}
+          >
+            {unreadAlerts > 9 ? '9+' : unreadAlerts}
+          </span>
+        ) : null}
       </button>
 
       <button

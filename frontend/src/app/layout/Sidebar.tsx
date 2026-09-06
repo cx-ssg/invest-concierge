@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, ChartLine, MessageSquare, Notebook, Settings, Wallet } from 'lucide-react'
+import { BarChart3, Bell, ChartLine, MessageSquare, Notebook, Settings, Wallet } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { NavTrack } from '../../types/api'
 import { Num } from '../../components/ui/primitives'
@@ -10,7 +10,7 @@ import { useUiStore, type Track } from '../../stores/ui'
 import { useSessionStore } from '../../stores/session'
 import { SessionList } from '../../features/agent/SessionList'
 
-/** 页面 key → 图标（live 6 页） */
+/** 页面 key → 图标（live 7 页：v1.0 六页 + v1.1 价格预警） */
 const PAGE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   dashboard: BarChart3,
   portfolio: Wallet,
@@ -18,6 +18,7 @@ const PAGE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   stock_diagnosis: ChartLine,
   ai_chat: MessageSquare,
   settings: Settings,
+  alert: Bell,
 }
 
 /** /api/nav 不可用时的本地兜底（与 services/nav_service.PAGE_META live 集逐条一致） */
@@ -42,6 +43,7 @@ const FALLBACK_TRACKS: NavTrack[] = [
     pages: [
       { key: 'ai_chat', label: '💬 AI 对话' },
       { key: 'settings', label: '⚙️ 系统设置' },
+      { key: 'alert', label: '🔔 价格预警' },
     ],
   },
 ]
@@ -159,6 +161,10 @@ export function Sidebar() {
             }}
           />
           <div className="flex flex-col gap-0.5">
+            <NavLink to="/alerts" end className={navCls}>
+              <Bell size={15} />
+              <span>价格预警</span>
+            </NavLink>
             <NavLink to="/settings" end className={navCls}>
               <Settings size={15} />
               <span>系统设置</span>

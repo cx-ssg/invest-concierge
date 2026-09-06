@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, Search } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { FundHolding, FundIn } from '../types/api'
 import { HoldingsTable } from '../features/holdings/HoldingsTable'
@@ -11,6 +12,7 @@ import { PageHeader } from '../components/layout/PageHeader'
 /** 我的持仓：筛选（全部/盈利/亏损）+ 搜索 + 增删改（UI_POLISH_PLAN §2.5） */
 export function PortfolioPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [formMode, setFormMode] = useState<'add' | 'edit' | null>(null)
   const [editing, setEditing] = useState<FundHolding | null>(null)
   const [deletingCode, setDeletingCode] = useState<string | null>(null)
@@ -196,7 +198,19 @@ export function PortfolioPage() {
         </Card>
       ) : null}
 
-      {funds ? <HoldingsTable funds={visible} onEdit={onEdit} onDelete={onDelete} deletingCode={deletingCode} /> : null}
+      {funds ? (
+        <HoldingsTable
+          funds={visible}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          deletingCode={deletingCode}
+          onAlert={(code, name) => {
+            const p = new URLSearchParams({ symbol: code })
+            if (name) p.set('name', name)
+            navigate(`/alerts?${p.toString()}`)
+          }}
+        />
+      ) : null}
     </section>
   )
 }

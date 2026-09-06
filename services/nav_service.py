@@ -49,7 +49,7 @@ PAGE_META = {
             {"key": "ai_chat",   "label": "💬 AI 对话", "live": True},
             {"key": "settings",  "label": "⚙️ 系统设置", "live": True},
             {"key": "profile",  "label": "👤 个人中心", "live": False},
-            {"key": "alert",    "label": "🔔 预警设置", "live": False},
+            {"key": "alert",    "label": "🔔 价格预警", "live": True},
         ],
     },
 }

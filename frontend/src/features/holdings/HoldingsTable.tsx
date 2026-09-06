@@ -1,4 +1,4 @@
-import { Pencil, Trash2 } from 'lucide-react'
+import { Bell, Pencil, Trash2 } from 'lucide-react'
 import type { FundHolding } from '../../types/api'
 import { fmtMoney, fmtNum, fmtPct } from '../../lib/format'
 import { Num } from '../../components/ui/primitives'
@@ -13,12 +13,15 @@ export function HoldingsTable({
   onDelete,
   deletingCode,
   compact = false,
+  onAlert,
 }: {
   funds: FundHolding[]
   onEdit: (code: string) => void
   onDelete: (code: string) => void
   deletingCode?: string | null
   compact?: boolean
+  /** v1.1 预警快捷入口：传则每行渲染 🔔（跳预警页预填该标的） */
+  onAlert?: (code: string, name: string) => void
 }) {
   return (
     <div className="overflow-x-auto rounded-tile border border-hairline">
@@ -63,6 +66,16 @@ export function HoldingsTable({
               ) : null}
               <td className="px-2.5 py-1.5 text-right">
                 <span className="inline-flex items-center gap-1">
+                  {onAlert ? (
+                    <button
+                      type="button"
+                      title="设价格预警"
+                      onClick={() => onAlert(f.code, f.name ?? '')}
+                      className="cursor-pointer rounded-tile p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
+                    >
+                      <Bell size={13} />
+                    </button>
+                  ) : null}
                   {!compact ? (
                     <button
                       type="button"

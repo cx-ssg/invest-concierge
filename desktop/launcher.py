@@ -208,6 +208,12 @@ def run_desktop(url, backend=None, external=False, args=None):
         tray = TrayIcon(on_show=lambda: window.show(), on_quit=on_quit_from_tray)
         tray.start()
         tray_holder["tray"] = tray
+        # v1.1 预警通知桥：调度器触发时走托盘气泡（浏览器/无头模式只落库+应用内角标）
+        try:
+            from services import alert_service
+            alert_service.register_notifier(tray.notify)
+        except Exception as exc:
+            print(f"[desktop] 预警通知桥注册失败（不影响预警落库）：{exc}")
         print("[desktop] 托盘已就绪：关窗最小化到托盘，双击托盘图标恢复。")
     else:
         print("[desktop] --no-tray：关窗直接退出。")

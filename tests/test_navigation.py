@@ -17,11 +17,11 @@ from ui_components.sidebar import PAGE_META, get_live_page_keys, get_live_pages
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# v1.0 渲染集（精确匹配，按轨道顺序：基金→股票→通用）
+# v1.1 渲染集（v1.0 六页 + 价格预警，按轨道顺序：基金→股票→通用）
 RENDER_SET = {
     "fund": ["dashboard", "portfolio", "diary"],
     "stock": ["stock_diagnosis"],
-    "common": ["ai_chat", "settings"],
+    "common": ["ai_chat", "settings", "alert"],
 }
 FULL_RENDER_SET = RENDER_SET["fund"] + RENDER_SET["stock"] + RENDER_SET["common"]
 
@@ -34,7 +34,7 @@ PLACEHOLDER_PAGES = {
              "dingtou_calc", "backtest", "analysis"],
     "stock": ["stock_search", "stock_holdings", "watchlist",
               "stock_market_overview", "stock_deep_analysis", "stock_tools"],
-    "common": ["profile", "alert"],
+    "common": ["profile"],
 }
 
 
@@ -42,7 +42,7 @@ def _all_track_keys():
     return [p["key"] for track in PAGE_META for p in PAGE_META[track]["pages"]]
 
 
-# ==================== 1. v1.0 渲染集精确匹配 ====================
+# ==================== 1. 渲染集精确匹配 ====================
 
 def test_v1_render_set_exact_per_track():
     """每个轨道的 live 渲染集精确匹配（不多不少）"""
@@ -51,13 +51,13 @@ def test_v1_render_set_exact_per_track():
 
 
 def test_v1_render_set_exact_overall():
-    """全量渲染集精确匹配：基金3 + 股票1 + ai_chat + settings，共 6 页"""
+    """全量渲染集精确匹配：基金3 + 股票1 + ai_chat + settings + alert，共 7 页"""
     assert get_live_page_keys() == FULL_RENDER_SET
-    assert len(get_live_page_keys()) == 6
+    assert len(get_live_page_keys()) == 7
 
 
 def test_v1_render_set_labels_match():
-    """live 页导航 label 与定案命名一致（资产总览/我的持仓/投资日记/综合诊断/AI对话/系统设置）"""
+    """live 页导航 label 与定案命名一致（资产总览/我的持仓/投资日记/综合诊断/AI对话/系统设置/价格预警）"""
     labels = dict(get_live_pages("fund") + get_live_pages("stock") + get_live_pages("common"))
     assert labels == {
         "dashboard": "📊 资产总览",
@@ -66,6 +66,7 @@ def test_v1_render_set_labels_match():
         "stock_diagnosis": "🩺 综合诊断",
         "ai_chat": "💬 AI 对话",
         "settings": "⚙️ 系统设置",
+        "alert": "🔔 价格预警",
     }
 
 
@@ -81,7 +82,7 @@ def test_track_structure_full_21_pages():
 
 
 def test_placeholder_pages_live_false():
-    """占位页（含 profile/alert）一律 live=false，不渲染 = 不存在"""
+    """占位页（含 profile）一律 live=false，不渲染 = 不存在（alert 已于 v1.1 转 live）"""
     live = set(FULL_RENDER_SET)
     for track in PAGE_META:
         for page in PAGE_META[track]["pages"]:

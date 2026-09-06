@@ -7,5 +7,6 @@ import type { Track } from '../stores/ui'
 export function pagePath(track: Track, key: string): string {
   if (key === 'ai_chat') return '/'
   if (key === 'settings') return '/settings'
+  if (key === 'alert') return '/alerts'
   return `/${track}/${key}`
 }

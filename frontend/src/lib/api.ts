@@ -7,6 +7,8 @@
 
 import type {
   AgentConfigPayload,
+  AlertEventsPayload,
+  AlertRule,
   ApiOk,
   ChatBody,
   DiagnosisPayload,
@@ -132,6 +134,29 @@ export const api = {
     get: () => request<SettingsPayload>('/api/settings'),
     setDemo: (enabled: boolean) =>
       request<ApiOk & { demo_mode?: boolean }>('/api/settings/demo', jsonInit('POST', { enabled })),
+    setAiReadHoldings: (enabled: boolean) =>
+      request<ApiOk & { ai_read_holdings?: boolean }>(
+        '/api/settings/ai-read-holdings',
+        jsonInit('POST', { enabled }),
+      ),
+  },
+
+  // ==================== 价格预警（v1.1 粘性三件套 A） ====================
+  alerts: {
+    list: () => request<ApiOk & { alerts: AlertRule[] }>('/api/alerts'),
+    create: (body: {
+      kind: string
+      symbol: string
+      name?: string
+      metric: string
+      op: string
+      threshold: number
+    }) => request<ApiOk & { id?: number }>('/api/alerts', jsonInit('POST', body)),
+    patch: (id: number, enabled: boolean) =>
+      request<ApiOk>(`/api/alerts/${id}`, jsonInit('PATCH', { enabled })),
+    remove: (id: number) => request<ApiOk>(`/api/alerts/${id}`, jsonInit('DELETE')),
+    events: () => request<AlertEventsPayload>('/api/alerts/events'),
+    markRead: () => request<ApiOk>('/api/alerts/events/read-all', jsonInit('POST')),
   },
 }
 

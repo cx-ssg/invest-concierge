@@ -113,6 +113,33 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,                    -- 'fund'(估值涨跌幅) | 'stock'(现价)
+            symbol TEXT NOT NULL,                  -- 基金/股票代码
+            name TEXT NOT NULL DEFAULT '',
+            metric TEXT NOT NULL,                  -- 'estimate_pct' | 'price'
+            op TEXT NOT NULL,                      -- 'above' | 'below'
+            threshold REAL NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_triggered_date TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS alerts_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL DEFAULT '',
+            observed REAL,                         -- 触发时快照值（盘中估值口径，见通知文案）
+            threshold REAL NOT NULL DEFAULT 0,
+            message TEXT NOT NULL DEFAULT '',
+            read INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     # ===== 旧表迁移：fund_holdings 老结构（buy_price/shares）补列并回填 =====
     # （CREATE TABLE IF NOT EXISTS 不会迁移已存在的旧表；老用户的 6 月库缺 cost_nav/hold_shares）
@@ -590,6 +617,147 @@ def set_setting(key, value):
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
                 (str(key), str(value)),
             )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+# ==================== 价格预警（v1.1 粘性三件套 A；SQL 一律参数绑定） ====================
+
+def list_alerts(enabled_only=False):
+    """全部/启用中的预警规则。"""
+    try:
+        conn = get_conn()
+        try:
+            sql = "SELECT id, kind, symbol, name, metric, op, threshold, enabled, last_triggered_date, created_at FROM alerts"
+            if enabled_only:
+                sql += " WHERE enabled = 1"
+            sql += " ORDER BY id DESC"
+            rows = conn.execute(sql).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return []
+
+
+def create_alert(kind, symbol, name, metric, op, threshold):
+    """新增预警规则；返回新 id 或 None。"""
+    try:
+        conn = get_conn()
+        try:
+            cur = conn.execute(
+                "INSERT INTO alerts(kind, symbol, name, metric, op, threshold) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (str(kind), str(symbol), str(name or ""), str(metric), str(op), float(threshold)),
+            )
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+
+
+def update_alert_enabled(alert_id, enabled):
+    try:
+        conn = get_conn()
+        try:
+            cur = conn.execute("UPDATE alerts SET enabled = ? WHERE id = ?",
+                               (1 if enabled else 0, int(alert_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return False
+
+
+def delete_alert(alert_id):
+    """删除规则及其事件（级联）。"""
+    try:
+        conn = get_conn()
+        try:
+            conn.execute("DELETE FROM alerts_events WHERE alert_id = ?", (int(alert_id),))
+            cur = conn.execute("DELETE FROM alerts WHERE id = ?", (int(alert_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return False
+
+
+def update_alert_last_triggered(alert_id, date_str):
+    try:
+        conn = get_conn()
+        try:
+            conn.execute("UPDATE alerts SET last_triggered_date = ? WHERE id = ?",
+                         (str(date_str), int(alert_id)))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return False
+
+
+def record_alert_event(alert_id, symbol, name, observed, threshold, message):
+    """记录一次触发（未读）；返回事件 id 或 None。"""
+    try:
+        conn = get_conn()
+        try:
+            cur = conn.execute(
+                "INSERT INTO alerts_events(alert_id, symbol, name, observed, threshold, message) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (int(alert_id), str(symbol), str(name or ""),
+                 None if observed is None else float(observed), float(threshold), str(message)),
+            )
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+
+
+def list_alert_events(limit=50):
+    """最近事件（新→旧）。"""
+    try:
+        conn = get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, alert_id, symbol, name, observed, threshold, message, read, created_at "
+                "FROM alerts_events ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return []
+
+
+def unread_alert_events_count():
+    try:
+        conn = get_conn()
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM alerts_events WHERE read = 0").fetchone()
+            return int(row[0]) if row else 0
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0
+
+
+def mark_all_alert_events_read():
+    try:
+        conn = get_conn()
+        try:
+            conn.execute("UPDATE alerts_events SET read = 1 WHERE read = 0")
             conn.commit()
             return True
         finally:

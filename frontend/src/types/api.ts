@@ -82,6 +82,39 @@ export interface ToolTraceEntry {
   output: string
 }
 
+// ==================== 价格预警（v1.1 粘性三件套 A） ====================
+
+export interface AlertRule {
+  id: number
+  kind: 'fund' | 'stock'
+  symbol: string
+  name: string
+  metric: 'estimate_pct' | 'price'
+  op: 'above' | 'below'
+  threshold: number
+  enabled: number | boolean
+  last_triggered_date: string
+  created_at: string
+}
+
+export interface AlertEvent {
+  id: number
+  alert_id: number
+  symbol: string
+  name: string
+  observed: number | null
+  threshold: number
+  message: string
+  read: number | boolean
+  created_at: string
+}
+
+export interface AlertEventsPayload {
+  ok: boolean
+  events: AlertEvent[]
+  unread: number
+}
+
 /** SSE 事件（services/agent_service.stream_events 协议，FRONTEND_PLAN §5.1） */
 export type SSEEvent =
   | { type: 'status'; state: string }
@@ -153,6 +186,8 @@ export interface SettingsPayload {
   api_key_configured: boolean
   version: string
   demo_mode_available: boolean
+  /** v1.1 隐私开关：允许 AI 读取我的持仓（默认 true，缺失按开处理） */
+  ai_read_holdings?: boolean
 }
 
 // ==================== 诊断（build_diagnosis_payload 6 引擎） ====================

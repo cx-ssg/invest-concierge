@@ -14,15 +14,30 @@ FastAPI 应用入口（M0）。
 import os
 import sys
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from data.database import init_db
 from server.routers import agent, core, diary, diagnosis, holdings, settings
+from server.routers import alert
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="invest-concierge", version="1.0.0")
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        # v1.1 预警调度器：daemon 线程，仅交易时段 + 单标的 10 分钟限频；
+        # 无启用规则时空转零网络。INVEST_DISABLE_ALERT_SCHEDULER=1 可禁（测试用）。
+        if os.environ.get("INVEST_DISABLE_ALERT_SCHEDULER", "") != "1":
+            from services import alert_service
+            alert_service.start_scheduler()
+        yield
+        from services import alert_service
+        alert_service.stop_scheduler()
+
+    app = FastAPI(title="invest-concierge", version="1.1.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -40,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(agent.router)
     app.include_router(diagnosis.router)
     app.include_router(settings.router)
+    app.include_router(alert.router)
 
     # M1：前端构建产物存在则托管（桌面壳/纯浏览器模式的 UI 入口）
     # 打包(exe)时 __file__ 指向 _MEIPASS 临时解包目录，dist 以 'frontend/dist' 打包在其中
