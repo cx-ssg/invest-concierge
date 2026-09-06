@@ -42,6 +42,9 @@ def parse_args(argv):
     p.add_argument("--port", type=int, default=None, help="强制后端端口（默认优先 8000，被占用自动找空闲）")
     p.add_argument("--browser", action="store_true", help="不起 GUI，只起后端并打开浏览器")
     p.add_argument("--no-tray", action="store_true", help="不驻留托盘：关窗直接退出（调试用）")
+    p.add_argument("--server", action="store_true",
+                   help="无头模式（SHELL_UPGRADE ③ Electron 壳配合）：只起后端不起 GUI/托盘，"
+                        "stdin 关闭即退出——Electron 壳 spawn 后杀进程树用")
     p.add_argument("--frameless", action="store_true",
                    help="无边框自绘标题栏（SHELL_UPGRADE ②）：窗口无系统边框，拖动/最小化/最大化/关闭"
                         "由 React TitleBar 承担（.pywebview-drag-region 类）；默认关=v1.0 原生边框")
@@ -63,6 +66,28 @@ def resolve_backend(mode, port_arg):
               f"请换 --port 或用浏览器模式。")
         sys.exit(1)
     return select_port(preferred, require_index=(mode == "prod"))
+
+
+def keep_alive_server(base_url):
+    """无头驻留（--server，SHELL_UPGRADE ③ Electron 壳配合项）：
+    后端就绪 + PORT= 上报后阻塞，直到 stdin 关闭或 KeyboardInterrupt——
+    Electron 壳 spawn 本进程（--print-port --server）解析端口后 loadURL，
+    退出时杀进程树；stdin 关闭检测让 Ctrl+C/管道关闭也能自然停。"""
+    print(f"[desktop] 无头模式：后端 {base_url} 驻留中（stdin 关闭或 Ctrl+C 退出）。")
+    try:
+        while True:
+            # stdin 活着就驻留（Electron 杀进程树时管道关闭，readline 立即 EOF）
+            if sys.stdin is None or sys.stdin.closed:
+                print("[desktop] stdin 已关闭，退出无头模式。")
+                return
+            line = sys.stdin.readline()
+            if line == "":
+                # EOF：管道方（Electron 壳）已死或 Ctrl+Z——EOF 不区分 tty/管道，一律退出
+                print("[desktop] stdin 已关闭，退出无头模式。")
+                return
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("[desktop] Ctrl+C，正在退出…")
 
 
 def keep_alive_browser_fallback(base_url, note=""):
@@ -241,7 +266,10 @@ def main(argv=None):
         if args.print_port:
             print(f"PORT={port}", flush=True)
 
-        # ---------- 3. GUI / 回退 ----------
+        # ---------- 3. GUI / 无头 / 回退 ----------
+        if args.server:
+            keep_alive_server(base_url)
+            return 0
         if args.browser:
             keep_alive_browser_fallback(base_url)
             return 0

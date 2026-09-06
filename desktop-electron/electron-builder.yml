@@ -1,0 +1,45 @@
+# SHELL_UPGRADE ③ Electron 壳打包配置（desktop-electron/electron-builder.yml）
+# 产物：nsis 安装包 + portable 单文件（双产物要求）
+# 关键：extraResource 把主 exe（dist_m4/invest-concierge.exe）带进安装包，
+# 运行时从 process.resourcesPath 解析——portable 与 nsis 两种形态路径一致。
+appId: com.cxssg.investconcierge
+productName: invest-concierge
+copyright: MIT
+
+directories:
+  output: release
+
+files:
+  - main.cjs
+  - preload.cjs
+  - package.json
+  - icon.ico
+
+extraResources:
+  # 构建时必须存在（npm run electron:build 前先重打主 exe）
+  - from: ../dist_m4/invest-concierge.exe
+    to: invest-concierge/invest-concierge.exe
+  - from: ../assets/icon.ico
+    to: invest-concierge/icon.ico
+
+win:
+  target:
+    - nsis
+    - portable
+  icon: icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  # 用户级安装（无 UAC），与 Inno 安装器同一定位
+  installerLanguages:
+    - zh_CN
+
+portable:
+  # portable 单文件直接落 release/ 下
+  artifactName: invest-concierge-portable-${version}.exe
+
+electronDownload:
+  # 国内镜像（坑位清单#1）
+  mirror: https://npmmirror.com/mirrors/electron/

@@ -74,3 +74,9 @@ Thumbs.db
 /scripts/ui_verify.cjs
 /scripts/ui_shots/
 /desktop/_pkg_env/
+
+# SHELL_UPGRADE 3: Electron 壳构建产物（desktop-electron/）
+desktop-electron/node_modules/
+desktop-electron/release/
+desktop-electron/electron_dev.log
+desktop-electron/icon.ico

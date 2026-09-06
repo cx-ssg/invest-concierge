@@ -15,6 +15,17 @@ declare global {
         destroy?: () => void
       }
     }
+    /** Electron 壳（SHELL_UPGRADE ③）preload contextBridge 注入；
+     *  注入时机先于页面脚本，挂载时同步可探测 */
+    desktopAPI?: {
+      minimize: () => Promise<void>
+      /** 返回切换后的最大化态：true=已最大化 false=已还原 */
+      maximize: () => Promise<boolean>
+      restore: () => Promise<void>
+      /** 走主进程 close 事件=隐藏到托盘 */
+      close: () => Promise<void>
+      isMaximized: () => Promise<boolean>
+    }
   }
 }
 
