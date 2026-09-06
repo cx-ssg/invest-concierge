@@ -140,6 +140,17 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,                    -- 'weekly'（v1.1 只有周报）
+            period TEXT NOT NULL,                  -- 周期键：周报 = 'YYYY-Www'（ISO 周）
+            content TEXT NOT NULL DEFAULT '',      -- Markdown 正文
+            degraded INTEGER NOT NULL DEFAULT 0,   -- 1=无 Key 降级纯数据卡
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(kind, period)
+        )
+    """)
 
     # ===== 旧表迁移：fund_holdings 老结构（buy_price/shares）补列并回填 =====
     # （CREATE TABLE IF NOT EXISTS 不会迁移已存在的旧表；老用户的 6 月库缺 cost_nav/hold_shares）
@@ -764,6 +775,60 @@ def mark_all_alert_events_read():
             conn.close()
     except sqlite3.Error:
         return False
+
+
+# ==================== 周报（v1.1 粘性三件套 B；SQL 一律参数绑定） ====================
+
+def save_report(kind, period, content, degraded=0):
+    """同 kind+period 覆盖写（幂等重生成）。返回是否成功。"""
+    try:
+        conn = get_conn()
+        try:
+            conn.execute(
+                "INSERT INTO reports(kind, period, content, degraded) VALUES(?, ?, ?, ?) "
+                "ON CONFLICT(kind, period) DO UPDATE SET "
+                "content = excluded.content, degraded = excluded.degraded, "
+                "created_at = CURRENT_TIMESTAMP",
+                (str(kind), str(period), str(content), 1 if degraded else 0),
+            )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+def get_report(kind, period):
+    try:
+        conn = get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id, kind, period, content, degraded, created_at "
+                "FROM reports WHERE kind = ? AND period = ?",
+                (str(kind), str(period)),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+def get_latest_report(kind):
+    try:
+        conn = get_conn()
+        try:
+            row = conn.execute(
+                "SELECT id, kind, period, content, degraded, created_at "
+                "FROM reports WHERE kind = ? ORDER BY period DESC LIMIT 1",
+                (str(kind),),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
 
 
 # ==================== 基金持仓单条记录操作 ====================

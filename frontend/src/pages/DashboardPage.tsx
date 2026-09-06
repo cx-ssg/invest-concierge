@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { FileText, Plus, X } from 'lucide-react'
 import { api } from '../lib/api'
 import { fmtMoney } from '../lib/format'
 import { Btn, Card, Kicker, Num, Spinner } from '../components/ui/primitives'
 import { PageHeader } from '../components/layout/PageHeader'
+import { MarkdownContent } from '../components/engine/MarkdownContent'
 import { HoldingsTable } from '../features/holdings/HoldingsTable'
 import { FundForm } from '../features/holdings/FundForm'
 import type { FundIn, FundHolding } from '../types/api'
@@ -48,6 +49,7 @@ export function DashboardPage() {
   const qc = useQueryClient()
   const [formMode, setFormMode] = useState<null | 'add'>(null)
   const [deletingCode, setDeletingCode] = useState<string | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
 
   const { data: summary } = useQuery({
     queryKey: ['summary'],
@@ -59,6 +61,23 @@ export function DashboardPage() {
     queryFn: api.holdings.list,
     staleTime: 15_000,
   })
+  // 最近一期周报（只读缓存；生成由按钮显式触发，幂等返回同周缓存）
+  const { data: weekly } = useQuery({
+    queryKey: ['weekly-report'],
+    queryFn: api.reports.latestWeekly,
+    staleTime: 60_000,
+  })
+  const weeklyMut = useMutation({
+    mutationFn: api.reports.generateWeekly,
+    onSuccess: () => {
+      setReportOpen(true)
+      void qc.invalidateQueries({ queryKey: ['weekly-report'] })
+    },
+  })
+  // 面板数据源：本次生成结果优先，否则显示已缓存的最近一期
+  const reportView = weeklyMut.data ?? (weekly?.exists
+    ? { period: weekly.period!, degraded: !!weekly.degraded, cached: true, content: weekly.content! }
+    : null)
 
   const agg = aggregate(funds)
 
@@ -96,12 +115,52 @@ export function DashboardPage() {
         desc="查看账户资产、投入金额与组合占比"
         actions={
           formMode == null ? (
-            <Btn variant="primary" onClick={() => setFormMode('add')}>
-              <Plus size={13} /> 新增持仓
-            </Btn>
+            <>
+              <Btn
+                onClick={() => void weeklyMut.mutate()}
+                title="生成本周持仓周报（同周幂等）"
+              >
+                <FileText size={13} className={weeklyMut.isPending ? 'animate-pulse' : undefined} />
+                {weeklyMut.isPending ? '生成中…' : '生成周报'}
+              </Btn>
+              <Btn variant="primary" onClick={() => setFormMode('add')}>
+                <Plus size={13} /> 新增持仓
+              </Btn>
+            </>
           ) : null
         }
       />
+
+      {/* 周报面板（v1.1 B）：最近一期（缓存/降级标注）+ 生成结果 */}
+      {reportOpen && reportView ? (
+        <Card className="p-4">
+          <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
+            <FileText size={14} className="text-ink-2" />
+            持仓周报 · {reportView.period}
+            {reportView.cached ? <span className="text-[11px] text-ink-3">（本周已生成）</span> : null}
+            {reportView.degraded ? (
+              <span
+                className="rounded-tile px-1.5 py-0.5 text-[11px]"
+                style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}
+              >
+                无 Key 数据卡
+              </span>
+            ) : null}
+            <div className="flex-1" />
+            <button
+              type="button"
+              aria-label="收起周报"
+              onClick={() => setReportOpen(false)}
+              className="cursor-pointer rounded-tile p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
+            >
+              <X size={13} />
+            </button>
+          </div>
+          <div className="mt-2 text-[13px] leading-relaxed">
+            <MarkdownContent content={reportView.content} />
+          </div>
+        </Card>
+      ) : null}
 
       {/* 指标行（5 列 · 1px 分隔 · 真实数据聚合，缺失降级 --） */}
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-card border border-hairline bg-hairline md:grid-cols-5">

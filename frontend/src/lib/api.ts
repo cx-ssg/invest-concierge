@@ -24,6 +24,8 @@ import type {
   SSEEvent,
   StatusPayload,
   SummaryPayload,
+  WeeklyCachedPayload,
+  WeeklyReportPayload,
 } from '../types/api'
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? ''
@@ -157,6 +159,13 @@ export const api = {
     remove: (id: number) => request<ApiOk>(`/api/alerts/${id}`, jsonInit('DELETE')),
     events: () => request<AlertEventsPayload>('/api/alerts/events'),
     markRead: () => request<ApiOk>('/api/alerts/events/read-all', jsonInit('POST')),
+  },
+
+  // ==================== 周报（v1.1 粘性三件套 B；生成走 AI 60-120s） ====================
+  reports: {
+    generateWeekly: () =>
+      request<WeeklyReportPayload>('/api/reports/weekly', jsonInit('POST'), 180_000),
+    latestWeekly: () => request<WeeklyCachedPayload>('/api/reports/weekly'),
   },
 }
 

@@ -115,6 +115,24 @@ export interface AlertEventsPayload {
   unread: number
 }
 
+// ==================== 周报（v1.1 粘性三件套 B） ====================
+
+export interface WeeklyReportPayload {
+  ok: boolean
+  period: string
+  degraded: boolean
+  cached?: boolean
+  content: string
+}
+
+export interface WeeklyCachedPayload {
+  ok: boolean
+  exists: boolean
+  period?: string
+  degraded?: boolean
+  content?: string
+}
+
 /** SSE 事件（services/agent_service.stream_events 协议，FRONTEND_PLAN §5.1） */
 export type SSEEvent =
   | { type: 'status'; state: string }

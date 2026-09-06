@@ -32,14 +32,22 @@ def _fake_call_llm(result_type="text", content="回答"):
 
 def _run_agent(task="你好", memory=True, session_id=None, continue_question=False,
                structured=True):
-    """跑一次 agent_run，返回 (结果, 结构化事件列表, call_llm 桩)。"""
+    """跑一次 agent_run，返回 (结果, 结构化事件列表, call_llm 桩)。
+
+    记忆落库三件套（ensure_session/record_message/maybe_summarize_session）一并
+    patch：单测不触真实库，且隔离其他测试在真库 agent_messages 里留下的历史
+    （否则 maybe_summarize_session 满 8 轮触发摘要，stub 会捕获到摘要调用）。
+    """
     events = []
 
     def _on_progress(stage, detail):
         events.append((stage, detail))
 
     stub = _fake_call_llm()
-    with patch.object(ai_helper, "call_llm", stub):
+    with patch.object(ai_helper, "call_llm", stub), \
+         patch("utils.agent_memory.ensure_session", side_effect=lambda sid, title="": sid or 1), \
+         patch("utils.agent_memory.record_message", return_value=None), \
+         patch("utils.agent_memory.maybe_summarize_session", return_value=None):
         res = agent_core.agent_run(
             task, memory=memory, session_id=session_id,
             continue_question=continue_question,
