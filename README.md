@@ -45,9 +45,21 @@
 
 ## 🚀 快速开始（三种方式，任选其一）
 
-环境要求：**Python 3.9+**（Windows 安装时勾选 *Add Python to PATH*）。
+### 方式一：下载安装包（推荐，零 Python 环境）
 
-### 方式一：普通用户 —— 桌面版（推荐，双击即用）
+到 [Releases](https://github.com/cx-ssg/invest-concierge/releases/latest) 下载：
+
+- **`invest-concierge-setup-v1.0.0.exe`** —— 安装器，双击安装（用户级，无需管理员），开始菜单/桌面生成快捷方式
+- **`invest-concierge.exe`** —— 绿色单文件，双击即用
+
+启动后进入设置页填入 DeepSeek API Key（[免费注册领取](https://platform.deepseek.com/)）即可使用 AI 功能；不填 Key 也能看行情、记持仓、写日记（AI 对话会友好引导）。
+
+> exe 未做代码签名，首次运行如遇 SmartScreen 提示，点"更多信息 → 仍要运行"。
+> 需要 Edge WebView2 Runtime（Win10/11 一般自带）；无图形环境自动回退浏览器模式，功能零损失。
+
+### 方式二：源码运行（已装 Python）
+
+环境要求：**Python 3.9+**（Windows 安装时勾选 *Add Python to PATH*）。
 
 ```bash
 # 1. 安装依赖（只需一次）
@@ -61,9 +73,8 @@ pip install -r requirements.txt
 启动后会自动完成：内嵌 FastAPI 后端（127.0.0.1:8000，被占用时自动换空闲端口）→ 打开原生桌面窗口（pywebview 渲染前端）→ 关窗最小化到系统托盘，托盘「退出」结束程序。
 
 - 桌面上不了/没图形环境也别慌：`desktop\launcher.py` 会自动回退为**浏览器模式**，功能零损失。
-- 预打包 exe 将随 GitHub Releases 提供（当前请用方式一/二）。
 
-### 方式二：开发者 —— 源码直接跑
+### 方式三：开发者 —— 源码直接跑
 
 ```bash
 git clone https://github.com/cx-ssg/invest-concierge.git
