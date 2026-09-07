@@ -204,6 +204,8 @@ export interface SettingsPayload {
   api_key_configured: boolean
   version: string
   demo_mode_available: boolean
+  /** v1.1：演示模式当前值（进程级开关，缺失按关处理） */
+  demo_mode?: boolean
   /** v1.1 隐私开关：允许 AI 读取我的持仓（默认 true，缺失按开处理） */
   ai_read_holdings?: boolean
 }

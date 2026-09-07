@@ -11,11 +11,15 @@ from services import status_service
 
 def get_settings():
     """GET /api/settings：React 设置页只读态"""
+    from utils.ai_helper import _is_demo_mode
     return {
         "ok": True,
         "api_key_configured": bool(API_KEY),
         "version": status_service.VERSION,
         "demo_mode_available": True,
+        # v1.1 修复：返回演示模式当前值——否则设置页刷新后开关跳回"关"，
+        # 用户以为没开成（"演示模式开不了"的真身：开了不显示）
+        "demo_mode": _is_demo_mode(),
         "ai_read_holdings": get_ai_read_holdings(),
     }
 

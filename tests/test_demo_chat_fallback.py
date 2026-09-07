@@ -52,3 +52,17 @@ def test_no_key_no_demo_still_errors():
     m.API_KEY = ""
     r = m.chat_with_tools([{"role": "user", "content": "test"}])
     assert "请先配置" in r.get("content", "")
+
+
+def test_settings_returns_demo_state():
+    """GET /api/settings 回显 demo_mode 当前值（修"开了不显示"）"""
+    import importlib
+    import services.settings_service as ss
+    ss.set_demo_mode(True)
+    try:
+        s = ss.get_settings()
+        assert s["demo_mode"] is True
+    finally:
+        ss.set_demo_mode(False)
+    s = ss.get_settings()
+    assert s["demo_mode"] is False

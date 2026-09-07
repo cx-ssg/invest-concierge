@@ -160,7 +160,7 @@ export function ChatArea({
       <footer className="hairline-t shrink-0 px-3 pb-2 pt-2">
         {!apiKeyConfigured ? (
           <div className="mx-auto mb-1.5 w-full max-w-[780px] px-1 text-[11px] text-ink-3">
-            演示模式 · 配置数据引擎后可获取实时行情
+            未配置 API Key · 当前为体验降级（配置后可获取实时行情与 AI 点评）
             <button
               type="button"
               onClick={() => navigate('/settings')}

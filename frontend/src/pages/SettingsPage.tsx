@@ -8,7 +8,7 @@ import { PageHeader } from '../components/layout/PageHeader'
 /** 系统设置（M2）：/api/settings + /api/agent/config 只读展示 + 演示模式开关 */
 export function SettingsPage() {
   const qc = useQueryClient()
-  const [demoOn, setDemoOn] = useState(false)
+  const [demoSwitch, setDemoSwitch] = useState<boolean | null>(null)
 
   const { data: settings, isFetching } = useQuery({ queryKey: ['settings'], queryFn: api.settings.get })
   const { data: config } = useQuery({ queryKey: ['agent-config'], queryFn: api.agent.config })
@@ -16,7 +16,7 @@ export function SettingsPage() {
   const demoMut = useMutation({
     mutationFn: (enabled: boolean) => api.settings.setDemo(enabled),
     onSuccess: (r) => {
-      setDemoOn(!!r.demo_mode)
+      setDemoSwitch(!!r.demo_mode)
       void qc.invalidateQueries({ queryKey: ['settings'] })
       void qc.invalidateQueries({ queryKey: ['agent-config'] })
     },
@@ -34,8 +34,9 @@ export function SettingsPage() {
   const currentHoldings = holdingsSwitch ?? settings?.ai_read_holdings ?? true
 
   const keyOk = settings?.api_key_configured ?? config?.api_key_configured ?? false
-  // 演示模式状态：后端 /api/settings 不返回当前值（进程级开关），以本地切换为准
-  const currentDemo = demoOn
+  // 演示模式状态：后端 GET /api/settings 现返回真实 demo_mode（v1.1 修复"开了不显示"），
+  // 初始化与服务端为准；点击后乐观切换 + mutation 结果校正
+  const currentDemo = demoSwitch ?? settings?.demo_mode ?? false
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4">
@@ -139,7 +140,7 @@ export function SettingsPage() {
             type="button"
             onClick={() => {
               const next = !currentDemo
-              setDemoOn(next)
+              setDemoSwitch(next)
               void demoMut.mutate(next)
             }}
             className={`relative h-5 w-9 cursor-pointer rounded-full border transition-colors ${
