@@ -66,3 +66,15 @@ def test_settings_returns_demo_state():
         ss.set_demo_mode(False)
     s = ss.get_settings()
     assert s["demo_mode"] is False
+
+
+def test_agent_config_returns_demo_state():
+    """GET /api/agent/config 回显 demo_mode——对话页跨页即时可见"""
+    import services.agent_service as ags
+    ah.set_demo_mode(True)
+    try:
+        c = ags.config()
+        assert c["demo_mode"] is True
+    finally:
+        ah.set_demo_mode(False)
+    assert ags.config()["demo_mode"] is False

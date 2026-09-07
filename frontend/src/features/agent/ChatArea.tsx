@@ -22,10 +22,13 @@ import { Btn, Spinner } from '../../components/ui/primitives'
 export function ChatArea({
   activeId,
   apiKeyConfigured,
+  demoMode,
   models,
 }: {
   activeId: number | null
   apiKeyConfigured: boolean
+  /** v1.1：演示模式当前值（agent-config.demo_mode，跨页 invalidate 即时可见） */
+  demoMode: boolean
   models: { chat: string; reasoner: string }
 }) {
   const qc = useQueryClient()
@@ -117,7 +120,13 @@ export function ChatArea({
           <span className="ml-2 font-normal text-ink-3">上下文记忆已开启</span>
         </span>
         <div className="flex-1" />
-        <span className="mono text-[10.5px] text-ink-3">{models.reasoner}</span>
+        {demoMode ? (
+          <span className="rounded-full border border-line bg-surface-2 px-2 py-0.5 text-[10.5px] text-ink-2">
+            演示模式 · 本地示例数据
+          </span>
+        ) : (
+          <span className="mono text-[10.5px] text-ink-3">{models.reasoner}</span>
+        )}
       </header>
 
       {/* 消息区（等宽可读列） */}
@@ -158,7 +167,7 @@ export function ChatArea({
 
       {/* 输入区 */}
       <footer className="hairline-t shrink-0 px-3 pb-2 pt-2">
-        {!apiKeyConfigured ? (
+        {!apiKeyConfigured && !demoMode ? (
           <div className="mx-auto mb-1.5 w-full max-w-[780px] px-1 text-[11px] text-ink-3">
             未配置 API Key · 当前为体验降级（配置后可获取实时行情与 AI 点评）
             <button
@@ -180,7 +189,7 @@ export function ChatArea({
                 void send()
               }
             }}
-            placeholder={apiKeyConfigured ? '输入问题，Enter 发送 / Shift+Enter 换行' : '（演示模式）输入问题体验完整流程'}
+            placeholder={apiKeyConfigured ? '输入问题，Enter 发送 / Shift+Enter 换行' : (demoMode ? '演示模式已开启 · 输入问题体验完整流程' : '未配置 Key · 输入问题体验降级流程（可在设置开启演示模式）')}
             rows={1}
             className="max-h-28 min-h-9 flex-1 resize-y rounded-tile border border-hairline bg-surface px-2.5 py-2 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-3 focus:border-hairline-strong"
           />

@@ -59,6 +59,8 @@ export interface AgentConfigPayload {
   api_key_configured: boolean
   chat_model: string
   reasoner_model: string
+  /** v1.1：演示模式当前值（进程级开关；缺失按关处理） */
+  demo_mode?: boolean
 }
 
 export interface SessionSummary {

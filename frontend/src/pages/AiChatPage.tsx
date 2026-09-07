@@ -16,6 +16,7 @@ export function AiChatPage() {
     <ChatArea
       activeId={activeId}
       apiKeyConfigured={config?.api_key_configured ?? false}
+      demoMode={config?.demo_mode ?? false}
       models={{
         chat: config?.chat_model ?? 'deepseek-chat',
         reasoner: config?.reasoner_model ?? 'deepseek-reasoner',
