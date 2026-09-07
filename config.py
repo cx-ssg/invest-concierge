@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 
 # ==================== 环境变量 ====================
 # 可选加载根目录 .env（复制 .env.example 为 .env 填入 DEEPSEEK_API_KEY 即可生效）。
@@ -32,10 +33,28 @@ CACHE_TTL = {
 # 本字典仅用于部分页面直接引用，实际缓存策略以 data/cache.py 为准
 
 # ==================== 文件路径 ====================
-MY_FUNDS_FILE = "my_funds.json"
-DIARY_FILE = "investment_diary.json"
-ALERT_SETTINGS_FILE = "alert_settings.json"
-DB_FILE = "fund_agent.db"
+# v1.1 修复（发版前审查）：数据文件不再落 exe 同目录（相对路径=cwd 随机性，
+# 绿色 exe 放哪 db 就散哪、不同启动位置多份数据库）。统一重定向到
+# %LOCALAPPDATA%\invest-concierge\（与安装器 MyAppDataDir 一致，iss:19）；
+# 源码跑（无 frozen）保持项目根目录不变——开发者工作流零影响。
+# 环境变量 INVEST_DATA_DIR 可显式覆盖（测试/便携模式用）。
+def _data_dir():
+    if os.environ.get("INVEST_DATA_DIR"):
+        return os.environ["INVEST_DATA_DIR"]
+    if getattr(sys, "frozen", False):  # PyInstaller exe：数据跟用户走
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        d = os.path.join(base, "invest-concierge")
+    else:  # 源码跑：项目根（原有行为）
+        d = os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+_DATA_DIR = _data_dir()
+MY_FUNDS_FILE = os.path.join(_DATA_DIR, "my_funds.json")
+DIARY_FILE = os.path.join(_DATA_DIR, "investment_diary.json")
+ALERT_SETTINGS_FILE = os.path.join(_DATA_DIR, "alert_settings.json")
+DB_FILE = os.path.join(_DATA_DIR, "fund_agent.db")
 
 # ==================== API Key ====================
 def get_api_key():

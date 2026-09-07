@@ -213,8 +213,10 @@ def generate_weekly(force=False):
         if not content:
             raise RuntimeError("AI 空回复")
     except Exception as exc:  # noqa: BLE001 - AI 层失败降级数据卡
-        content = base_card + "\n\n> AI 点评生成失败（{}），以上为数据卡。".format(exc)
-        save_report("weekly", period, content, degraded=1)
+        # v1.1 修复（发版前审查）：AI 失败的降级卡【不落库】——否则同周幂等
+        # 缓存会让用户整周点多少次都拿到失败卡（数据源反爬恢复后也无法重试）。
+        # 只返回不缓存：下次点按钮重新走完整生成（含 AI 重试）。
+        content = base_card + "\n\n> AI 点评生成失败（{}），以上为数据卡。可稍后重试。".format(exc)
         return {"ok": True, "period": period, "degraded": True,
                 "cached": False, "content": content}
 
