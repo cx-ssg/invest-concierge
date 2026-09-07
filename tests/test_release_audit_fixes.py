@@ -60,14 +60,12 @@ def test_weekly_ai_failure_not_cached():
          mock.patch.object(rs, "get_report", return_value=None), \
          mock.patch.object(rs, "aggregate_weekly", return_value=agg), \
          mock.patch.object(rs, "save_report") as save_mock:
-        import config as _c
-        old_key = _c.API_KEY
-        _c.API_KEY = "sk-test"
-        try:
+        # 注意：report_service 是 from config import API_KEY（值绑定），
+        # 必须直接 patch rs 命名空间的 API_KEY——改 config.API_KEY 无效，
+        # 且本机（.env 有 key）与 CI（无 key）行为必须一致
+        with mock.patch.object(rs, "API_KEY", "sk-test"):
             with mock.patch("utils.agent_core.agent_run", side_effect=RuntimeError("网络炸了")):
                 r = rs.generate_weekly(force=True)
-        finally:
-            _c.API_KEY = old_key
         assert r["degraded"] is True
         assert "AI 点评生成失败" in r["content"]
         assert "可稍后重试" in r["content"]
