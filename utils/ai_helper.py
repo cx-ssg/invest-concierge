@@ -42,6 +42,8 @@ def call_llm(prompt, tools=None, model="deepseek-chat", temperature=0.7):
         - 工具调用模式：{"type": "tool_call", "content": tool_calls}
     """
     if not API_KEY:
+        if _is_demo_mode():
+            return _demo_chat_fallback(prompt if isinstance(prompt, list) else [{"role": "user", "content": prompt}])
         return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~"}
 
     client = _get_client()
@@ -445,6 +447,36 @@ def seed_demo_funds():
     return dict(DEMO_FUNDS)
 
 
+def _demo_chat_fallback(messages):
+    """演示模式无 Key 的 AI 对话降级（v1.1 bugfix：demo 演示穿帮修复）。
+
+    场景：给别人演示时开了演示模式，但没配 Key——原实现直接报
+    「请先配置 API Key」，演示当场穿帮。修复：返回基于内置演示持仓的
+    脚本化示例回答（数据全部来自 DEMO_FUNDS 假数据，醒目标注演示内容），
+    纯本地不外发请求，让演示者能展示 agent 完整形态。
+    """
+    question = ""
+    for m in reversed(messages or []):
+        if m.get("role") == "user":
+            question = str(m.get("content", ""))[:40]
+            break
+    funds = DEMO_FUNDS
+    names = "、".join(f.get("name", f.get("code", "?")) for f in list(funds.values())[:3])
+    lines = [
+        "📌 **演示内容**（当前为演示模式，以下基于内置示例数据，未调用真实 AI）",
+        "",
+        f"收到你的问题：「{question}」",
+        "",
+        f"以示例持仓 {names} 等为例，正常的分析会包含：",
+        "- 逐只近期涨跌与估值水位（来自实时数据工具）",
+        "- 成本与盈亏现状、与大盘同期对比",
+        "- 结合市场资金流向给出调仓思路与风险提示",
+        "",
+        "配置 DeepSeek API Key（设置页）并关闭演示模式后，以上每一步都会由 AI 结合你的真实持仓完成。",
+    ]
+    return {"type": "text", "content": "\n".join(lines), "tool_trace": []}
+
+
 # 演示模式进程级开关（M0：FastAPI 服务化后无 st.session_state，
 # Streamlit 端勾选时同步调 set_demo_mode；默认 False 与原行为一致）
 _demo_flag = False
@@ -520,6 +552,8 @@ def chat_with_tools(messages, tools=None, model=DEEPSEEK_MODEL, temperature=0.7,
         {"type": "text", "content": "最终回答", "tool_trace": [{"name", "arguments", "output"}, ...]}
     """
     if not API_KEY:
+        if _is_demo_mode():
+            return _demo_chat_fallback(messages)
         return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~", "tool_trace": []}
 
     history = [dict(m) for m in messages]
