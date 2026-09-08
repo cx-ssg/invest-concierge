@@ -51,3 +51,30 @@ def set_ai_read_holdings(enabled):
     from data.database import set_setting
     ok = set_setting(PRIVACY_AI_READ_HOLDINGS, "1" if enabled else "0")
     return {"ok": bool(ok), "ai_read_holdings": bool(enabled)}
+
+
+# ==================== v1.2 模型接入（多 provider + 设置页填 Key） ====================
+
+def get_llm_view():
+    """设置页「模型接入」卡片安全视图（key 掩码，明文不出服务）"""
+    from services.llm_config import get_settings_view, PROVIDERS
+    view = get_settings_view()
+    view["providers"] = {
+        pid: {"label": p["label"], "models": p["models"], "default_model": p["default_model"],
+              "key_hint": p["key_hint"], "base_url": p["base_url"]}
+        for pid, p in PROVIDERS.items()
+    }
+    return view
+
+
+def save_llm(provider, api_key="", base_url="", model="", reasoner_model=""):
+    """POST /api/settings/llm：保存 provider 配置（api_key 空串=沿用已有）"""
+    from services.llm_config import save_llm_config
+    return save_llm_config(provider, api_key=api_key, base_url=base_url,
+                           model=model, reasoner_model=reasoner_model)
+
+
+def test_llm(provider, api_key="", base_url="", model=""):
+    """POST /api/settings/llm/test：连通性测试（15s 超时，不落库）"""
+    from services.llm_config import test_connection
+    return test_connection(provider, api_key=api_key, base_url=base_url, model=model)

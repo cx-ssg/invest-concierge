@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Server, ShieldCheck, ToggleRight } from 'lucide-react'
+import { KeyRound, PlugZap, Server, ShieldCheck, ToggleRight } from 'lucide-react'
 import { api } from '../lib/api'
 import { Btn, Card, Kicker, Spinner } from '../components/ui/primitives'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -33,10 +33,73 @@ export function SettingsPage() {
   })
   const currentHoldings = holdingsSwitch ?? settings?.ai_read_holdings ?? true
 
-  const keyOk = settings?.api_key_configured ?? config?.api_key_configured ?? false
   // 演示模式状态：后端 GET /api/settings 现返回真实 demo_mode（v1.1 修复"开了不显示"），
   // 初始化与服务端为准；点击后乐观切换 + mutation 结果校正
   const currentDemo = demoSwitch ?? settings?.demo_mode ?? false
+
+  // ==================== v1.2 模型接入（多 provider） ====================
+  const { data: llm, isFetching: llmFetching } = useQuery({ queryKey: ['llm-view'], queryFn: api.settings.getLlm })
+  const [llmProvider, setLlmProvider] = useState<string>('')
+  const [llmKey, setLlmKey] = useState('')
+  const [llmBaseUrl, setLlmBaseUrl] = useState('')
+  const [llmModel, setLlmModel] = useState('')
+  const [llmTestMsg, setLlmTestMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [llmSaveMsg, setLlmSaveMsg] = useState<string | null>(null)
+
+  // 首次加载后用服务端值初始化本地表单（之后用户输入为准）
+  const [llmInited, setLlmInited] = useState(false)
+  if (llm && !llmInited) {
+    setLlmProvider(llm.provider)
+    setLlmBaseUrl(llm.provider === 'custom' ? llm.custom_base_url || '' : llm.base_url || '')
+    setLlmModel(llm.source === 'settings' ? llm.model : '')
+    setLlmInited(true)
+  }
+
+  const llmMeta = llm?.providers[llmProvider || llm?.provider || 'deepseek']
+  const isCustom = (llmProvider || llm?.provider || '') === 'custom'
+  const modelOptions = llmMeta?.models ?? []
+
+  const llmTestMut = useMutation({
+    mutationFn: () =>
+      api.settings.testLlm({
+        provider: llmProvider || llm!.provider,
+        api_key: llmKey,
+        base_url: isCustom ? llmBaseUrl : '',
+        model: llmModel,
+      }),
+    onSuccess: (r) => {
+      setLlmTestMsg(
+        r.ok
+          ? { ok: true, text: `连接成功 · ${r.latency_ms}ms · ${r.model}${r.reply ? ` · 回复「${r.reply}」` : ''}` }
+          : { ok: false, text: r.error || '连接失败' },
+      )
+    },
+    onError: (e) => setLlmTestMsg({ ok: false, text: String(e).slice(0, 120) }),
+  })
+
+  const llmSaveMut = useMutation({
+    mutationFn: () =>
+      api.settings.saveLlm({
+        provider: llmProvider || llm!.provider,
+        api_key: llmKey,
+        base_url: isCustom ? llmBaseUrl : '',
+        model: llmModel,
+      }),
+    onSuccess: (r) => {
+      if (r.ok) {
+        setLlmKey('') // 保存成功后清输入框（服务端只存不回显明文）
+        setLlmSaveMsg(`已保存：${r.provider_label} · ${r.api_key_masked || '未配置 Key'}`)
+        setLlmTestMsg(null)
+        void qc.invalidateQueries({ queryKey: ['llm-view'] })
+        void qc.invalidateQueries({ queryKey: ['settings'] })
+        void qc.invalidateQueries({ queryKey: ['agent-config'] })
+        void qc.invalidateQueries({ queryKey: ['status'] })
+      } else {
+        setLlmSaveMsg(r.error ? `保存失败：${r.error}` : '保存失败')
+      }
+    },
+    onError: (e) => setLlmSaveMsg(String(e).slice(0, 120)),
+  })
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4">
@@ -54,23 +117,110 @@ export function SettingsPage() {
 
       <Card className="p-4">
         <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
-          <KeyRound size={14} className="text-ink-2" /> API Key
+          <PlugZap size={14} className="text-ink-2" /> 模型接入
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span
-            className={`inline-block size-2 rounded-full ${keyOk ? '' : 'opacity-40'}`}
-            style={{ background: keyOk ? 'var(--accent)' : 'var(--text-3)' }}
-          />
-          <span className="text-[13px] text-ink-2">{keyOk ? '已配置（真实调用可用）' : '未配置（演示降级模式）'}</span>
+        {llm && (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px] text-ink-2">
+            <span
+              className={`inline-block size-2 rounded-full ${llm.api_key_configured ? '' : 'opacity-40'}`}
+              style={{ background: llm.api_key_configured ? 'var(--accent)' : 'var(--text-3)' }}
+            />
+            <span>
+              {llm.provider_label} · {llm.api_key_masked || '未配置 Key'}
+              {llm.source === 'env' ? '（来自 .env / 环境变量）' : llm.source === 'settings' ? '' : '（演示降级模式）'}
+            </span>
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <label className="block">
+            <Kicker>接入方 Provider</Kicker>
+            <select
+              value={llmProvider || llm?.provider || 'deepseek'}
+              onChange={(e) => {
+                setLlmProvider(e.target.value)
+                setLlmSaveMsg(null)
+                setLlmTestMsg(null)
+                const meta = llm?.providers[e.target.value]
+                setLlmBaseUrl(e.target.value === 'custom' ? llm?.custom_base_url || '' : '')
+                setLlmModel(meta?.default_model || '')
+              }}
+              className="mt-1 w-full rounded-tile border border-hairline bg-bg px-3 py-2 text-[13px] text-ink outline-none focus:border-hairline-strong"
+            >
+              {Object.entries(llm?.providers ?? {}).map(([pid, p]) => (
+                <option key={pid} value={pid}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <Kicker>API Key{llmMeta ? `（${llmMeta.key_hint}）` : ''}</Kicker>
+            <input
+              type="password"
+              value={llmKey}
+              onChange={(e) => setLlmKey(e.target.value)}
+              placeholder={llm?.api_key_masked ? `已配置 ${llm.api_key_masked}，留空沿用` : '粘贴 API Key'}
+              autoComplete="off"
+              className="mt-1 w-full rounded-tile border border-hairline bg-bg px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-3 focus:border-hairline-strong"
+            />
+          </label>
+          {isCustom ? (
+            <label className="block md:col-span-2">
+              <Kicker>Base URL（OpenAI 兼容端点）</Kicker>
+              <input
+                value={llmBaseUrl}
+                onChange={(e) => setLlmBaseUrl(e.target.value)}
+                placeholder="https://your-gateway.example.com/v1"
+                className="mono mt-1 w-full rounded-tile border border-hairline bg-bg px-3 py-2 text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus:border-hairline-strong"
+              />
+            </label>
+          ) : null}
+          <label className="block">
+            <Kicker>对话模型（可选，留空用默认）</Kicker>
+            <input
+              value={llmModel}
+              onChange={(e) => setLlmModel(e.target.value)}
+              placeholder={llmMeta?.default_model || '如 deepseek-chat'}
+              list="llm-model-options"
+              className="mono mt-1 w-full rounded-tile border border-hairline bg-bg px-3 py-2 text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus:border-hairline-strong"
+            />
+            <datalist id="llm-model-options">
+              {modelOptions.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </label>
         </div>
-        {!keyOk ? (
-          <div className="mt-2 rounded-tile border border-hairline bg-bg px-3 py-2 text-[12px] leading-relaxed text-ink-3">
-            配置方式：
-            <br />1. 在项目目录创建 <span className="mono">local_env.bat</span>，写入{' '}
-            <span className="mono">set DEEPSEEK_API_KEY=你的key</span> 后运行
-            <br />2. 或设置系统环境变量 <span className="mono">DEEPSEEK_API_KEY</span> 后重启后端
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Btn onClick={() => void llmTestMut.mutate()} disabled={llmTestMut.isPending}>
+            {llmTestMut.isPending ? <Spinner size={12} /> : <PlugZap size={13} />} 测试连接
+          </Btn>
+          <Btn onClick={() => void llmSaveMut.mutate()} disabled={llmSaveMut.isPending}>
+            {llmSaveMut.isPending ? <Spinner size={12} /> : <KeyRound size={13} />} 保存
+          </Btn>
+          {llmFetching ? <Spinner size={12} /> : null}
+        </div>
+        {llmTestMsg ? (
+          <div
+            className={`mt-2 rounded-tile border px-3 py-2 text-[12px] leading-relaxed ${
+              llmTestMsg.ok ? 'border-hairline bg-bg text-ink-2' : 'border-hairline-strong bg-bg text-ink-2'
+            }`}
+          >
+            {llmTestMsg.ok ? '✅ ' : '❌ '}
+            {llmTestMsg.text}
           </div>
         ) : null}
+        {llmSaveMsg ? (
+          <div className="mt-2 rounded-tile border border-hairline bg-bg px-3 py-2 text-[12px] text-ink-2">
+            💾 {llmSaveMsg}
+          </div>
+        ) : null}
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
+          Key 仅保存在本机数据库（不上传/不入 git/不回显明文）。保存后立即生效，无需重启；
+          .env 方式继续有效（设置页配置优先）。自定义接入支持任何 OpenAI 兼容端点（中转/网关/本地部署）。
+        </p>
       </Card>
 
       <Card className="p-4">

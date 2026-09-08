@@ -2,6 +2,7 @@
 """agent_run 规划循环单测：多轮顺序 / error 回填明说数据不可得 / 无 key 降级 / 记忆续写（离线 mock）"""
 import json
 from unittest.mock import patch
+from services import llm_config
 
 from utils import agent_core, ai_helper
 from utils.agent_core import agent_run
@@ -36,7 +37,7 @@ def test_agent_run_plan_loop_tool_trace_ge_3_in_order():
     def fake_execute(name, arguments):
         return json.dumps({"name": name, "ok": True}, ensure_ascii=False)
 
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(agent_core, "execute_ai_tool_v2", side_effect=fake_execute):
         r = agent_run("诊断一下 600519", max_tool_rounds=8)
@@ -67,7 +68,7 @@ def test_agent_run_error_fill_says_data_unavailable():
     def fake_execute(name, arguments):
         return json.dumps({"error": "工具执行出错：网络不可达"}, ensure_ascii=False)
 
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(agent_core, "execute_ai_tool_v2", side_effect=fake_execute):
         r = agent_run("分析一下 600519 的风险")
@@ -85,7 +86,7 @@ def test_agent_run_no_key_returns_guide():
     def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
         return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~"}
 
-    with patch.object(ai_helper, "API_KEY", ""), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", ""), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm):
         r = agent_run("今天大盘怎么样？")
     assert r["type"] == "text"
@@ -98,7 +99,7 @@ def test_agent_run_max_rounds_cap():
     def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
         return _tool_call("get_market_index", {}, call_id="call_x")
 
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(agent_core, "execute_ai_tool_v2", return_value="[]"):
         r = agent_run("hi", max_tool_rounds=8)
@@ -124,7 +125,7 @@ def test_agent_run_injects_context_into_system_prompt():
         "当前诊断数据：{...}",
         "最近会话记忆：\n- 【持仓偏好】会话#1：用户偏好白酒赛道",
     ]
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm):
         agent_run("这只股票风险大吗？", context=context)
 
@@ -155,7 +156,7 @@ def test_agent_run_memory_records_and_reuses_session(tmp_path, monkeypatch):
     def fake_execute(name, arguments):
         return json.dumps([{"name": "上证指数", "price": 3200.0}], ensure_ascii=False)
 
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(agent_core, "execute_ai_tool_v2", side_effect=fake_execute):
         r1 = agent_run("今天大盘怎么样？", memory=True, continue_question=True)
@@ -167,7 +168,7 @@ def test_agent_run_memory_records_and_reuses_session(tmp_path, monkeypatch):
     msgs = database.get_agent_messages(session_id)
     assert [m["role"] for m in msgs] == ["user", "tool", "assistant"]
     # 追问：续写同一会话，上轮内容进入本轮上下文
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(agent_core, "execute_ai_tool_v2", side_effect=fake_execute):
         r2 = agent_run("再讲讲风险？", memory=True, session_id=session_id, continue_question=True)
@@ -186,7 +187,7 @@ def test_agent_run_memory_no_key_still_records(tmp_path, monkeypatch):
     def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
         return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~"}
 
-    with patch.object(ai_helper, "API_KEY", ""), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", ""), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm):
         r = agent_run("我的持仓怎么样？", memory=True)
 

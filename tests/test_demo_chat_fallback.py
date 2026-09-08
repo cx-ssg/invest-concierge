@@ -8,6 +8,7 @@
 import os
 import sys
 from unittest.mock import patch
+from services import llm_config
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -17,8 +18,14 @@ import utils.ai_helper as ah
 def _demo_no_key():
     """演示开 + 无 Key 环境"""
     ah.set_demo_mode(True)
-    ah.API_KEY = ""
+    llm_config._TEST_KEY_OVERRIDE = ""
     return ah
+
+
+def _restore():
+    """恢复 demo 关 + 清测试钩子（防模块级污染泄漏到后续测试）"""
+    ah.set_demo_mode(False)
+    llm_config._TEST_KEY_OVERRIDE = None
 
 
 def test_demo_no_key_returns_sample_not_error():
@@ -31,7 +38,7 @@ def test_demo_no_key_returns_sample_not_error():
         assert "请先配置" not in content, f"demo 模式不应报无Key错：{content[:50]}"
         assert "演示" in content, "示例回答应标注演示内容"
     finally:
-        m.set_demo_mode(False)
+        _restore()
 
 
 def test_demo_no_key_no_network_call():
@@ -42,16 +49,19 @@ def test_demo_no_key_no_network_call():
             r = m.chat_with_tools([{"role": "user", "content": "随便分析下"}])
             assert r.get("type") == "text"
     finally:
-        m.set_demo_mode(False)
+        _restore()
 
 
 def test_no_key_no_demo_still_errors():
-    """非 demo + 无Key：保持原报错行为（提示配置），回归保护"""
+    """非 demo + 无Key：保持原报错行为（提示配置），回归保护（v1.2 文案改为指向设置页）"""
     m = ah
     m.set_demo_mode(False)
-    m.API_KEY = ""
-    r = m.chat_with_tools([{"role": "user", "content": "test"}])
-    assert "请先配置" in r.get("content", "")
+    llm_config._TEST_KEY_OVERRIDE = ""
+    try:
+        r = m.chat_with_tools([{"role": "user", "content": "test"}])
+        assert "请先在设置页配置" in r.get("content", "")
+    finally:
+        llm_config._TEST_KEY_OVERRIDE = None
 
 
 def test_settings_returns_demo_state():

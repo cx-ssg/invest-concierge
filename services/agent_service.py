@@ -39,11 +39,13 @@ AGENT_POOL_SIZE = 4
 
 def config():
     """GET /api/agent/config"""
-    from utils.ai_helper import _is_demo_mode
+    from utils.ai_helper import _is_demo_mode, _has_key, _chat_model
+    from services.llm_config import get_llm_config
+    cfg = get_llm_config()
     return {
-        "api_key_configured": bool(API_KEY),
-        "chat_model": DEEPSEEK_MODEL,
-        "reasoner_model": DEEPSEEK_REASONER_MODEL,
+        "api_key_configured": _has_key(),
+        "chat_model": cfg["model"] or DEEPSEEK_MODEL,
+        "reasoner_model": cfg["reasoner_model"] or DEEPSEEK_REASONER_MODEL,
         # v1.1：demo 状态进 config——对话页已订阅 ['agent-config']，
         # 设置页开关 invalidate 后跨页即时可见（修"刷新才看得见"）
         "demo_mode": _is_demo_mode(),

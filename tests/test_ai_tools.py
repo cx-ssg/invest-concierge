@@ -2,6 +2,7 @@
 """ai_chat 工具调用（tools）+ 演示 seed 单测：mock LLM/数据层，验证 schema、执行器与多轮循环"""
 import json
 from unittest.mock import patch
+from services import llm_config
 
 from utils import ai_helper
 
@@ -77,7 +78,7 @@ def test_seed_demo_funds_no_db_write():
 
 def test_chat_with_tools_no_key_returns_guide():
     """无 Key：chat_with_tools 直接返回引导文案，不崩溃"""
-    with patch.object(ai_helper, "API_KEY", ""):
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", ""):
         r = ai_helper.chat_with_tools([{"role": "user", "content": "hi"}])
     assert r["type"] == "text"
     assert "API Key" in r["content"]
@@ -101,7 +102,7 @@ def test_chat_with_tools_runs_tool_loop():
     def fake_execute(name, arguments):
         return json.dumps([{"name": "上证指数", "price": 3200.0}], ensure_ascii=False)
 
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(ai_helper, "execute_ai_tool", side_effect=fake_execute):
         r = ai_helper.chat_with_tools([{"role": "user", "content": "今天大盘怎么样？"}])
@@ -124,7 +125,7 @@ def test_chat_with_tools_max_rounds_cap():
             "function": {"name": "get_market_index", "arguments": "{}"},
         }]}
 
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_call_llm), \
          patch.object(ai_helper, "execute_ai_tool", return_value="[]"):
         r = ai_helper.chat_with_tools([{"role": "user", "content": "hi"}], max_tool_rounds=2)

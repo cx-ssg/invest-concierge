@@ -9,6 +9,7 @@ import importlib
 import os
 import sys
 import unittest.mock as mock
+from services import llm_config
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -63,7 +64,7 @@ def test_weekly_ai_failure_not_cached():
         # 注意：report_service 是 from config import API_KEY（值绑定），
         # 必须直接 patch rs 命名空间的 API_KEY——改 config.API_KEY 无效，
         # 且本机（.env 有 key）与 CI（无 key）行为必须一致
-        with mock.patch.object(rs, "API_KEY", "sk-test"):
+        with mock.patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"):
             with mock.patch("utils.agent_core.agent_run", side_effect=RuntimeError("网络炸了")):
                 r = rs.generate_weekly(force=True)
         assert r["degraded"] is True

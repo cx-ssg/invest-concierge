@@ -212,6 +212,44 @@ export interface SettingsPayload {
   ai_read_holdings?: boolean
 }
 
+// ==================== v1.2 模型接入（多 provider） ====================
+
+export interface LlmProviderInfo {
+  label: string
+  models: string[]
+  default_model: string
+  key_hint: string
+  base_url: string
+}
+
+export interface LlmViewPayload {
+  ok: boolean
+  provider: string
+  provider_label: string
+  api_key_masked: string
+  api_key_configured: boolean
+  base_url: string
+  model: string
+  reasoner_model: string
+  source: 'settings' | 'env' | 'none' | 'test'
+  custom_base_url?: string
+  providers: Record<string, LlmProviderInfo>
+}
+
+export interface LlmSavePayload extends LlmViewPayload {
+  /** 保存失败时 ok=false + error 文案 */
+  ok: boolean
+  error?: string
+}
+
+export interface LlmTestPayload {
+  ok: boolean
+  latency_ms?: number
+  model?: string
+  reply?: string
+  error?: string
+}
+
 // ==================== 诊断（build_diagnosis_payload 6 引擎） ====================
 
 export interface StockInfo {

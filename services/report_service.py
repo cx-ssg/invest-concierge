@@ -13,7 +13,7 @@
 import datetime
 import json
 
-from config import API_KEY
+from utils.ai_helper import _has_key
 from data.database import get_latest_report, get_report, save_report
 from services._json import to_jsonable
 
@@ -196,7 +196,7 @@ def generate_weekly(force=False):
     agg = aggregate_weekly()
     base_card = _data_card(agg)
 
-    if not API_KEY:
+    if not _has_key():
         save_report("weekly", period, base_card, degraded=1)
         return {"ok": True, "period": period, "degraded": True,
                 "cached": False, "content": base_card}

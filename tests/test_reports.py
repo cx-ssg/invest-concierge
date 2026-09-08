@@ -15,7 +15,7 @@
 import pytest
 
 from data import database
-from services import report_service
+from services import llm_config, report_service
 
 
 @pytest.fixture()
@@ -106,7 +106,7 @@ def test_data_card_renders_rows_and_none_degradation():
 
 def test_generate_weekly_no_key_degrades(tmp_db, monkeypatch):
     _seed_holding("110022", "易方达消费", 10000.0, 2.5, 2000.0)
-    monkeypatch.setattr(report_service, "API_KEY", "")  # 模块 import 时已绑定，patch 侧引用
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "")  # 模块 import 时已绑定，patch 侧引用
     monkeypatch.setattr(report_service, "_fetch_nav_rows",
                         lambda code, size=12: [{"date": f"d{i}", "nav": 3.0} for i in range(8)])
     monkeypatch.setattr("data.market_api.get_valuation_data", lambda: [])
@@ -120,7 +120,7 @@ def test_generate_weekly_no_key_degrades(tmp_db, monkeypatch):
 
 def test_generate_weekly_idempotent_same_week(tmp_db, monkeypatch):
     _seed_holding("110022", "易方达消费", 10000.0, 2.5, 2000.0)
-    monkeypatch.setattr(report_service, "API_KEY", "")
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "")
     calls = {"n": 0}
     real_fetch = report_service._fetch_nav_rows
 
@@ -138,7 +138,7 @@ def test_generate_weekly_idempotent_same_week(tmp_db, monkeypatch):
 
 def test_generate_weekly_ai_path_success(tmp_db, monkeypatch):
     _seed_holding("110022", "易方达消费", 10000.0, 2.5, 2000.0)
-    monkeypatch.setattr(report_service, "API_KEY", "sk-test")
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "sk-test")
     monkeypatch.setattr(report_service, "_fetch_nav_rows",
                         lambda code, size=12: [{"nav": 3.0}] * 8)
     monkeypatch.setattr("data.market_api.get_valuation_data", lambda: [])
@@ -161,7 +161,7 @@ def test_generate_weekly_ai_path_success(tmp_db, monkeypatch):
 
 def test_generate_weekly_ai_failure_falls_back(tmp_db, monkeypatch):
     _seed_holding("110022", "易方达消费", 10000.0, 2.5, 2000.0)
-    monkeypatch.setattr(report_service, "API_KEY", "sk-test")
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "sk-test")
     monkeypatch.setattr(report_service, "_fetch_nav_rows",
                         lambda code, size=12: [{"nav": 3.0}] * 8)
     monkeypatch.setattr("data.market_api.get_valuation_data", lambda: [])

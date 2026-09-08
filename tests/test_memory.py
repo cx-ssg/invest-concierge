@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Memory 单测：SQLite 写读 / 满 8 轮摘要 / 无 key 降级兜底 / 跨 session 不串 / 最近 3 条注入规则"""
 from unittest.mock import patch
+from services import llm_config
 
 from data import database
 from utils import agent_memory, ai_helper
@@ -76,7 +77,7 @@ def test_summary_trigger_at_8_rounds_no_key_fallback(tmp_path, monkeypatch):
     """会话满 8 轮生成摘要；无 key 降级为最近消息末尾截取"""
     monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "t4.db"))
     database.init_db()
-    monkeypatch.setattr(agent_memory, "API_KEY", "")
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "")
 
     sid = database.create_agent_session(title="持仓咨询")
     _seed_rounds(sid, 7)
@@ -96,7 +97,7 @@ def test_summary_uses_llm_when_key_present(tmp_path, monkeypatch):
     """有 key：摘要由 LLM 生成（mock call_llm，确定性断言）"""
     monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "t5.db"))
     database.init_db()
-    monkeypatch.setattr(agent_memory, "API_KEY", "sk-test")
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "sk-test")
 
     def fake_call_llm(messages, **kwargs):
         return {"type": "text", "content": "用户偏好长期持有白酒板块"}
@@ -114,7 +115,7 @@ def test_summary_fallback_when_llm_fails(tmp_path, monkeypatch):
     """LLM 失败（返回非 text）→ 兜底末尾截取，不崩"""
     monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "t6.db"))
     database.init_db()
-    monkeypatch.setattr(agent_memory, "API_KEY", "sk-test")
+    monkeypatch.setattr(llm_config, "_TEST_KEY_OVERRIDE", "sk-test")
 
     def fake_call_llm(messages, **kwargs):
         return {"type": "tool_call", "content": None}             # 异常形态

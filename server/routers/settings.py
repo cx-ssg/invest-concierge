@@ -36,3 +36,41 @@ def set_ai_read_holdings(body: AiReadHoldingsIn):
     """隐私开关（v1.1 记忆显性化 C-4）：允许 AI 读取我的持仓（默认开）。
     关闭后 agent 不注入持仓快照、memory_used 不带 holdings 来源。"""
     return settings_service.set_ai_read_holdings(body.enabled)
+
+
+# ==================== v1.2 模型接入 ====================
+
+class LlmConfigIn(BaseModel):
+    provider: str
+    api_key: str = ""      # 空串=沿用已有；"-"=清除
+    base_url: str = ""     # 仅 custom 生效
+    model: str = ""
+    reasoner_model: str = ""
+
+
+class LlmTestIn(BaseModel):
+    provider: str
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+@router.get("/settings/llm")
+def get_llm():
+    """模型接入当前态（key 掩码）+ provider 注册表"""
+    return settings_service.get_llm_view()
+
+
+@router.post("/settings/llm")
+def save_llm(body: LlmConfigIn):
+    """保存 provider 配置（key 落本地 SQLite app_settings，不入仓库/不回传明文）"""
+    return settings_service.save_llm(body.provider, api_key=body.api_key,
+                                     base_url=body.base_url, model=body.model,
+                                     reasoner_model=body.reasoner_model)
+
+
+@router.post("/settings/llm/test")
+def test_llm(body: LlmTestIn):
+    """连通性测试：用给定参数（未保存也可）发最小请求，15s 超时"""
+    return settings_service.test_llm(body.provider, api_key=body.api_key,
+                                     base_url=body.base_url, model=body.model)

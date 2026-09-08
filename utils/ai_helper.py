@@ -19,16 +19,30 @@ from utils.agent_core import execute_ai_tool, build_tool_schemas
 
 
 def _get_client():
-    """获取 OpenAI 客户端（延迟初始化）"""
-    if not API_KEY:
+    """获取 OpenAI 客户端（延迟初始化）——v1.2 多 provider：读动态配置（DB>.env>env）"""
+    from services.llm_config import get_llm_config
+    cfg = get_llm_config()
+    if not cfg["api_key"]:
         return None
     return OpenAI(
-        api_key=API_KEY,
-        base_url=DEEPSEEK_API_BASE
+        api_key=cfg["api_key"],
+        base_url=cfg["base_url"]
     )
 
 
-def call_llm(prompt, tools=None, model="deepseek-chat", temperature=0.7):
+def _has_key():
+    """v1.2：配置感知的 key 存在判断（替代散落的 bool(API_KEY)）"""
+    from services.llm_config import get_llm_config
+    return bool(get_llm_config()["api_key"])
+
+
+def _chat_model():
+    """v1.2：生效 chat 模型（DB 配置优先，未配置回落 DeepSeek 默认）"""
+    from services.llm_config import get_llm_config
+    return get_llm_config()["model"] or DEEPSEEK_MODEL
+
+
+def call_llm(prompt, tools=None, model=None, temperature=0.7):
     """统一的 LLM 调用函数
 
     参数：
@@ -41,10 +55,13 @@ def call_llm(prompt, tools=None, model="deepseek-chat", temperature=0.7):
         - 纯文本模式：{"type": "text", "content": "回复内容"}
         - 工具调用模式：{"type": "tool_call", "content": tool_calls}
     """
-    if not API_KEY:
+    if not _has_key():
         if _is_demo_mode():
             return _demo_chat_fallback(prompt if isinstance(prompt, list) else [{"role": "user", "content": prompt}])
-        return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~"}
+        return {"type": "text", "content": "⚠️ 请先在设置页配置 API Key 才能使用 AI 功能哦~"}
+
+    if model is None:
+        model = _chat_model()
 
     client = _get_client()
 
@@ -109,7 +126,7 @@ def call_llm(prompt, tools=None, model="deepseek-chat", temperature=0.7):
 
 def get_ai_response(messages):
     """调用 DeepSeek API 获取 AI 回复（兼容旧接口，返回纯文本）"""
-    result = call_llm(messages, model=DEEPSEEK_MODEL, temperature=0.7)
+    result = call_llm(messages, model=None, temperature=0.7)
     return result["content"]
 
 
@@ -376,7 +393,7 @@ def multi_agent_stock_analysis(stock_code, stock_name="", stock_data=None):
             {"role": "system", "content": full_prompt},
             {"role": "user", "content": "请对 " + stock_label + " 进行" + role_info["name"] + "。"},
         ]
-        result = call_llm(messages, model=DEEPSEEK_MODEL, temperature=0.7)
+        result = call_llm(messages, model=None, temperature=0.7)
 
         if result["type"] == "text":
             analyst_reports[role_key] = {
@@ -407,7 +424,7 @@ def multi_agent_stock_analysis(stock_code, stock_name="", stock_data=None):
         {"role": "system", "content": "你是交易决策委员会主席。请基于四位独立分析师报告，组织辩论并给出综合判断。"},
         {"role": "user", "content": debate_prompt},
     ]
-    debate_result = call_llm(messages, model=DEEPSEEK_MODEL, temperature=0.7)
+    debate_result = call_llm(messages, model=None, temperature=0.7)
     debate_text = debate_result["content"] if debate_result["type"] == "text" else "综合判断生成失败"
 
     # 提取评级
@@ -540,7 +557,7 @@ def load_funds_snapshot(max_funds_with_metrics=6, metrics_days=365):
 AI_TOOLS = build_tool_schemas()
 
 
-def chat_with_tools(messages, tools=None, model=DEEPSEEK_MODEL, temperature=0.7, max_tool_rounds=4):
+def chat_with_tools(messages, tools=None, model=None, temperature=0.7, max_tool_rounds=4):
     """带工具调用的多轮对话循环（ai_chat 主入口）。
 
     流程：
@@ -551,10 +568,13 @@ def chat_with_tools(messages, tools=None, model=DEEPSEEK_MODEL, temperature=0.7,
     返回：
         {"type": "text", "content": "最终回答", "tool_trace": [{"name", "arguments", "output"}, ...]}
     """
-    if not API_KEY:
+    if not _has_key():
         if _is_demo_mode():
             return _demo_chat_fallback(messages)
-        return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~", "tool_trace": []}
+        return {"type": "text", "content": "⚠️ 请先在设置页配置 API Key 才能使用 AI 功能哦~", "tool_trace": []}
+
+    if model is None:
+        model = _chat_model()
 
     history = [dict(m) for m in messages]
     tool_trace = []

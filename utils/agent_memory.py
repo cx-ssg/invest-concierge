@@ -11,7 +11,7 @@ Agent 记忆层：跨页会话持久化（"越用越懂"的关键）。
 """
 import sys
 
-from config import API_KEY
+from utils.ai_helper import _has_key as _key_check
 from data.database import (
     create_agent_session,
     add_agent_message,
@@ -51,7 +51,7 @@ def summarize_session(session_id, llm_fn=None):
     if not messages:
         return ""
 
-    if API_KEY:
+    if _key_check():
         try:
             if llm_fn is None:
                 # 晚绑定：避免 agent_memory → ai_helper → agent_core → agent_memory 循环 import，

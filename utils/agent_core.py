@@ -19,6 +19,12 @@ from typing import Optional, List, Dict, Any
 
 from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
 
+
+def _reasoner_model():
+    """v1.2 多 provider：DB 配置的 reasoner 模型优先（未配置回落 DeepSeek）"""
+    from services.llm_config import get_llm_config
+    return get_llm_config()["reasoner_model"] or DEEPSEEK_REASONER_MODEL
+
 # Windows 控制台 GBK 防护
 if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
     try:
@@ -386,7 +392,7 @@ AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投�
 
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
-              model=DEEPSEEK_REASONER_MODEL, temperature=0.7, max_tool_rounds=8,
+              model=_reasoner_model(), temperature=0.7, max_tool_rounds=8,
               continue_question=False, on_progress=None, structured_progress=False):
     """带规划的 Agent 多轮执行循环（ai_chat / 诊断页"AI 追问"共用入口）。
 

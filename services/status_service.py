@@ -8,7 +8,8 @@ SIDEBAR_FETCH_TIMEOUT 经验：TUN 代理拦数据源时不让状态栏拖整页
 
 import datetime
 
-from config import API_KEY, DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
+from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
+from services.llm_config import get_llm_config
 from utils.common import fetch_with_timeout
 
 VERSION = "1.0.0"
@@ -21,7 +22,7 @@ def health():
     """GET /api/health：存活探针（最轻量，无外部调用）"""
     return {
         "status": "ok",
-        "api_key_configured": bool(API_KEY),
+        "api_key_configured": bool(get_llm_config()["api_key"]),
         "version": VERSION,
         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
     }
@@ -45,10 +46,10 @@ def status_bar():
 
     return {
         "engine": {
-            "state": "ready" if API_KEY else "off",
-            "api_key_configured": bool(API_KEY),
-            "chat_model": DEEPSEEK_MODEL,
-            "reasoner_model": DEEPSEEK_REASONER_MODEL,
+            "state": "ready" if get_llm_config()["api_key"] else "off",
+            "api_key_configured": bool(get_llm_config()["api_key"]),
+            "chat_model": get_llm_config()["model"] or DEEPSEEK_MODEL,
+            "reasoner_model": get_llm_config()["reasoner_model"] or DEEPSEEK_REASONER_MODEL,
         },
         "data_source": {
             "ok": bool(indices),

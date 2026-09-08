@@ -20,6 +20,9 @@ import type {
   NavPayload,
   SessionMessage,
   SessionSummary,
+  LlmSavePayload,
+  LlmTestPayload,
+  LlmViewPayload,
   SettingsPayload,
   SSEEvent,
   StatusPayload,
@@ -141,6 +144,12 @@ export const api = {
         '/api/settings/ai-read-holdings',
         jsonInit('POST', { enabled }),
       ),
+    // v1.2 模型接入（key 明文只进请求体，回显永远是掩码）
+    getLlm: () => request<LlmViewPayload>('/api/settings/llm'),
+    saveLlm: (body: { provider: string; api_key?: string; base_url?: string; model?: string; reasoner_model?: string }) =>
+      request<LlmSavePayload>('/api/settings/llm', jsonInit('POST', body)),
+    testLlm: (body: { provider: string; api_key?: string; base_url?: string; model?: string }) =>
+      request<LlmTestPayload>('/api/settings/llm/test', jsonInit('POST', body)),
   },
 
   // ==================== 价格预警（v1.1 粘性三件套 A） ====================

@@ -4,6 +4,7 @@ import datetime
 import json
 import threading
 from unittest.mock import patch
+from services import llm_config
 
 import pandas as pd
 
@@ -93,7 +94,7 @@ def _fake_llm_one_tool_then_text(messages, tools=None, model=None, temperature=0
 def test_agent_run_structured_progress_off_by_default():
     """默认 structured_progress=False：on_progress 只收字符串 detail，零回归"""
     seen = []
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=_fake_llm_one_tool_then_text), \
          patch.object(agent_core, "execute_ai_tool_v2",
                       side_effect=lambda n, a: json.dumps({"ok": True}, ensure_ascii=False)):
@@ -105,7 +106,7 @@ def test_agent_run_structured_progress_off_by_default():
 def test_agent_run_structured_progress_emits_start_end_pair():
     """structured_progress=True：tool_start/tool_end 成对，含 name/arguments/ok/elapsed_ms"""
     seen = []
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=_fake_llm_one_tool_then_text), \
          patch.object(agent_core, "execute_ai_tool_v2",
                       side_effect=lambda n, a: json.dumps({"ok": True}, ensure_ascii=False)):
@@ -128,7 +129,7 @@ def test_agent_run_structured_progress_bad_tool_marks_not_ok():
         return "工具执行失败：数据源不可用"
 
     seen = []
-    with patch.object(ai_helper, "API_KEY", "sk-test"), \
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=_fake_llm_one_tool_then_text), \
          patch.object(agent_core, "execute_ai_tool_v2", side_effect=fake_execute):
         agent_run("x", structured_progress=True,
