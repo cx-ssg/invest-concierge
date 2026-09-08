@@ -2,6 +2,19 @@
 
 本项目遵循 [Semver](https://semver.org/)。发布日如有调整，以 GitHub Release 为准。
 
+## [Unreleased] - 2026-09-08
+
+### Added
+- **v1.2 模型接入**：设置页「模型接入」卡片——直接填 API Key，无需再写 .env/local_env.bat
+- 多 provider 支持：DeepSeek 官方 / SiliconFlow 硅基流动 / 阿里云百炼 DashScope / 自定义 OpenAI 兼容端点（中转/网关/本地部署）
+- 测试连接：保存前发最小请求验证连通，回显延迟；401/404/429/超时自动翻译为人话
+- Key 安全：仅落本机 SQLite（app_settings），掩码回显（sk-ab****wxyz），不入 git/不上传/不回传明文
+
+### Changed
+- 配置优先级：设置页 DB > .env/环境变量（.env 老用户零迁移，继续有效）
+- 保存即生效无需重启（ai_helper/agent_core/report/status 全链路动态读配置）
+- 26 处测试 patch 迁移至 llm_config._TEST_KEY_OVERRIDE 钩子；pytest 171→180
+
 ## [1.0.0] - 2026-09-15（计划）
 
 首个公开版本。
