@@ -16,8 +16,11 @@ PROVIDERS = {
     "deepseek": {
         "label": "DeepSeek 官方",
         "base_url": "https://api.deepseek.com",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
-        "default_model": "deepseek-chat",
+        # 2026-07-24 起 deepseek-chat/deepseek-reasoner 已停用（调旧名 400/404），
+        # 现役三模型：flash（默认，快+便宜）/ pro（旗舰推理）/ flash-vision-exp（图片输入）
+        # 思考/非思考 = 同一模型 ID 用 thinking 参数切换（V4 设计，非选不同模型名）
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"],
+        "default_model": "deepseek-v4-flash",
         "key_hint": "platform.deepseek.com",
         "env_key": "DEEPSEEK_API_KEY",
     },

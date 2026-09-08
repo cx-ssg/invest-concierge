@@ -181,7 +181,7 @@ export function SettingsPage() {
             <input
               value={llmModel}
               onChange={(e) => setLlmModel(e.target.value)}
-              placeholder={llmMeta?.default_model || '如 deepseek-chat'}
+              placeholder={llmMeta?.default_model || '如 deepseek-v4-flash'}
               list="llm-model-options"
               className="mono mt-1 w-full rounded-tile border border-hairline bg-bg px-3 py-2 text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus:border-hairline-strong"
             />

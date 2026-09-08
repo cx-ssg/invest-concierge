@@ -42,14 +42,18 @@ def _chat_model():
     return get_llm_config()["model"] or DEEPSEEK_MODEL
 
 
-def call_llm(prompt, tools=None, model=None, temperature=0.7):
+def call_llm(prompt, tools=None, model=None, temperature=0.7, thinking=False):
     """统一的 LLM 调用函数
 
     参数：
         prompt: 字符串或消息列表（格式为 [{"role": "system", "content": ...}, {"role": "user", "content": ...}]）
         tools: 工具定义列表（可选），当不为空时启用 tool_choice="auto"
-        model: 模型名称，默认 "deepseek-chat"
-        temperature: 温度参数，默认 0.7
+        model: 模型名称，None=用配置的默认（deepseek-v4-flash）
+        temperature: 温度参数，默认 0.7（思考模式下服务端不生效，仅兼容保留）
+        thinking: v1.2.1 思考模式开关（V4 设计：同一模型 ID 用 thinking 参数切换）。
+            False=非思考（=旧 deepseek-chat 行为，快+便宜）；
+            True=思考（返回 reasoning_content 思维链；思考模式下 temperature 等采样参数不生效）。
+            ⚠️ 带 tools 的思考模式多轮调用需回传 reasoning_content（当前 agent 链路非思考调用，不受影响）。
 
     返回：
         - 纯文本模式：{"type": "text", "content": "回复内容"}
@@ -84,6 +88,14 @@ def call_llm(prompt, tools=None, model=None, temperature=0.7):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+
+        # v1.2.1：DeepSeek V4 思考模式开关（extra_body 透传 thinking 参数）。
+        # 默认 False=显式关闭思考（对齐旧 deepseek-chat 非思考行为；
+        # V4 思考默认开启，不显式关会把日常对话变成慢+贵的思考调用）。
+        if thinking:
+            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        else:
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         response = client.chat.completions.create(**kwargs)
         choice = response.choices[0]
@@ -581,7 +593,10 @@ def chat_with_tools(messages, tools=None, model=None, temperature=0.7, max_tool_
     tools = AI_TOOLS if tools is None else tools
 
     for _round in range(max_tool_rounds + 1):
-        result = call_llm(history, tools=tools, model=model, temperature=temperature)
+        # v1.2.1：chat_with_tools 是"AI 追问"思考流展示链路 → 开思考（返回 reasoning_content）。
+        # ⚠️ V4 思考模式带 tools 多轮需回传 reasoning_content（官方 400 契约）——
+        # 当前 history 未回传，若服务端报错则在此追加 reasoning_content 透传逻辑。
+        result = call_llm(history, tools=tools, model=model, temperature=temperature, thinking=True)
         if result.get("type") != "tool_call":
             result.setdefault("tool_trace", tool_trace)
             return result

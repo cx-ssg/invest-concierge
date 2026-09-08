@@ -27,7 +27,7 @@ def test_agent_run_plan_loop_tool_trace_ge_3_in_order():
     calls = []
     order = ["get_stock_diagnosis", "get_stock_valuation", "get_stock_minefield"]
 
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         calls.append(messages)
         if len(calls) <= len(order):
             name = order[len(calls) - 1]
@@ -59,7 +59,7 @@ def test_agent_run_error_fill_says_data_unavailable():
     """验收：mock 全部工具返回 error → 回填 error 后最终明说"数据不可得"，不编造"""
     calls = []
 
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         calls.append(messages)
         if len(calls) == 1:
             return _tool_call("get_stock_diagnosis", {"stock_code": "600519"})
@@ -83,7 +83,7 @@ def test_agent_run_error_fill_says_data_unavailable():
 
 def test_agent_run_no_key_returns_guide():
     """无 key 全链路降级：返回引导文案，tool_trace 为空，不崩"""
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~"}
 
     with patch.object(llm_config, "_TEST_KEY_OVERRIDE", ""), \
@@ -96,7 +96,7 @@ def test_agent_run_no_key_returns_guide():
 
 def test_agent_run_max_rounds_cap():
     """模型一直请求工具 → max_tool_rounds(8) 封顶，返回超限提示"""
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         return _tool_call("get_market_index", {}, call_id="call_x")
 
     with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
@@ -116,7 +116,7 @@ def test_agent_run_injects_context_into_system_prompt():
     """context（含诊断数据 + 记忆摘要）拼进 system prompt（诊断追问注入规则的落点）"""
     captured = []
 
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         captured.append(messages)
         return {"type": "text", "content": "好的"}
 
@@ -144,7 +144,7 @@ def test_agent_run_memory_records_and_reuses_session(tmp_path, monkeypatch):
 
     calls = []
 
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         calls.append(messages)
         if len(calls) == 1:
             return _tool_call("get_market_index", {}, call_id="call_1")
@@ -184,7 +184,7 @@ def test_agent_run_memory_no_key_still_records(tmp_path, monkeypatch):
     monkeypatch.setattr(database, "DB_FILE", str(tmp_path / "agent2.db"))
     database.init_db()
 
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         return {"type": "text", "content": "⚠️ 请先配置 DeepSeek API Key 才能使用 AI 功能哦~"}
 
     with patch.object(llm_config, "_TEST_KEY_OVERRIDE", ""), \

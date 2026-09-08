@@ -484,7 +484,10 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         tools = [t.schema for t in TOOL_REGISTRY.values()]
 
     for _round in range(max_tool_rounds + 1):
-        result = ai_helper.call_llm(messages, tools=tools, model=model, temperature=temperature)
+        # v1.2.1：思考模式开关——agent 链路默认显式关闭思考（旧 chat 行为：快+便宜）。
+        # 原生思考流展示走 chat_with_tools/_reasoner_model 链路（那是诊断页 AI 追问）；
+        # 若未来要 agent 思考，加 thinking=True 并处理 reasoning_content 回传契约。
+        result = ai_helper.call_llm(messages, tools=tools, model=model, temperature=temperature, thinking=False)
         # 模型原生思考流（reasoner 才有；deepseek-chat 为空）实时透传
         if result.get("reasoning"):
             _progress("reasoning", result["reasoning"])

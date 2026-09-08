@@ -89,7 +89,7 @@ def test_chat_with_tools_runs_tool_loop():
     """有 Key：模型先请求工具，执行器回填后再出文本（完整闭环）"""
     calls = []
 
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         calls.append(messages)
         if len(calls) == 1:
             return {"type": "tool_call", "content": [{
@@ -118,7 +118,7 @@ def test_chat_with_tools_runs_tool_loop():
 
 def test_chat_with_tools_max_rounds_cap():
     """模型一直请求工具时，循环被 max_tool_rounds 封顶，返回提示文案"""
-    def fake_call_llm(messages, tools=None, model=None, temperature=0.7):
+    def fake_call_llm(messages, tools=None, model=None, temperature=0.7, thinking=False):
         return {"type": "tool_call", "content": [{
             "id": "call_x",
             "type": "function",

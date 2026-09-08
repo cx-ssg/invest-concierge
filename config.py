@@ -15,11 +15,36 @@ try:
 except Exception:
     pass  # 未安装 python-dotenv 时退化为纯系统环境变量模式
 
+# v1.2.1：兼容 local_env.bat（exe 直接启动时 start.bat 链路不存在，.bat 未被 source，
+# key 读不到 → 引擎"假未配置"）。这里解析 bat 的 set KEY=value 行注入环境变量——
+# 仅本机开发场景文件，不随 exe 分发；优先级仍低于系统环境变量（已存在则跳过）。
+def _load_local_env_bat():
+    """解析 local_env.bat 的 `set KEY=value` 行（兼容 REM 注释/引号/尾部空白）"""
+    import re
+    bat = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_env.bat")
+    try:
+        with open(bat, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                m = re.match(r"\s*set\s+([A-Za-z_][A-Za-z0-9_]*)=(.+?)\s*$", line, re.IGNORECASE)
+                if not m:
+                    continue
+                k, v = m.group(1), m.group(2).strip().strip('"')
+                if k not in os.environ and v:  # 系统环境变量优先
+                    os.environ[k] = v
+    except OSError:
+        pass  # 无 bat 文件=正常（exe 分发场景）
+
+_load_local_env_bat()
+
 # ==================== API 配置 ====================
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
-DEEPSEEK_MODEL = "deepseek-chat"
+# v1.2.1：2026-07-24 起 deepseek-chat/deepseek-reasoner 已停用（调旧名 400/404）。
+# 默认模型升级为 deepseek-v4-flash（快+便宜，非思考=旧 chat 行为）；
+# reasoner 用同一模型显式开思考（V4 设计：思考/非思考=同 ID 参数切换，非不同模型名）。
+# thinking 开关通过 extra_body={"thinking": {"type": "enabled"}} 传递（见 ai_helper.call_llm）。
+DEEPSEEK_MODEL = "deepseek-v4-flash"
 # reasoner：返回 reasoning_content（模型原生思考流，对话中心思考链展示用）
-DEEPSEEK_REASONER_MODEL = os.environ.get("DEEPSEEK_REASONER_MODEL", "deepseek-reasoner")
+DEEPSEEK_REASONER_MODEL = os.environ.get("DEEPSEEK_REASONER_MODEL", "deepseek-v4-flash")
 
 # ==================== 缓存配置 ====================
 CACHE_TTL = {

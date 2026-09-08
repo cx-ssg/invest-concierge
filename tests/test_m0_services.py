@@ -85,7 +85,7 @@ def test_to_jsonable_str_fallback_for_unknown_objects():
 # ==================== M0 #4：structured_progress 事件对 ====================
 
 
-def _fake_llm_one_tool_then_text(messages, tools=None, model=None, temperature=0.7):
+def _fake_llm_one_tool_then_text(messages, tools=None, model=None, temperature=0.7, thinking=False):
     if len([m for m in messages if m.get("role") == "tool"]) == 0:
         return _tool_call("get_stock_diagnosis", {"stock_code": "600519"})
     return {"type": "text", "content": "好了"}
