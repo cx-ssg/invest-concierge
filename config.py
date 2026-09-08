@@ -19,20 +19,39 @@ except Exception:
 # key 读不到 → 引擎"假未配置"）。这里解析 bat 的 set KEY=value 行注入环境变量——
 # 仅本机开发场景文件，不随 exe 分发；优先级仍低于系统环境变量（已存在则跳过）。
 def _load_local_env_bat():
-    """解析 local_env.bat 的 `set KEY=value` 行（兼容 REM 注释/引号/尾部空白）"""
+    """解析 local_env.bat 的 `set KEY=value` 行（兼容 REM 注释/引号/尾部空白）。
+
+    多路径探测（按优先级）：
+    1. 源码目录（__file__ 旁）——开发/start.bat 场景
+    2. exe 同目录（sys.executable 旁）——本机双击 exe 测试场景
+    3. cwd——便携/任意启动场景
+    仅本机开发文件，不随 exe 分发；系统环境变量优先级最高（已存在则跳过）。
+    """
     import re
-    bat = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_env.bat")
+    import sys as _sys
+    cands = []
+    base = os.path.dirname(os.path.abspath(__file__))
+    cands.append(os.path.join(base, "local_env.bat"))
     try:
-        with open(bat, encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                m = re.match(r"\s*set\s+([A-Za-z_][A-Za-z0-9_]*)=(.+?)\s*$", line, re.IGNORECASE)
-                if not m:
-                    continue
-                k, v = m.group(1), m.group(2).strip().strip('"')
-                if k not in os.environ and v:  # 系统环境变量优先
-                    os.environ[k] = v
-    except OSError:
-        pass  # 无 bat 文件=正常（exe 分发场景）
+        cands.append(os.path.join(os.path.dirname(os.path.abspath(_sys.executable)), "local_env.bat"))
+    except Exception:
+        pass
+    cands.append(os.path.join(os.getcwd(), "local_env.bat"))
+    for bat in cands:
+        if not os.path.exists(bat):
+            continue
+        try:
+            with open(bat, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    m = re.match(r"\s*set\s+([A-Za-z_][A-Za-z0-9_]*)=(.+?)\s*$", line, re.IGNORECASE)
+                    if not m:
+                        continue
+                    k, v = m.group(1), m.group(2).strip().strip('"')
+                    if k not in os.environ and v:  # 系统环境变量优先
+                        os.environ[k] = v
+        except OSError:
+            continue
+        break  # 命中第一个存在的 bat 即停
 
 _load_local_env_bat()
 
