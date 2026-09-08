@@ -92,10 +92,15 @@ def call_llm(prompt, tools=None, model=None, temperature=0.7, thinking=False):
         # v1.2.1：DeepSeek V4 思考模式开关（extra_body 透传 thinking 参数）。
         # 默认 False=显式关闭思考（对齐旧 deepseek-chat 非思考行为；
         # V4 思考默认开启，不显式关会把日常对话变成慢+贵的思考调用）。
-        if thinking:
-            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
-        else:
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        # Hermes 审计 🟡-3：extra_body 仅 DeepSeek 官方认识——SiliconFlow/DashScope/
+        # 自定义 OpenAI 兼容端点传未知字段可能 4xx，按 provider 白名单发送。
+        from services.llm_config import get_llm_config as _llm_cfg
+        provider = _llm_cfg()["provider"]
+        if provider == "deepseek":
+            if thinking:
+                kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            else:
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         response = client.chat.completions.create(**kwargs)
         choice = response.choices[0]
@@ -594,15 +599,20 @@ def chat_with_tools(messages, tools=None, model=None, temperature=0.7, max_tool_
 
     for _round in range(max_tool_rounds + 1):
         # v1.2.1：chat_with_tools 是"AI 追问"思考流展示链路 → 开思考（返回 reasoning_content）。
-        # ⚠️ V4 思考模式带 tools 多轮需回传 reasoning_content（官方 400 契约）——
-        # 当前 history 未回传，若服务端报错则在此追加 reasoning_content 透传逻辑。
+        # V4 契约（Hermes 审计 🔴-2）：思考模式带 tools 多轮，assistant 轮次的
+        # reasoning_content 必须回传，否则服务端 400（"must be passed back"）。
         result = call_llm(history, tools=tools, model=model, temperature=temperature, thinking=True)
         if result.get("type") != "tool_call":
             result.setdefault("tool_trace", tool_trace)
             return result
 
         tool_calls = result.get("content") or []
-        history.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+        # 回传本轮思考流（有则带，无则 None；V4 要求 assistant + reasoning 成对）
+        reasoning = result.get("reasoning") or ""
+        asst_msg = {"role": "assistant", "content": None, "tool_calls": tool_calls}
+        if reasoning:
+            asst_msg["reasoning_content"] = reasoning
+        history.append(asst_msg)
         for tc in tool_calls:
             fn = tc.get("function") or {}
             name = fn.get("name", "")

@@ -129,3 +129,43 @@ def test_custom_provider_requires_base_url(client):
         r = client.post("/api/settings/llm/test", json={
             "provider": "custom", "api_key": "sk-x", "base_url": "", "model": "gpt-x"}).json()
     assert r["ok"] is False and "Base URL" in r["error"]
+
+
+def test_llm_thinking_extra_body_only_deepseek(tmp_db, monkeypatch):
+    """Hermes 审计 🟡-3：extra_body(thinking) 仅 DeepSeek provider 发送——非 deepseek 端点不传未知字段"""
+    from types import SimpleNamespace
+    from utils import ai_helper
+    from services import llm_config as lc
+
+    lc._TEST_KEY_OVERRIDE = "sk-test-1234567890123"
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured['extra_body'] = kwargs.get('extra_body')
+        # call_llm 访问链：response.choices[0].message.content / .reasoning_content
+        import types
+        m = types.SimpleNamespace(content="ok")
+        m.reasoning_content = None
+        m.tool_calls = None
+        ch = types.SimpleNamespace(message=m, finish_reason="stop")
+        return types.SimpleNamespace(choices=[ch])
+
+    try:
+        # deepseek provider → 应发 thinking disabled
+        # 注意：ai_helper 模块级 from openai import OpenAI → 必须 patch 模块命名空间
+        #（patch("openai.OpenAI") 只改 openai 模块属性，ai_helper 早已绑定旧引用）
+        with patch.object(ai_helper, "OpenAI") as mk:
+            mk.return_value.chat.completions.create.side_effect = fake_create
+            ai_helper.call_llm("hi", thinking=False)
+        assert captured['extra_body'] == {"thinking": {"type": "disabled"}}, "deepseek 应发 disabled"
+
+        # 切到 siliconflow provider → 不发 extra_body（白名单）
+        lc.save_llm_config("siliconflow", api_key="sk-sf-1234567890123", model="deepseek-ai/DeepSeek-V4-Flash")
+        with patch.object(ai_helper, "OpenAI") as mk:
+            mk.return_value.chat.completions.create.side_effect = fake_create
+            ai_helper.call_llm("hi", thinking=False)
+        assert captured['extra_body'] is None, "非 deepseek 不应发 extra_body"
+    finally:
+        lc._TEST_KEY_OVERRIDE = None
+        lc.save_llm_config("deepseek", api_key="")
+
