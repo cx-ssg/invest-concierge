@@ -4,6 +4,13 @@
 
 ## [Unreleased] - 2026-09-08
 
+### Fixed
+- **v1.2.1 DeepSeek V4 模型升级**：`deepseek-chat`/`deepseek-reasoner` 已 2026-07-24 被官方停用（调旧名 400/404）——默认模型改为 `deepseek-v4-flash`，现役三模型可选：`deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp`（图片输入）
+- 思考模式开关：V4 思考默认开启 → agent 对话链路显式关闭（对齐旧 chat 快+便宜行为），诊断"AI 追问"链路开启（保留思考链展示）；思考经 `extra_body={"thinking": ...}` 切换，非换模型名
+- **local_env.bat 兼容**：exe 直接启动（无 start.bat）也能读到 key——多路径探测（源码目录/exe 同目录/cwd）
+
+## [Unreleased] - 2026-09-08
+
 ### Added
 - **v1.2 模型接入**：设置页「模型接入」卡片——直接填 API Key，无需再写 .env/local_env.bat
 - 多 provider 支持：DeepSeek 官方 / SiliconFlow 硅基流动 / 阿里云百炼 DashScope / 自定义 OpenAI 兼容端点（中转/网关/本地部署）
