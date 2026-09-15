@@ -21,8 +21,40 @@ BACKUP_EMBED_KEY = None
 BACKUP_EMBED_MODEL = "BAAI/bge-m3"
 
 
+EMBED_BATCH = 32   # 单次请求最大条数（依据见 embed_texts_batched）
+
+
+def embed_texts_batched(texts, batch_size=EMBED_BATCH, model=MODEL,
+                        timeout=DEFAULT_TIMEOUT, on_progress=None):
+    """分批 embedding —— **大批量必须走这个，不要直接调 embed_texts**。
+
+    实测依据（2026-09-16）：1041 个公告块一次性 POST → ollama `HTTP Error 400 Bad Request`
+    （请求体过大）。知识库侧 `search_wiki.build_index` 一直是分批的（64），本模块初版漏了这层。
+
+    `on_progress(done, total)` 可选回调，供 ingest 打印可观测进度。
+    """
+    if batch_size <= 0:
+        # 静默返回 [] 会让调用方以为「没有向量要算」而丢数据 —— 必须响亮地失败
+        raise ValueError("batch_size 必须 >= 1，收到 {}".format(batch_size))
+    texts = list(texts or [])
+    if not texts:
+        return []
+    out = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        got = embed_texts(batch, model=model, timeout=timeout)
+        if len(got) != len(batch):
+            raise RuntimeError(
+                "embedding 条数不一致：请求 {} 条、返回 {} 条（错位向量比报错更危险）".format(
+                    len(batch), len(got)))
+        out.extend(got)
+        if on_progress:
+            on_progress(min(i + batch_size, len(texts)), len(texts))
+    return out
+
+
 def embed_texts(texts, model=MODEL, timeout=DEFAULT_TIMEOUT):
-    """批量 embedding，返回 list[list[float]]。
+    """单批 embedding，返回 list[list[float]]。
 
     空输入直接返回 []（不触发网络）；失败抛 RuntimeError 并给出可操作指引（K3 验收）。
     """
