@@ -19,6 +19,31 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# ==================== 国内财经数据源绕代理（2026-09-15） ====================
+# Why：akshare 内部走 requests，requests 默认 trust_env → 读系统代理（v2rayN 10808）。
+# v2rayN 一旦抖动或分流异常，股票接口直接 ProxyError('Remote end closed connection')，
+# 表现为「K 线 / 资金流整体不可得」（2026-09-15 在线评测实测：26 条里所有股票数据都因此失败）。
+# 国内财经域名本就该直连；海外 API（DeepSeek / 检索）必须保留代理，
+# 故这里只**追加**国内域名，绝不整体关代理。
+_FINANCE_NO_PROXY = (
+    "eastmoney.com,push2.eastmoney.com,push2his.eastmoney.com,fund.eastmoney.com,"
+    "sinajs.cn,sina.com.cn,finance.sina.com.cn,gtimg.cn,qq.com,163.com,"
+    "cninfo.com.cn,szse.cn,sse.com.cn,csindex.com.cn,hexun.com,"
+    "localhost,127.0.0.1"
+)
+
+
+def _apply_finance_no_proxy():
+    """把国内财经域名追加进 NO_PROXY（幂等；不覆盖用户已设的其他域名）"""
+    for key in ("NO_PROXY", "no_proxy"):
+        cur = os.environ.get(key, "")
+        if "eastmoney.com" in cur:
+            continue
+        os.environ[key] = (cur + "," + _FINANCE_NO_PROXY).strip(",")
+
+
+_apply_finance_no_proxy()
+
 # ==================== JSON 工具 ====================
 
 

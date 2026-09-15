@@ -57,7 +57,7 @@ def get_fund_info(fund_code):
                 pass
             return None
         r = row.iloc[0]
-        return {
+        info = {
             'name': str(r.get('基金简称', str(r.get('基金名称', '')))),
             'code': fund_code,
             'dwjz': '--',
@@ -65,6 +65,25 @@ def get_fund_info(fund_code):
             'gszzl': 0,
             'gztime': '',
         }
+        # 2026-09-15 修（由在线评测连带发现）：净值四字段此前是**硬编码占位**——本函数只从
+        # ak.fund_name_em()（纯名称列表）取名字，从来没有净值；而 holdings_service（持仓页）、
+        # alert_service（价格预警判涨跌幅）、compare_funds（基金对比）都把它当净值源 →
+        # 持仓页恒 '--'、**基金预警恒按涨跌 0 判断（永不触发）**。
+        # 现改用已有缓存的 get_fund_history 补：dwjz=最新单位净值、gszzl=相邻两净值算出的
+        # 日涨跌幅（%）、gztime=最新净值日期。
+        # ⚠️ gsz（盘中估算净值）无可靠数据源（原 fundgz.1234567.com.cn 接口已下线，
+        # 2026-09-15 实测返回东财 404 页）→ 保持 '--'，不编数字。
+        try:
+            nav_dates, nav_values = get_fund_history(fund_code, days=30)
+            if len(nav_values) >= 1:
+                info['dwjz'] = round(float(nav_values[-1]), 4)
+                info['gztime'] = pd.to_datetime(nav_dates[-1]).strftime('%Y-%m-%d')
+                if len(nav_values) >= 2 and nav_values[-2]:
+                    info['gszzl'] = round(
+                        (float(nav_values[-1]) / float(nav_values[-2]) - 1) * 100, 2)
+        except Exception as e:
+            print("基金 {} 净值补充失败：{}".format(fund_code, e))
+        return info
     except Exception as e:
         print("获取基金 {} 信息失败：{}".format(fund_code, e))
         return None
@@ -92,17 +111,28 @@ def _fetch_fund_history(fund_code, days=365):
         df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
         if df is None or df.empty:
             return None
-        df = df.sort_index()
+        # 2026-09-15 修（由在线评测连带发现）：**按列名**取日期与净值，不再用 index / 位置。
+        # 实测 akshare 返回的 index 是 0..N 整数、首列是「净值日期」字符串，
+        # 旧写法 pd.to_datetime(index) + float(row.iloc[0]) 让每一行都 ValueError →
+        # 被 continue 全部跳过 → 本函数恒返回 None（历史净值/指标/回测一并失效）。
+        date_col = next((c for c in df.columns if "日期" in str(c)), None)
+        val_col = next((c for c in df.columns if "单位净值" in str(c)), None)
+        if date_col is None or val_col is None:
+            print("基金 {} 历史净值列名异常：{}".format(fund_code, list(df.columns)))
+            return None
         dates = []
         values = []
-        for idx, row in df.iterrows():
-            try:
-                d = pd.to_datetime(idx)
-                v = float(row.iloc[0])
-                dates.append(d)
-                values.append(v)
-            except (ValueError, TypeError):
+        for _, row in df.iterrows():
+            d = pd.to_datetime(row[date_col], errors="coerce")
+            v = pd.to_numeric(row[val_col], errors="coerce")
+            if pd.isna(d) or pd.isna(v):
                 continue
+            dates.append(d)
+            values.append(float(v))
+        if dates:
+            pairs = sorted(zip(dates, values))
+            dates = [p[0] for p in pairs]
+            values = [p[1] for p in pairs]
         # 截取需要的天数
         if len(dates) > days:
             dates = dates[-days:]

@@ -26,7 +26,32 @@
 - `tests/test_tool_contract_hardening.py`：**10 条回归锁**（缺参 / 空参 / 无必填项工具 / 超时生效与关闭 / 并行默认关 / 顺序基线 / 并行下 trace 顺序）。
 - **P0-5 · `agent_messages` 瘦身**：`record_message(session, "tool", …)` 落库时按 `TOOL_MESSAGE_LIMIT`（600）截断为**摘要 + 截断标记（含原始长度）**，不再落全文 —— 工具返回的完整 JSON（行情 / K 线 / 财报可达数十 KB）对「越用越懂」没有价值，却会让表无界膨胀并污染 `summarize_session` 的 transcript；`user` / `assistant` 消息**不受限**（对话内容才是记忆原料）。非字符串入参先序列化，按同一规则处理。
 - `tests/test_tool_message_slimming.py`：**6 条回归锁**（tool 截断 + 标记带原始长度 / 短 tool 原样 / user·assistant 不截断对照 / 非字符串入参 / 上限合理性）。
-- 全量 `pytest` **258 passed**（181 → 189 → 201 → 233 → 236 → 242 → 252 → 本轮 258）。
+- 全量 `pytest` **258 passed**（181 → 189 → 201 → 233 → 236 → 242 → 252 → 258）。
+
+### 在线评测连带发现的缺口修复（2026-09-15 · **非 P0 范围**）
+
+> 起因：把 `scripts/eval_agent.py --run` 真跑了一遍（26 条，工具命中 26/26=100%、事实 38/45=84.4%）。
+> 报告里出现「净值类数据当前不可得」与 akshare `ProxyError`，顺着查，抓出**三个长期存在、离线测试永远看不见**的缺口。
+
+1. **`_fetch_fund_history` 按位置取列 → 基金历史净值恒返回空（最严重）**
+   实测 akshare 返回的 index 是 `0..N` 整数、首列是「净值日期」字符串，旧写法
+   `pd.to_datetime(index)` + `float(row.iloc[0])` 让**每一行**都 `ValueError` 被 `continue` 跳过
+   → 函数恒返回 `None`。连带 `calc_fund_metrics` / `backtest_dca` / 净值曲线 / `get_fund_history` 工具全废。
+   修：按**列名**（含「日期」/「单位净值」关键字）解析 + `errors="coerce"` + 按日期排序（列名改名也能容错）。
+2. **`get_fund_info` 的净值四字段是硬编码占位** → 持仓页恒 `--`、**价格预警恒按涨跌 0 判断（永不触发）**
+   它只从 `ak.fund_name_em()`（纯名称列表）取名字，却同时被 `holdings_service`（持仓页）、
+   `alert_service`（价格预警判涨跌幅）、`compare_funds`（基金对比）当作净值源。
+   修：用**已有缓存的** `get_fund_history` 补 `dwjz`/`gszzl`（相邻两净值自算 %）/`gztime`；
+   `gsz`（盘中估算净值）无可靠数据源（原 `fundgz.1234567.com.cn` 已下线，实测返回东财 404 页）
+   → 保持 `--`，**不编数字**。
+3. **国内财经域名未绕系统代理** → akshare 走 v2rayN（10808）时代理一抖动就
+   `ProxyError ... RemoteDisconnected` → 股票 K 线 / 资金流整体不可得（评测 26 条里所有股票数据都因此失败）。
+   修：`utils/common.py` 模块级把 eastmoney / sina / qq / 163 / cninfo / 交易所等**追加**进 `NO_PROXY`（幂等），
+   海外 API（模型 / 检索）保持走代理。
+
+- `tests/test_fund_data_fixes.py`：**6 条回归锁**（列名解析 / 列名改名容错 / 公开契约非空 / 净值填充 / 拿不到时降级 / 代理绕行对照 + 海外不绕）。
+- **真实数据端到端**：`get_fund_history('000001')` → 2026-09-09~09-15 五日真实净值 `[1.268,1.262,1.254,1.235,1.25]`；`get_fund_info('000001')` → `dwjz=1.25, gszzl=1.21, gztime='2026-09-15'`（自算 `1.250/1.235-1=1.2146%→1.21` 与 akshare「日增长率」列吻合）。
+- 全量 `pytest` **264 passed**（258 + 6）。
 
 ### 审计处理（2026-09-15 · 独立子代理审 `4d51a15..HEAD`）
 - 总体判定：**P0-1/P0-2 达标**（行为锚定、revert 即 FAIL、无自证陷阱）；**golden set 仅算阶段性半成品**（`test_golden_case_drives_agent_run` 是编排冒烟，不是评测）—— 已如实标注于本节与 `tests/golden/cases.py` docstring。

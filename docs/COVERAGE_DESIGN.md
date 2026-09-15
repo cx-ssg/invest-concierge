@@ -427,3 +427,37 @@ P0（P0-1 ~ P0-5） → M1 → M2 → M3 → MCP / Agentic RAG
 
 - 审计方**跑不了 pytest**（只读环境）→ 「RED→GREEN」是它的**静态推演** → **由主代理实测补上**：`test_p0_agent_fixes.py` 8 条 → 4 failed；`test_tool_error_contract.py` 12 条 → 10 failed；各轮全量 189 → 201 → 233 → 236 passed，均为实际运行输出。
 - **本次审计自身的经验（可复用）**：`tool:review` 跑满 8 步被暂停；`tool:read_only_task` 传 `effort=high` 报 `UNSUPPORTED_REASONING_EFFORT`（`deepseek-v4.1-flash` 的 supported 列表为空）→ **子代理用默认 effort，别传高推理档**。
+
+---
+
+## 13. 在线评测首跑与「连带发现」实证（2026-09-15）
+
+### 13.1 首跑数据（`scripts/eval_agent.py --run`，全 26 条）
+
+| 指标 | 结果 |
+|---|---|
+| 工具命中 | **26/26 = 100%**（模型选工具零失误） |
+| 事实命中 | 38/45 = 84.4%（宽松子串） |
+| token | prompt 204,381 / completion 12,587 / total **216,968**（58 次模型调用） |
+| 耗时 | 210.8s（2 条试水时 16.8s / 13,820 token） |
+
+> 显式未做：**未给 `--price`** —— 单价随平台与峰谷变动，宁可只报 token 也不报一个会过时的钱数。
+
+### 13.2 价值实证：在线评测抓出了离线测试**结构上抓不到**的三件事
+
+离线（`test_golden_offline.py`）锁的是「编排契约」——mock 按用例吐工具序列、agent 执行同一序列，
+**它不可能发现"工具调对了但数据是空的/假的/拿不到"**。首跑立刻暴露三条：
+
+1. **`_fetch_fund_history` 恒返回空**（按位置取列 → 全行 `ValueError` 被跳过）。离线测试全绿、264 条断言全过，但**基金历史净值实际一条都拿不到**。
+2. **`get_fund_info` 净值四字段是硬编码占位** —— 持仓页恒 `--`、**价格预警恒按涨跌 0 判断（永不触发）**，属静默失效。
+3. **国内财经域名未绕系统代理** —— 评测里所有股票数据都因 `ProxyError ... RemoteDisconnected` 失败；而本机直连实测 200（0.146s），说明是**代理分流问题而非数据源问题**。
+
+→ 结论：P0-3-B 的投入是**值得的**，它把「离线契约」升级成「能发现静默失效的评测」。
+已在 CHANGELOG「在线评测连带发现的缺口修复」条目与 `tests/test_fund_data_fixes.py`（6 条回归锁）中闭环，
+全量 `pytest` **264 passed**。
+
+### 13.3 一处环境事实（供后续排障）
+
+`git push` 在本仓库**不能走 HTTPS**：`credential.helper=manager`（GCM）会在无交互的前台挂起
+（实测 >2 分钟超时）。已改用 **SSH 443**（`~/.ssh/config` 已配 `Host github.com → ssh.github.com:443`）
+推送成功。
