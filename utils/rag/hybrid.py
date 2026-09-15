@@ -1,31 +1,30 @@
 # -*- coding: utf-8 -*-
-"""混合检索：向量 + BM25 → RRF 融合。
+"""混合检索：向量 + BM25 → RRF 融合；**证据充分性判据走 EvidenceJudge（SAR + V1）**。
 
-复用自知识库 `co-planning/scripts/search_wiki.py:503 run_hybrid()`（RRF k=60，
-与 `COVERAGE_DESIGN.md` §3.3 写定的参数逐字一致）。两处有意差异：
+## 2026-09-16 判据重构（两份外部评审 + 主 Agent 实测对账后拍板）
 
-1. **去掉 domain/pool 白名单维度**（知识库特有，本项目 YAGNI）。
-2. **新增 `query_vec` 入参** —— 让单测与批量场景复用已算好的查询向量，
-   避免每次检索都调用 embedding（也让内核单测不依赖 ollama 进程）。
+**删除了什么**：`max_sim < min_sim` 整查询闸门。
+理由（可复现）：`max_sim` 是**极值统计量** —— 语料越大越容易撞到高分近邻，
+误放行概率单调上升；且它衡量的是「话题语言风格接近度」，不是「这块里有没有答案」。
+实测 HOLDOUT 组**区间倒挂**（无关 0.6902 > 相关 0.6668）。
+
+**换成什么**：证据判据由 `utils/rag/evidence.py` 的 `EvidenceJudge` 判定
+（`SAR` = BM25 分数达成率 + `V1` = 特征词存在率，均为尺度无关量），
+实测 TUNING 与 HOLDOUT **两组都干净可分**（3.65× gap）。
+
+**向量退回纯排序**（方案 A 原意）：语义路只提供排名，不再做闸门。
+
+**返回值改为三元组** `(order, rrf_scores, evidence)` —— 调用方据 `evidence.level` 分档：
+`none`（弃权）/ `weak`（返回 + 标注证据不足，交 LLM 裁决）/ `strong`（正常返回）。
 """
 import numpy as np
 
 from utils.rag.bm25 import BM25Index
 from utils.rag.embed import embed_texts
+from utils.rag.evidence import LEVEL_NONE
 from utils.rag.tokenize import tokenize
 
 RRF_K = 60
-# 绝对下限：max_sim 低于它 → 判定「无关查询」直接返回空（A3 判据）。
-# 依据（2026-09-16，**真实公告语料 814 块**、8 个查询实测；工具 scripts/rag_threshold_probe.py）：
-#   相关查询 max_sim ∈ [0.6528, 0.8191]；无关查询 max_sim ∈ [0.4643, 0.5864]
-#   → 可取区间 (0.5864, 0.6528)，取 **0.62**。
-# 演进史：0.35（5 篇样例）→ 0.45（被「量子计算」0.381 漏过）→ **0.62（真实语料）**。
-# ⚠️ gap 很窄（仅 0.067）且样本只有 8 个查询 —— **改此值前必须先跑
-#    `python scripts/rag_threshold_probe.py` 重新实测**，不要照抄。
-MIN_SIM = 0.62
-# 相对阈值：块级取舍只保留 sim >= max_sim * MIN_SIM_RATIO。
-# 实测见上：相关块 0.72+ vs 次相关块 0.45，gap 明显 → 单一固定阈值无法兼顾。
-MIN_SIM_RATIO = 0.85
 DEFAULT_POOL_MIN = 50
 
 
@@ -40,45 +39,45 @@ def _cosine_scores(query_vec, matrix):
 
 
 def _top_k(scores, k, min_score=0.0):
-    """按分数降序取前 k 个**达标**下标（`min_score` 为严格下限）。
+    """按分数降序取前 k 个**严格高于** min_score 的下标。
 
-    ⚠️ 必须过滤：不过滤时池内会「补位」，把与查询毫无关系的块也塞进结果 ——
-    2026-09-15 probe K3-b 实测发现（降级路径下 3 个块全部进了 top-3，含完全无关块）。
+    注意：这里的过滤只用于「不把零分块塞进池里」，
+    **不再**承担"相关性闸门"职责（该职责已移交 EvidenceJudge）。
     """
     order = sorted(range(len(scores)), key=lambda i: -float(scores[i]))
     return [i for i in order[:k] if float(scores[i]) > min_score]
 
 
 def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
-               min_sim=MIN_SIM, min_sim_ratio=MIN_SIM_RATIO):
-    """返回 (order, rrf_scores)。
+               judge=None, bm25_index=None):
+    """返回 `(order, rrf_scores, evidence)`。
 
-    - `order`：top-k 块下标（按融合分降序）
-    - `rrf_scores`：{下标: RRF 分}
-    - 空查询 / 空语料 / `max_sim < min_sim` → `([], {})`（A3「无关查询返回 0 条」）
-    - 块级取舍（双判据，2026-09-15 实测修正）：
-      语义路保留 `sim > max_sim * min_sim_ratio`；BM25 路保留 `分 > 0`；
-      两路皆空同样返回 `([], {})`
+    - `judge`：`EvidenceJudge` 实例（**必须用全库构建**，见其 docstring）；None = 跳过判据
+    - `bm25_index`：可复用的 `BM25Index`（避免每次查询重建，扩容后是 O(N·L) 的纯 Python 循环）
+    - `evidence.level == "none"` → `order` 为空（A3a 确定性弃权）
+    - 空查询 / 空语料 → `([], {}, None)`
     """
     if not query or not str(query).strip():
-        return [], {}
+        return [], {}, None
     if matrix is None or len(meta) == 0:
-        return [], {}
+        return [], {}, None
+
+    evidence = judge.assess(query) if judge is not None else None
+    if evidence is not None and evidence.level == LEVEL_NONE:
+        return [], {}, evidence          # A3a：证据缺失 → 弃权
 
     matrix = np.asarray(matrix, dtype="float32")
     if query_vec is None:
         query_vec = np.asarray(embed_texts([query])[0], dtype="float32")
     query_vec = np.asarray(query_vec, dtype="float32")
 
-    sims = _cosine_scores(query_vec, matrix)
-    max_sim = float(np.max(sims)) if len(sims) else 0.0
-    if max_sim < min_sim:
-        return [], {}   # A3：无关查询不得返回勉强相关内容
-
     kk = min(pool, len(meta)) if pool else min(max(k * 20, DEFAULT_POOL_MIN), len(meta))
-    semantic_rank = _top_k(sims, kk, min_score=max_sim * min_sim_ratio)
-    docs = [tokenize(m.get("text", "")) for m in meta]
-    bm25_rank = _top_k(BM25Index(docs).score(tokenize(query)), kk)
+    sims = _cosine_scores(query_vec, matrix)
+    semantic_rank = _top_k(sims, kk, min_score=0.0)     # 只排序，不做闸门
+
+    if bm25_index is None:
+        bm25_index = BM25Index([tokenize(m.get("text", "")) for m in meta])
+    bm25_rank = _top_k(bm25_index.score(tokenize(query)), kk, min_score=0.0)
 
     rrf = {}
     for rank, idx in enumerate(semantic_rank):
@@ -87,4 +86,4 @@ def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
         rrf[idx] = rrf.get(idx, 0.0) + 1.0 / (RRF_K + rank + 1)
 
     order = sorted(rrf.keys(), key=lambda i: -rrf[i])
-    return order[:k], rrf
+    return order[:k], rrf, evidence

@@ -46,9 +46,11 @@ def test_bm25_ranks_relevant_doc_first():
 def test_rrf_fusion_merges_both_retrievers():
     """精确断言 RRF = 两路贡献之和 —— 纯向量或纯 BM25 实现必然失败。
 
-    ⚠️ 旧版断言 `set(order[:2]) == {0, 2}` **在「只保留向量路」时同样成立**
-    （语义序本就是 0,2,1），无法区分真融合与退化 —— 这是自证陷阱
-    （critic 独立审计 2026-09-15 指出，已加固）。
+    ⚠️ 历史：旧版断言 `set(order[:2]) == {0,2}` **在「只保留向量路」时同样成立**，
+    无法区分真融合与退化（critic 审计 2026-09-15 指出的自证陷阱，已加固）。
+
+    ⚠️ 2026-09-16 判据重构：语义路**不再做相关性闸门**（只过滤 score==0），
+    故两块的融合分对称。
     """
     matrix = np.array([[1.0, 0.0], [0.0, 1.0], [0.7, 0.7]], dtype="float32")
     meta = [
@@ -56,33 +58,30 @@ def test_rrf_fusion_merges_both_retrievers():
         {"text": "比亚迪汽车销量"},
         {"text": "茅台酒毛利率"},
     ]
-    order, rrf = run_hybrid(
+    order, rrf, ev = run_hybrid(
         "茅台", matrix, meta, k=2,
         query_vec=np.array([1.0, 0.0], dtype="float32"),
     )
-    # 语义路（相对阈值 cutoff = max_sim*0.85 = 0.85）：只保留 idx0（sim=1.0）；
-    #   idx2 的 0.707 低于 cutoff 被丢弃，idx1 的 0.0 同样丢弃
-    # BM25 序：[2, 0]（idx1 无「茅台」token 得 0 分被丢弃）
-    # → idx0 = 语义第1 + BM25 第2 = 1/61 + 1/62
-    # → idx2 = **仅** BM25 第1 = 1/61
-    # 这两个期望值把三种实现彻底区分开：
-    #   纯向量 → (1/61, 1/62)；纯 BM25 → (1/62, 1/61)；真融合 → (1/61+1/62, 1/61)
+    # 语义路：[0(1.0), 2(0.707)]（idx1 sim=0 被过滤）；BM25 路：[2, 0]（idx1 无「茅台」得 0 分）
+    # → idx0 = 语义第1 + BM25 第2；idx2 = 语义第2 + BM25 第1 → 两者对称
+    # 三种实现的期望值互不相同，故仍可区分：
+    #   纯向量 → (1/61, 1/62)；纯 BM25 → (1/62, 1/61)；真融合 → 两者皆 1/61+1/62
     assert rrf[0] == pytest.approx(1 / 61 + 1 / 62), "RRF 必须是两路贡献之和"
-    assert rrf[2] == pytest.approx(1 / 61), "只被一路命中的块只能拿到单路贡献"
+    assert rrf[2] == pytest.approx(1 / 62 + 1 / 61)
     assert order == [0, 2]
     assert 1 not in rrf, "两路皆无命中的块必须被彻底排除，不得靠池内补位进结果"
+    assert ev is None, "未传 judge 时不应产生 evidence"
 
 
 def test_irrelevant_chunks_are_excluded():
-    """完全无关的块（语义 < min_sim 且 BM25 = 0）不得进入结果 —— A3 的内核级落地。
+    """语义为 0 且 BM25 无命中的块不得进入结果。
 
-    回归锁：降级为纯 BM25 单路（或 min_sim=0）时，若不设分数门槛，
-    弱相关块会被"池内补位"塞进 top-n（2026-09-15 probe K3-b 实测发现）。
+    回归锁：曾因「池内补位」把与查询毫无关系的块塞进 top-n（2026-09-15 probe K3-b 实测）。
     """
     matrix = np.array([[1.0, 0.0], [0.0, 1.0]], dtype="float32")
     meta = [{"text": "贵州茅台营业收入"}, {"text": "比亚迪汽车销量"}]
-    order, rrf = run_hybrid("茅台", matrix, meta, k=5,
-                            query_vec=np.array([1.0, 0.0], dtype="float32"))
+    order, rrf, _ = run_hybrid("茅台", matrix, meta, k=5,
+                               query_vec=np.array([1.0, 0.0], dtype="float32"))
     assert order == [0]
     assert 1 not in rrf
 
@@ -91,9 +90,30 @@ def test_empty_query_returns_empty():
     """空查询 → 空结果（不得凭向量相似度硬凑相关内容）。"""
     matrix = np.array([[1.0, 0.0]], dtype="float32")
     meta = [{"text": "贵州茅台"}]
-    order, rrf = run_hybrid("", matrix, meta, k=5,
-                            query_vec=np.zeros(2, dtype="float32"))
+    order, rrf, _ = run_hybrid("", matrix, meta, k=5,
+                               query_vec=np.zeros(2, dtype="float32"))
     assert order == [] and rrf == {}
+
+
+def test_hybrid_abstains_when_judge_says_none():
+    """judge 判定 `none` → 不返回任何结果（A3a 在**检索层**的落地）。
+
+    这是 2026-09-16 判据重构的核心行为：**弃权由 EvidenceJudge（SAR+V1）决定，
+    不再由向量 `max_sim` 决定** —— 故此处故意给满向量相似度，验证它不再能左右闸门。
+    """
+    from utils.rag.evidence import EvidenceJudge
+    from utils.rag.tokenize import tokenize
+
+    judge = EvidenceJudge([tokenize("贵州茅台营业收入")])
+    matrix = np.array([[1.0, 0.0]], dtype="float32")
+    meta = [{"text": "贵州茅台营业收入"}]
+    order, rrf, ev = run_hybrid(
+        "量子计算最新进展", matrix, meta, k=5,
+        query_vec=np.array([1.0, 0.0], dtype="float32"),   # 向量相似度故意给满
+        judge=judge,
+    )
+    assert ev.level == "none"
+    assert order == [] and rrf == {}, "证据为 none 时不得返回任何块"
 
 
 # ==================== 4. 切块器：表格保护 + 硬上限 ====================

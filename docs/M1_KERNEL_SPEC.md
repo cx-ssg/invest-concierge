@@ -122,7 +122,7 @@ documents 的 **UNIQUE 约束 = (code, source, published_at, title)**（v2；v1 
 | **K3** | `python scripts/rag_probe.py --no-embed` 与 `python scripts/rag_probe.py --embed-url http://127.0.0.1:1/api/embed` | 两条降级路径均 **exit 0 不崩溃**，且给出 `ollama pull bge-m3` 等可操作指引；BM25 单路仍能返回结果 |
 | **K4** | `python scripts/rag_probe.py --query "量子计算最新进展"` | **返回 0 条（`RESULT: NO_HIT`）** —— A3「无关查询返回 0 条」的内核级验收 |
 | **K5** | `python scripts/rag_ingest.py --code 600519 --limit 20`，再用 `retrieve_docs` 检索 | **documents / chunks / embedded = 20 / 814 / 814**（含**正文**，schema v2）；「董事会决议公告」「利润分配方案」精准命中且带 `url` + `published_at`；无关查询返回 0 条 |
-| **K6** | `python scripts/rag_threshold_probe.py --holdout`（**必须用留出组**） | 🔴 **当前未达标**：留出组输出 `可分=False`（IRR 上限 0.6902 > REL 下限 0.6668）—— 实测证明**向量阈值方案失效**；方案 A（BM25 主判据 + 自动校准）实施后此条才应转绿。⚠️ 用 TUNING 组验收等于**自证**（critic 审计 F1） |
+| **K6** | `python scripts/rag_threshold_probe.py --holdout`（**必须用留出组**） | ✅ **已达标（2026-09-16）**：TUNING 与 HOLDOUT **两组均 0 误弃权 / 0 误放行**（`RESULT: OK`）。判据 = `SAR + V1`（`utils/rag/evidence.py`），已取代向量 `max_sim`。⚠️ 用 TUNING 组单独验收等于**自证**（critic F1） |
 
 > ⚠️ **K2 必须走脚本文件**：bash 内联 `python -c` 传中文会按 cp936 破坏源码字符串（本会话已实测踩到，导致首轮探针假阴性）。
 
