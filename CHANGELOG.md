@@ -24,7 +24,9 @@
   - **单次调用超时**：`TOOL_TIMEOUT_SECONDS`（默认 30s，设 0 关闭）。看门狗用线程池 `future.result(timeout)`；⚠️ **不能用 `with ThreadPoolExecutor(...)`**（`__exit__` 会 `shutdown(wait=True)` 等线程跑完，超时控制形同虚设 —— 这个坑由超时测试当场抓出）；并区分**看门狗超时**（`_ToolTimeout` → `TIMEOUT`）与**工具内部超时**（`TimeoutError` → 保持 `TOOL_EXCEPTION`，旧契约不破）
   - **并行执行能力**：`agent_run(parallel_tools=True)` 时多工具并发执行；**默认关**（工具内部对缓存/SQLite 的线程安全性尚未实测）；无论并行与否，`tool_start`/`tool_end` 事件与 `tool_trace` 仍**按调用顺序**
 - `tests/test_tool_contract_hardening.py`：**10 条回归锁**（缺参 / 空参 / 无必填项工具 / 超时生效与关闭 / 并行默认关 / 顺序基线 / 并行下 trace 顺序）。
-- 全量 `pytest` **252 passed**（181 → 189 → 201 → 233 → 236 → 242 → 本轮 252）。
+- **P0-5 · `agent_messages` 瘦身**：`record_message(session, "tool", …)` 落库时按 `TOOL_MESSAGE_LIMIT`（600）截断为**摘要 + 截断标记（含原始长度）**，不再落全文 —— 工具返回的完整 JSON（行情 / K 线 / 财报可达数十 KB）对「越用越懂」没有价值，却会让表无界膨胀并污染 `summarize_session` 的 transcript；`user` / `assistant` 消息**不受限**（对话内容才是记忆原料）。非字符串入参先序列化，按同一规则处理。
+- `tests/test_tool_message_slimming.py`：**6 条回归锁**（tool 截断 + 标记带原始长度 / 短 tool 原样 / user·assistant 不截断对照 / 非字符串入参 / 上限合理性）。
+- 全量 `pytest` **258 passed**（181 → 189 → 201 → 233 → 236 → 242 → 252 → 本轮 258）。
 
 ### 审计处理（2026-09-15 · 独立子代理审 `4d51a15..HEAD`）
 - 总体判定：**P0-1/P0-2 达标**（行为锚定、revert 即 FAIL、无自证陷阱）；**golden set 仅算阶段性半成品**（`test_golden_case_drives_agent_run` 是编排冒烟，不是评测）—— 已如实标注于本节与 `tests/golden/cases.py` docstring。

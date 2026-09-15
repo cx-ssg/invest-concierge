@@ -341,7 +341,7 @@ meta(key, value)                    -- 索引版本、模型名、构建时间
 | P0-2 | ✅ **已完成（2026-09-15）**：`tool_end.ok` 判定对齐真实错误契约 + **统一 per-tool 错误码**（`error_code` / `tool` / `retryable`，新增 `make_tool_error()` 与 `tool_output_error()`） | M1 的 `retrieve_docs`、M3 的每个节点都踩在这层；不修则排障被误导 |
 | P0-3 | ✅ **已完成（2026-09-15）**：A 段——golden set `tests/golden/cases.py`（26 条 / 覆盖 23 个工具）+ 离线契约 `tests/test_golden_offline.py`；B 段——`scripts/eval_agent.py`（在线评测，默认 dry-run 不花钱）+ `call_llm`/`agent_run` 的 token 记账（`usage` 跨轮累加） | §10.3 引用的调查：**89% 有可观测、仅 52% 有 eval**，我们两项都空 → 当前最便宜的差异化点 |
 | P0-4 | ✅ **已完成（2026-09-15）**：必填参数校验（`INVALID_ARGS`）+ 单次调用看门狗超时（`TOOL_TIMEOUT_SECONDS`=30s → `TIMEOUT` 码，且不破坏工具内部超时的 `TOOL_EXCEPTION`）+ 并行执行能力（`parallel_tools`，**默认关**：工具内缓存/SQLite 的线程安全性待实测）。「结构化返回」已在 P0-2 完成 | 同上；并发还是"生产级 Agent"标配 |
-| P0-5 | `agent_messages` 瘦身：tool 消息只存摘要/引用，不落全文 | 否则 M2 再往里加事实/经验记忆会彻底失控 |
+| P0-5 | ✅ **已完成（2026-09-15）**：tool 消息落库截断为摘要 + 截断标记（`TOOL_MESSAGE_LIMIT`=600，标记含原始长度）；user/assistant 不受限 | 否则 M2 再往里加事实/经验记忆会彻底失控 |
 
 > **P0-1/P0-2 验收证据（2026-09-15）**：
 > ① **P0-1**：先写 RED（`tests/test_p0_agent_fixes.py` 8 条 → 4 failed）→ 修 → GREEN；全量 `pytest` **189 passed**（原 181）；同时修正了 `tests/test_m0_services.py` 里锁定**错误契约**的旧用例（它喂的是真实代码从不产生的「工具执行失败」字符串）。

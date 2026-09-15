@@ -9,6 +9,7 @@ Agent 记忆层：跨页会话持久化（"越用越懂"的关键）。
 
 实现依据：docs/AGENT_MVP_DESIGN.md §2.③ / §7 验收（注入规则：最近 3 条、按更新倒序）。
 """
+import json
 import sys
 
 from utils.ai_helper import _has_key as _key_check
@@ -32,6 +33,8 @@ SUMMARY_TRIGGER_ROUNDS = 8
 MEMORY_CONTEXT_SESSIONS = 3
 # 无 key / LLM 失败时，摘要降级为"最近消息末尾截取"的长度
 FALLBACK_SUMMARY_LEN = 80
+# P0-5：tool 消息落库上限（超出只存前 N 字符 + 截断标记）；user/assistant 不受限
+TOOL_MESSAGE_LIMIT = 600
 
 # Windows 控制台 GBK 防护
 if sys.stdout is not None and hasattr(sys.stdout, "reconfigure"):
@@ -117,5 +120,15 @@ def ensure_session(session_id, title=""):
 
 
 def record_message(session_id, role, content):
-    """落库一条消息（对外薄封装，页面可复用）"""
-    return add_agent_message(session_id, role, content)
+    """落库一条消息（对外薄封装，页面可复用）。
+
+    P0-5：`role="tool"` 时只存**摘要**（前 TOOL_MESSAGE_LIMIT 字符 + 截断标记），不落全文 ——
+    工具返回的完整 JSON（行情 / K 线 / 财报可达数十 KB）对「越用越懂」（记住用户偏好与
+    关注点）没有价值，却会让 agent_messages 无界膨胀，并污染 summarize_session 的 transcript。
+    user / assistant 消息不受限：对话内容本身才是记忆的原料。
+    """
+    text = content if isinstance(content, str) else \
+        json.dumps(content, ensure_ascii=False, default=str)
+    if role == "tool" and len(text) > TOOL_MESSAGE_LIMIT:
+        text = "{}…[P0-5 截断，原始 {} 字符]".format(text[:TOOL_MESSAGE_LIMIT], len(text))
+    return add_agent_message(session_id, role, text)
