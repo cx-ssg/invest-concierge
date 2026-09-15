@@ -402,6 +402,12 @@ def execute_ai_tool_v2(tool_name, arguments):
     - 执行抛异常 → {"error": "工具执行出错：…"} + error_code=TOOL_EXCEPTION
       （网络/超时类异常额外带 retryable=True，调用方可据此重试）
     - 结果统一 _truncate 截断后 JSON 序列化（default=str 兜底 DataFrame 等）
+
+    ⚠️ 契约（成功载荷）：**不得含非空的顶层 `error` 字段**。
+    判定方 `tool_output_error()` 以「顶层 error 为真值」作为失败依据；已有先例
+    `data/fund_api.py` 的 compare_funds_structured 成功时返回 {"ok": true, "error": "", ...}
+    （空串是假值 → 判成功）。若未来有工具要用顶层 error 传「部分成功/告警」文案，
+    必须先改这条约定与判定逻辑（2026-09-15 独立审计 🟡 条指出该启发式耦合）。
     """
     if not isinstance(arguments, dict):
         arguments = {}
@@ -598,8 +604,11 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 "elapsed_ms": int((time.time() - _t0) * 1000),
             }
             if _err_info:
-                # 失败时带机器码，SSE 消费方可按类型分支（重试 / 降级 / 上报）
+                # 失败时带机器码与可重试标记。注意：**当前前端未消费这两个字段**
+                # （前瞻性附加，供未来的 M3 图节点 / 降级重试逻辑分支用；勿在文案里
+                # 宣称"消费方可按类型分支"——见 2026-09-15 独立审计 ⚪ 条）
                 _payload["error_code"] = _err_info["error_code"]
+                _payload["retryable"] = _err_info["retryable"]
             _progress_structured("tool_end", _payload)
             tool_trace.append({"name": name, "arguments": args, "output": output})
             messages.append({

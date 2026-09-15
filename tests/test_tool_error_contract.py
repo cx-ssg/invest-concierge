@@ -155,6 +155,7 @@ def test_tool_end_event_carries_error_code_on_failure():
     ends = [d for s, d in seen if s == "tool_end"]
     assert ends and ends[0]["ok"] is False
     assert ends[0].get("error_code") == "TOOL_EXCEPTION"
+    assert ends[0].get("retryable") is False        # 非网络类异常 → 不可重试
 
 
 def test_tool_end_event_has_no_error_code_on_success():
@@ -168,3 +169,39 @@ def test_tool_end_event_has_no_error_code_on_success():
     ends = [d for s, d in seen if s == "tool_end"]
     assert ends and ends[0]["ok"] is True
     assert "error_code" not in ends[0]
+    assert "retryable" not in ends[0]
+
+
+def test_tool_end_event_carries_retryable_on_network_failure():
+    """网络类失败：tool_end 同时带 error_code 与 retryable=True（供未来的降级/重试分支）"""
+    seen = []
+    err_out = json.dumps({"error": "工具执行出错：timed out", "error_code": "TOOL_EXCEPTION",
+                          "tool": "get_stock_diagnosis", "retryable": True}, ensure_ascii=False)
+    with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
+         patch.object(ai_helper, "call_llm", side_effect=_fake_llm_one_tool_then_text), \
+         patch.object(agent_core, "execute_ai_tool_v2", side_effect=lambda n, a: err_out):
+        agent_run("x", structured_progress=True, on_progress=lambda s, d: seen.append((s, d)))
+    ends = [d for s, d in seen if s == "tool_end"]
+    assert ends and ends[0].get("retryable") is True
+
+
+# ==================== 五、把「启发式」固化成「显式约定」 ====================
+
+
+def test_success_payload_must_not_carry_nonempty_error():
+    """契约（见 execute_ai_tool_v2 docstring）：成功载荷不得含非空顶层 error。
+
+    2026-09-15 独立审计 🟡 条指出：判定依赖「顶层 error 为真值」，属启发式耦合。
+    本条把它固化为**显式约定** —— 未来若有工具用顶层 error 传「部分成功/告警」，
+    会在此立刻失败，提醒改约定，而不是默默误判为失败。
+    """
+    from utils.agent_core import tool_output_error
+    out = json.dumps({"ok": True, "error": "部分数据缺失", "data": [1]}, ensure_ascii=False)
+    assert tool_output_error(out) is not None, "顶层 error 非空 → 按失败计（契约要求）"
+
+
+def test_empty_string_error_is_treated_as_success():
+    """反面（真实先例）：compare_funds_structured 成功时返回 {"ok": true, "error": "", ...} → 判成功"""
+    from utils.agent_core import tool_output_error
+    ok = json.dumps({"ok": True, "error": "", "funds": [], "metrics": []}, ensure_ascii=False)
+    assert tool_output_error(ok) is None

@@ -13,6 +13,12 @@
 
 ⚠️ 本表最大的坑：**工具名 / 参数名写错会静默失效**（离线测不出、在线才发现）。
    tests/test_golden_offline.py 对此有专门的契约校验（工具名存在性 + 参数名合法性）。
+
+诚实边界（2026-09-15 独立审计判定）：
+- 离线测试**不是评测**：mock LLM 按本表的 expect_tools 吐工具序列、agent 再执行同一序列，
+  本质是「编排冒烟 + 用例表自校验」，**不能证明模型选得对**（那是在线阶段的事）。
+- 在线评测（scripts/eval_agent.py）判定约定：**按工具集合命中**，顺序不敏感
+  （模型可能先估值再诊断）；仅对显式标注 `order_sensitive: True` 的用例按序列判定。
 """
 
 CASES = [
@@ -95,7 +101,8 @@ CASES = [
      "tool_args": {"get_stock_minefield": {"stock_code": "000858"}},
      "expect_facts": ["风险"], "tags": ["个股", "排雷"]},
 
-    {"id": "stock_moat_018", "question": "贵州茅台的护城河怎么样",
+    # 2026-09-15 审计指出：原问题写"贵州茅台"未给代码，在线评测时模型可能先 search_stock → 改为直接给代码
+    {"id": "stock_moat_018", "question": "600519 的护城河怎么样",
      "expect_tools": ["get_stock_moat"], "tool_args": {"get_stock_moat": {"stock_code": "600519"}},
      "expect_facts": ["护城河"], "tags": ["个股", "护城河"]},
 
@@ -144,5 +151,6 @@ CASES = [
 ]
 
 
-# 离线契约的覆盖下限：23 个注册工具里至少被 golden set 覆盖多少个
-MIN_TOOL_COVERAGE = 20
+# 离线契约的覆盖下限（2026-09-15 审计建议：20 形同虚设 → 提到与注册表等值 23）
+# 语义：新增工具若没同步进 golden set，这条断言立刻失败（防「加了工具却没加用例」）
+MIN_TOOL_COVERAGE = 23

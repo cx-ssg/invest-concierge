@@ -11,10 +11,20 @@
 
 ### Added
 - **P0-3-A 离线评测契约（golden set）**：新增 `tests/golden/cases.py` 作**单一事实源**（26 条用例，覆盖全部 23 个工具 + 3 条多工具编排；字段 `question` / `expect_tools` / `tool_args` / `expect_facts` / `tags`），离线与未来的在线评测共用同一份；新增 `tests/test_golden_offline.py`（6 条用例表合法性校验 + 26 条编排契约）。离线阶段的核心价值：抓出 golden set 里**写错的工具名 / 参数名**（这类错误在在线评测里会静默失效）——已做**阴性对照**验证（注入 `_TYPO` 后 2 条校验立刻 FAIL）。
-- **P0-2 后半 · 统一 per-tool 错误码**：三类错误返回在**保留旧中文文案**的前提下新增机器可判字段 `error_code` / `tool` / `retryable`（码值 `UNKNOWN_TOOL` / `NOT_FOUND` / `TOOL_EXCEPTION`，兜底 `UNKNOWN_ERROR`）；新增 `make_tool_error()` 与 `tool_output_error()`（兼容新格式 / 老格式 / 非 JSON 三种形态），`tool_output_is_error()` 改为其薄封装；`tool_end` 事件失败时携带 `error_code`，SSE 消费方可按类型分支（重试 / 降级 / 上报）。
+- **P0-2 后半 · 统一 per-tool 错误码**：三类错误返回在**保留旧中文文案**的前提下新增机器可判字段 `error_code` / `tool` / `retryable`（码值 `UNKNOWN_TOOL` / `NOT_FOUND` / `TOOL_EXCEPTION`，兜底 `UNKNOWN_ERROR`）；新增 `make_tool_error()` 与 `tool_output_error()`（兼容新格式 / 老格式 / 非 JSON 三种形态），`tool_output_is_error()` 改为其薄封装；`tool_end` 事件失败时携带 `error_code` + `retryable`。
+  > ⚠️ **诚实标注（源自 2026-09-15 独立审计 ⚪ 条）**：这两个字段**当前没有任何消费方**（前端 `useAgentRun` 只读 `name/ok/elapsed_ms`），属**前瞻性附加**，供未来 M3 图节点 / 降级重试使用 —— 不要写成"消费方可按类型分支"。
 - `tests/test_p0_agent_fixes.py`：**8 条 P0 回归锁**（P0-1 model 晚绑定 2 条；P0-2 `ok` 判定 6 条，含空 `error`、非 JSON 等边界）。
 - `tests/test_tool_error_contract.py`：**12 条错误契约回归锁**（三类 error_code / 网络类 `retryable=True` / 成功路径不含 error 字段 / `tool_output_error()` 四种形态 / `tool_end` 是否携带 code）。
-- 全量 `pytest` **233 passed**（181 → 189 → 201 → 本轮 233）。
+- 全量 `pytest` **236 passed**（181 → 189 → 201 → 233 → 本轮 236）。
+
+### 审计处理（2026-09-15 · 独立子代理审 `4d51a15..HEAD`）
+- 总体判定：**P0-1/P0-2 达标**（行为锚定、revert 即 FAIL、无自证陷阱）；**golden set 仅算阶段性半成品**（`test_golden_case_drives_agent_run` 是编排冒烟，不是评测）—— 已如实标注于本节与 `tests/golden/cases.py` docstring。
+- 🟡 `error` 字段启发式耦合（`agent_core.py` 的 `tool_output_error`）→ 把「成功载荷不得含非空顶层 `error`」写进 `execute_ai_tool_v2` docstring，并加 2 条契约测试固化（`test_success_payload_must_not_carry_nonempty_error` / `test_empty_string_error_is_treated_as_success`，后者对应 `compare_funds_structured` 的真实形态 `{"ok": true, "error": "", ...}`）。
+- 🟡 `MIN_TOOL_COVERAGE=20` 形同虚设 → 提到 **23**（与注册表等值）：新增工具若没同步进 golden set，该断言立刻失败。
+- 🟡 `tool_end` 只转发 `error_code`、丢了 `retryable` → 已补上（+ 测试）。
+- 🟡 期望标定歧义 → `stock_moat_018` 的问题改为直接给代码（600519）；`cases.py` 写明在线判定约定：**按工具集合命中、顺序不敏感**。
+- ⚪ `error_code` 无消费方却被写成"可按类型分支" → 措辞已改（见上）。
+- **审计无法验证项**：只读环境跑不了 pytest，"RED→GREEN"是它的静态推演 → 由主代理实测补上（本文件与 §11 记载的 4 failed / 10 failed 与各轮 passed 数均为实际运行输出）。
 
 ## [Unreleased] - 2026-09-08
 

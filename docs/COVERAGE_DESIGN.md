@@ -398,3 +398,32 @@ P0（P0-1 ~ P0-5） → M1 → M2 → M3 → MCP / Agentic RAG
 - 评审方**未能跑代码**（其 workspace shell 因 9/8 Windows 更新不可用），全部为静态读码
 - 本次复核用 **grep + 定点读码确认了 10 条断言中的 9 条**（第 10 条驳回），但**未跑 pytest、未复现 4/5 两个 bug 的运行时表现**
 - → 修 P0-1 / P0-2 前**先各写一条失败测试（RED）再修**（符合 TDD 契约，也避免"照着评审直接改"而漏判）
+
+---
+
+## 12. 独立审计记录（2026-09-15 · 子代理审 `4d51a15..HEAD`）
+
+> 审计方：独立**只读**子代理（`tool:read_only_task`）。对象：3 个 commit（`132e802` / `05b5349` / `0d5ac98`），8 个文件，+1115/−14。
+
+### 12.1 总体判定
+
+| 对象 | 判定 |
+|---|---|
+| **P0-1（config 断点）/ P0-2（ok 判定失真）** | ✅ **达标**：真实缺陷、修复方向正确、旧中文文案与 SSE 契约零破坏；回归测试是**行为锚定**（revert 即 FAIL），**无「输入由被测代码自身生成」的自证陷阱** |
+| **P0-3-A golden set** | 🟡 **仅算阶段性半成品**：`test_golden_case_drives_agent_run` 是「mock LLM 按用例吐序列 → agent 再执行同一序列」的**编排冒烟**，**不能称为评测**（已在 `cases.py` docstring 与 CHANGELOG 如实标注） |
+
+### 12.2 findings 处置
+
+| 级别 | 问题（审计要点） | 处置 |
+|---|---|---|
+| 🟡 | `tool_output_error` 以「顶层 `error` 为真值」判失败，属启发式耦合；未来工具若用顶层 error 传「部分成功/告警」会被误判 | ✅ 把「成功载荷不得含非空顶层 error」写进 `execute_ai_tool_v2` docstring + 2 条契约测试固化（含 `compare_funds_structured` 真实形态 `{"ok":true,"error":""}` 的反面用例） |
+| 🟡 | `MIN_TOOL_COVERAGE=20` 形同虚设 | ✅ 提到 **23**（与注册表等值）：新增工具未同步进 golden set 时断言立刻失败 |
+| 🟡 | `tool_end` 只转发 `error_code`，丢了 `retryable` / `tool` | ✅ 补 `retryable`（+测试）；`tool` 仍保留在工具返回体内，事件层暂不发（避免冗余） |
+| 🟡 | `stock_moat_018` 与多工具用例的期望标定，在线阶段有歧义（推测性） | ✅ `stock_moat_018` 改为直接给代码；`cases.py` 写明在线判定约定：**按工具集合命中、顺序不敏感** |
+| ⚪ | `error_code` 当前**无消费方**，CHANGELOG 却写「消费方可按类型分支」（宣称而非落地） | ✅ 措辞已改（CHANGELOG 加「诚实标注」） |
+| ⚪ | 三个测试文件均**无自证陷阱**（正面结论） | 记录，无需动作 |
+
+### 12.3 审计的诚实边界（与我们的规则一致）
+
+- 审计方**跑不了 pytest**（只读环境）→ 「RED→GREEN」是它的**静态推演** → **由主代理实测补上**：`test_p0_agent_fixes.py` 8 条 → 4 failed；`test_tool_error_contract.py` 12 条 → 10 failed；各轮全量 189 → 201 → 233 → 236 passed，均为实际运行输出。
+- **本次审计自身的经验（可复用）**：`tool:review` 跑满 8 步被暂停；`tool:read_only_task` 传 `effort=high` 报 `UNSUPPORTED_REASONING_EFFORT`（`deepseek-v4.1-flash` 的 supported 列表为空）→ **子代理用默认 effort，别传高推理档**。
