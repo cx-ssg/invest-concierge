@@ -247,6 +247,24 @@ TOOL_REGISTRY = {
         required=["fund_code", "monthly_amount", "months"],
         none_error="基金 {fund_code} 历史数据不足，无法回测",
     ),
+    # --- M1 私域知识层（2026-09-15）：第 24 个工具 ---
+    "retrieve_docs": ToolDef(
+        name="retrieve_docs",
+        module="utils.rag.retrieve",
+        fn="retrieve_docs",
+        description=(
+            "检索本地私域知识库（上市公司公告 / 券商研报 / 财报原文），返回带来源与日期的原文片段。"
+            "用户问「某公司最近的公告说了什么」「研报怎么看这个行业」等**需要文档原文**的问题时用它；"
+            "实时行情、财务指标、资金流请用对应专用工具。检索为空时本工具会明确回「未找到相关公告」，"
+            "此时**必须如实告知用户知识库中没有相关内容，不得凭记忆编造**。"
+        ),
+        params={
+            "query": {"type": "string", "description": "检索问题或关键词，如「茅台上半年营收」"},
+            "code": {"type": "string", "description": "可选，限定股票代码（如 600519）；不填则全库检索"},
+            "top_n": {"type": "integer", "description": "返回条数，默认 5"},
+        },
+        required=["query"],
+    ),
     "get_stock_info": ToolDef(
         name="get_stock_info",
         module="data.stock_api",
