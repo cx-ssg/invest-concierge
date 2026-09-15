@@ -343,53 +343,95 @@ def _truncate(result, max_len=8000, list_top_n=20):
     return trunc_str(result)
 
 
+# ==================== 工具错误契约 ====================
+# 错误返回在**旧中文文案之上**新增机器可判字段（旧文案保持不变，被存量测试断言）：
+#   {"error": "<中文文案>", "error_code": "<码>", "tool": "<工具名>", "retryable": bool}
+TOOL_ERR_UNKNOWN_TOOL = "UNKNOWN_TOOL"   # 注册表里没有该工具
+TOOL_ERR_NOT_FOUND = "NOT_FOUND"         # 工具返回 None（声明了 none_error 模板）
+TOOL_ERR_EXCEPTION = "TOOL_EXCEPTION"    # 执行抛异常
+TOOL_ERR_UNKNOWN = "UNKNOWN_ERROR"       # 兜底：老格式 / 非 JSON 输出
+
+# 网络/超时类异常视为可重试（requests 的超时与连接异常均继承自 OSError 系）
+_RETRYABLE_EXCEPTIONS = (TimeoutError, ConnectionError, OSError)
+
+
+def make_tool_error(message, code, tool_name, exc=None):
+    """构造标准化的工具错误 JSON 字符串（中文文案 + 机器可判字段）。
+
+    消费方（agent_run / SSE / 未来的 M1 检索与 M3 图节点）应据此分支：
+    `error_code` 判类型、`retryable` 判能否重试。
+    """
+    retryable = bool(exc is not None and isinstance(exc, _RETRYABLE_EXCEPTIONS))
+    return json.dumps({
+        "error": message,
+        "error_code": code,
+        "tool": tool_name,
+        "retryable": retryable,
+    }, ensure_ascii=False)
+
+
+def tool_output_error(output):
+    """解析工具输出：失败 → 错误信息 dict；成功 → None。
+
+    兼容三种形态：
+    - 新格式（带 error_code / tool / retryable）
+    - 老格式（只有 error 文案）→ 兜底 error_code=UNKNOWN_ERROR
+    - 非 str / 非 JSON（异常路径）→ 同样按失败计，不抛异常
+    """
+    if not isinstance(output, str):
+        return {"error": str(output), "error_code": TOOL_ERR_UNKNOWN, "tool": "", "retryable": False}
+    try:
+        data = json.loads(output)
+    except Exception:
+        return {"error": output, "error_code": TOOL_ERR_UNKNOWN, "tool": "", "retryable": False}
+    if isinstance(data, dict) and data.get("error"):
+        return {
+            "error": data["error"],
+            "error_code": data.get("error_code") or TOOL_ERR_UNKNOWN,
+            "tool": data.get("tool", ""),
+            "retryable": bool(data.get("retryable", False)),
+        }
+    return None
+
+
 def execute_ai_tool_v2(tool_name, arguments):
     """执行一次 AI 工具调用（注册表分派），返回 JSON 字符串（回填给模型继续推理）。
 
-    - 未知工具 → {"error": "未知工具：..."}（旧文案兼容）
-    - 工具返回 None 且有 none_error 模板 → 按模板输出（get_fund_info 的"未找到基金"旧文案）
+    - 未知工具 → {"error": "未知工具：…"}（旧文案兼容）+ error_code=UNKNOWN_TOOL
+    - 工具返回 None 且有 none_error 模板 → 按模板输出（旧文案兼容）+ error_code=NOT_FOUND
+    - 执行抛异常 → {"error": "工具执行出错：…"} + error_code=TOOL_EXCEPTION
+      （网络/超时类异常额外带 retryable=True，调用方可据此重试）
     - 结果统一 _truncate 截断后 JSON 序列化（default=str 兜底 DataFrame 等）
     """
     if not isinstance(arguments, dict):
         arguments = {}
     entry = TOOL_REGISTRY.get(tool_name)
     if not entry:
-        return json.dumps({"error": "未知工具：{}".format(tool_name)}, ensure_ascii=False)
+        return make_tool_error("未知工具：{}".format(tool_name),
+                               TOOL_ERR_UNKNOWN_TOOL, tool_name)
     try:
         fn = resolve(entry.fn_ref)
         kwargs = {k: v for k, v in arguments.items() if k in entry.param_names}
         result = fn(**kwargs)
         if result is None and entry.none_error:
             fmt_args = {k: arguments.get(k, "") for k in entry.param_names}
-            return json.dumps({"error": entry.none_error.format(**fmt_args)}, ensure_ascii=False)
+            return make_tool_error(entry.none_error.format(**fmt_args),
+                                   TOOL_ERR_NOT_FOUND, tool_name)
         payload = _truncate(result)
         return json.dumps(payload, ensure_ascii=False, default=str)
     except Exception as e:
-        return json.dumps({"error": "工具执行出错：{}".format(e)}, ensure_ascii=False)
+        return make_tool_error("工具执行出错：{}".format(e),
+                               TOOL_ERR_EXCEPTION, tool_name, exc=e)
 
 
 def tool_output_is_error(output):
-    """判定一次工具输出是否代表失败（tool_end.ok 等消费方统一走这里）。
-
-    与 execute_ai_tool_v2 的返回契约对齐（见其 docstring）：
-    - 非 str（异常路径）→ 失败
-    - 非 JSON 字符串 → 失败（该函数契约上总是返回 JSON 字符串）
-    - JSON 对象且 error 字段为真值 → 失败（未知工具 / none_error 模板 / 执行异常三种）
-    - 其他 → 成功
+    """（保留旧名）输出是否代表失败 —— 等价于 tool_output_error(output) is not None
 
     背景：旧实现用 `output.startswith("工具执行失败")` 判定，而该字符串真实代码从不
     产生（错误一律是 {"error": ...} JSON）→ tool_end.ok 恒为 True，排障被误导。
     详见 docs/COVERAGE_DESIGN.md §11.1；回归锁见 tests/test_p0_agent_fixes.py。
     """
-    if not isinstance(output, str):
-        return True
-    try:
-        data = json.loads(output)
-    except Exception:
-        return True
-    if isinstance(data, dict) and data.get("error"):
-        return True
-    return False
+    return tool_output_error(output) is not None
 
 
 # ==================== 兼容别名 ====================
@@ -549,12 +591,16 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
             # 模块级名调用 → 测试可 patch agent_core.execute_ai_tool_v2
             _t0 = time.time()
             output = execute_ai_tool_v2(name, args)
-            _ok = not tool_output_is_error(output)
-            _progress_structured("tool_end", {
+            _err_info = tool_output_error(output)
+            _payload = {
                 "name": name,
-                "ok": _ok,
+                "ok": _err_info is None,
                 "elapsed_ms": int((time.time() - _t0) * 1000),
-            })
+            }
+            if _err_info:
+                # 失败时带机器码，SSE 消费方可按类型分支（重试 / 降级 / 上报）
+                _payload["error_code"] = _err_info["error_code"]
+            _progress_structured("tool_end", _payload)
             tool_trace.append({"name": name, "arguments": args, "output": output})
             messages.append({
                 "role": "tool",

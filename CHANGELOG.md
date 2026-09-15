@@ -10,7 +10,10 @@
 - 测试修正：`tests/test_m0_services.py` 中「以'工具执行失败'开头 → ok=False」的用例喂的是**真实代码从不产生**的字符串（锁定错误契约），已改为真实 JSON 错误格式。
 
 ### Added
-- `tests/test_p0_agent_fixes.py`：**8 条 P0 回归锁**（P0-1 model 晚绑定 2 条；P0-2 `ok` 判定 6 条，含空 `error`、非 JSON 等边界）。全量 `pytest` **189 passed**（原 181）。
+- **P0-2 后半 · 统一 per-tool 错误码**：三类错误返回在**保留旧中文文案**的前提下新增机器可判字段 `error_code` / `tool` / `retryable`（码值 `UNKNOWN_TOOL` / `NOT_FOUND` / `TOOL_EXCEPTION`，兜底 `UNKNOWN_ERROR`）；新增 `make_tool_error()` 与 `tool_output_error()`（兼容新格式 / 老格式 / 非 JSON 三种形态），`tool_output_is_error()` 改为其薄封装；`tool_end` 事件失败时携带 `error_code`，SSE 消费方可按类型分支（重试 / 降级 / 上报）。
+- `tests/test_p0_agent_fixes.py`：**8 条 P0 回归锁**（P0-1 model 晚绑定 2 条；P0-2 `ok` 判定 6 条，含空 `error`、非 JSON 等边界）。
+- `tests/test_tool_error_contract.py`：**12 条错误契约回归锁**（三类 error_code / 网络类 `retryable=True` / 成功路径不含 error 字段 / `tool_output_error()` 四种形态 / `tool_end` 是否携带 code）。
+- 全量 `pytest` **201 passed**（P0 修复前 181 → P0-1/P0-2 后 189 → 本轮 201）。
 
 ## [Unreleased] - 2026-09-08
 
