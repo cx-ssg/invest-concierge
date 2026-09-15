@@ -36,7 +36,10 @@ P1_TOOLS = {
 
 def test_p1_all_12_tools_registered_with_late_binding():
     """12 个新工具全部入注册表（11→23），fn_ref 精确指向引擎模块（不走 ai_helper 转发层）"""
-    assert len(TOOL_REGISTRY) == 23
+    # ⚠️ 用下限而非精确值：本测试意图是「P1 的 12 个工具都在」，
+    # 而工具总量会随功能迭代增长（2026-09-15 M1 新增 retrieve_docs → 24）。
+    # 旧写法 `== 23` 把实现细节锁进了回归锁 —— 每加一个工具都会假红一次。
+    assert len(TOOL_REGISTRY) >= 23
     for name, fn_ref in P1_TOOLS.items():
         assert name in TOOL_REGISTRY, name
         entry = TOOL_REGISTRY[name]

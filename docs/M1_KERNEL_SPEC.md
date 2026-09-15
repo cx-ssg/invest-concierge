@@ -9,7 +9,11 @@
 ## 1. 本切片范围
 
 **做**：RAG 内核 —— 切块、分词、BM25、向量、RRF 融合、持久化、单测。
-**不做（YAGNI，留后续切片）**：akshare 采集层、PDF 解析、`retrieve_docs` 工具注册、前端引用渲染、时效加权。
+**不做（YAGNI，留后续切片）**：PDF 解析、公告正文抓取、前端引用渲染、时效加权。
+
+> ✅ **2026-09-15 范围补正**：本节初版曾把「`retrieve_docs` 工具注册」与「语料试水」列为"不做"，
+> 但用户拍板的方案 A 原文包含二者（「内核 + **retrieve_docs 工具** + 语料先用少量真实公告试水」）。
+> 已补做：第 24 个 Agent 工具 + `scripts/rag_ingest.py`（akshare 公告采集）+ K5 端到端验收。
 
 **理由**：`COVERAGE_DESIGN.md` §6 风险表第一条即「akshare 接口变动」，采集层最易被外部打掉；内核稳定且可独立测试。
 
@@ -55,11 +59,16 @@ utils/rag/
                 #   实测依据：无关查询 max_sim 0.30~0.38、相关块 0.72~0.80
   chunker.py    chunk_document(text: str, target: int = 600, hard_max: int = 1200) -> list[dict]
                 # 返回 [{"seq": int, "text": str, "is_table": bool}]
-  store.py      ensure_schema(conn)
-                upsert_document(conn, doc: dict) -> int          # 幂等键 (code, source, published_at)
+  store.py      ensure_schema(conn)                              # SCHEMA_VERSION = 2
+                upsert_document(conn, doc: dict) -> int
+                # 幂等键 **(code, source, published_at, title)** —— v1 少了 title，
+                # 会让同一天的多份公告互相覆盖（实测 25 条只落库 7 篇，见 test_rag_store.py）
                 insert_chunks(conn, doc_id: int, chunks: list[dict]) -> list[int]
                 save_embeddings(conn, chunk_ids: list[int], vecs: list[list[float]], model: str)
                 load_index(conn) -> tuple[list[dict], "np.ndarray"]   # (meta, matrix)
+  retrieve.py   retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None) -> str
+                # 第 24 个 Agent 工具（返回 JSON 字符串，与既有 23 工具同契约）
+                # 无命中 → results=[] + 明确 message（设计 §3.3 第 4 条「无引用 = 不算回答」）
 ```
 
 **依赖**：仅 `numpy`（项目已有）+ stdlib。**不新增第三方依赖**（不需要 jieba / pdfplumber / rank_bm25）。
@@ -87,6 +96,10 @@ embeddings(chunk_id, model, dim, vec BLOB)   -- bge-m3, dim=1024, float32
 meta(key, value)                             -- schema_version / model / tokenizer / built_at
 ```
 **无 FTS5 表**（中文实测不可用，见 `COVERAGE_DESIGN.md` §3.3 第 3 条）。BM25 索引启动时由 `chunks` 现建。
+documents 的 **UNIQUE 约束 = (code, source, published_at, title)**（v2；v1 少了 title → 同日公告互相覆盖）。
+
+> ⚠️ **schema v1→v2 必须重建库**：UNIQUE 约束无法用 ALTER 修改。删 `kb.db` 后重新 ingest。
+> `ensure_schema()` 会检出旧版本并打印提示，**不自动删库** —— 静默清空用户数据比报错更糟。
 
 ---
 
@@ -94,10 +107,11 @@ meta(key, value)                             -- schema_version / model / tokeniz
 
 | # | 命令 | 预期输出 |
 |---|---|---|
-| **K1** | `pytest tests/test_rag_core.py -p no:warnings` | **12 passed**；含：中文 bigram / BM25 排序 / **RRF 精确融合值（能区分纯向量·纯 BM25·真融合三种实现）** / 无关块排除 / 空查询 / 表格不切碎 / 超长表格拆分并重复表头 / embedding 失败给指引 |
+| **K1** | `pytest tests/test_rag_core.py tests/test_rag_retrieve.py tests/test_rag_store.py -p no:warnings` | **21 passed**（12 内核 + 4 工具 + 5 持久化）；含：中文 bigram / BM25 排序 / **RRF 精确融合值（能区分纯向量·纯 BM25·真融合）** / 无关块排除 / 空查询 / 表格不切碎 / 超长表格拆分并重复表头 / embedding 失败给指引 / retrieve_docs 引用字段齐备 / **幂等键（同日多公告不互相覆盖）** |
 | **K2** | `python scripts/rag_probe.py`（UTF-8 脚本文件） | 中文长查询（≥5 字）**#1 命中正确块**（贵州茅台段）；⚠️ 已知行为：与查询共享通用词（如"增长"）的弱相关块仍会经 **BM25 路**进入结果，见 §9 |
 | **K3** | `python scripts/rag_probe.py --no-embed` 与 `python scripts/rag_probe.py --embed-url http://127.0.0.1:1/api/embed` | 两条降级路径均 **exit 0 不崩溃**，且给出 `ollama pull bge-m3` 等可操作指引；BM25 单路仍能返回结果 |
 | **K4** | `python scripts/rag_probe.py --query "量子计算最新进展"` | **返回 0 条（`RESULT: NO_HIT`）** —— A3「无关查询返回 0 条」的内核级验收 |
+| **K5** | `python scripts/rag_ingest.py --code 600519 --limit 25`，再用 `retrieve_docs` 检索 | **documents / chunks / embedded = 25 / 25 / 25**（schema v2）；「董事会决议公告」「利润分配方案」命中对应公告且带 `url` + `published_at`；无关查询返回 0 条 |
 
 > ⚠️ **K2 必须走脚本文件**：bash 内联 `python -c` 传中文会按 cp936 破坏源码字符串（本会话已实测踩到，导致首轮探针假阴性）。
 

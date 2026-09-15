@@ -12,7 +12,10 @@ import sqlite3
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+# v2（2026-09-15）：documents 的幂等键加入 title。
+# v1 用的 (code, source, published_at) 会让**同一天的多份公告互相覆盖** ——
+# 实测：ingest 25 条公告只落库 7 篇，静默丢数据（详见 tests/test_rag_store.py）。
 VEC_DTYPE = "float32"
 
 SCHEMA = """
@@ -26,7 +29,7 @@ CREATE TABLE IF NOT EXISTS documents(
     file_path    TEXT,
     sha256       TEXT,
     created_at   TEXT,
-    UNIQUE(code, source, published_at)
+    UNIQUE(code, source, published_at, title)
 );
 CREATE TABLE IF NOT EXISTS chunks(
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,10 +69,20 @@ def get_conn(path=None):
 
 
 def ensure_schema(conn):
-    """建表 + 记录 schema_version（幂等）。"""
+    """建表 + 记录 schema_version（幂等）。
+
+    ⚠️ schema 升级（v1→v2 是 UNIQUE 约束变更）**无法用 ALTER 完成**，旧库必须重建：
+    删除 kb.db 后重新 ingest。此处只检出不自动删库 —— 静默清空用户数据比报错更糟。
+    """
     conn.executescript(SCHEMA)
+    # 建表之后才读旧版本 —— 否则全新库会在 meta 表存在之前查询它
+    #（2026-09-15：初版写反了顺序，被 test_rag_store 当场抓出）
+    prev = get_meta(conn, "schema_version")
     set_meta(conn, "schema_version", str(SCHEMA_VERSION))
     conn.commit()
+    if prev is not None and int(prev) < SCHEMA_VERSION:
+        print("[kb] ⚠️ schema 从 v{} 升级到 v{}（documents 幂等键变更）。"
+              "旧库需重建：删除 kb.db 后重新 ingest。".format(prev, SCHEMA_VERSION))
     return conn
 
 
@@ -88,20 +101,23 @@ def get_meta(conn, key, default=None):
 
 
 def upsert_document(conn, doc):
-    """幂等键 (code, source, published_at)。返回 documents.id。"""
+    """幂等键 **(code, source, published_at, title)**。返回 documents.id。
+
+    ⚠️ v1 只用前三列 → 同一天的多份公告会互相覆盖（2026-09-15 实测丢数据）。
+    """
     conn.execute(
         "INSERT INTO documents(code, source, title, url, published_at, "
         "file_path, sha256, created_at) VALUES(?,?,?,?,?,?,?, datetime('now')) "
-        "ON CONFLICT(code, source, published_at) DO UPDATE SET "
-        "title=excluded.title, url=excluded.url, file_path=excluded.file_path, "
-        "sha256=excluded.sha256",
+        "ON CONFLICT(code, source, published_at, title) DO UPDATE SET "
+        "url=excluded.url, file_path=excluded.file_path, sha256=excluded.sha256",
         (doc.get("code"), doc.get("source"), doc.get("title"), doc.get("url"),
          doc.get("published_at"), doc.get("file_path"), doc.get("sha256")),
     )
     conn.commit()
     row = conn.execute(
-        "SELECT id FROM documents WHERE code IS ? AND source IS ? AND published_at IS ?",
-        (doc.get("code"), doc.get("source"), doc.get("published_at")),
+        "SELECT id FROM documents WHERE code IS ? AND source IS ? "
+        "AND published_at IS ? AND title IS ?",
+        (doc.get("code"), doc.get("source"), doc.get("published_at"), doc.get("title")),
     ).fetchone()
     return row["id"] if row else None
 
