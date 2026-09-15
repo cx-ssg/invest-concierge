@@ -15,6 +15,7 @@ import importlib
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, List, Dict, Any
 
 from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
@@ -350,9 +351,48 @@ TOOL_ERR_UNKNOWN_TOOL = "UNKNOWN_TOOL"   # 注册表里没有该工具
 TOOL_ERR_NOT_FOUND = "NOT_FOUND"         # 工具返回 None（声明了 none_error 模板）
 TOOL_ERR_EXCEPTION = "TOOL_EXCEPTION"    # 执行抛异常
 TOOL_ERR_UNKNOWN = "UNKNOWN_ERROR"       # 兜底：老格式 / 非 JSON 输出
+TOOL_ERR_INVALID_ARGS = "INVALID_ARGS"   # 缺必填参数（P0-4）
+TOOL_ERR_TIMEOUT = "TIMEOUT"             # 单次调用超时（P0-4，可重试）
 
 # 网络/超时类异常视为可重试（requests 的超时与连接异常均继承自 OSError 系）
 _RETRYABLE_EXCEPTIONS = (TimeoutError, ConnectionError, OSError)
+
+# 单次工具调用超时（秒）；设为 0 关闭超时控制（P0-4）
+TOOL_TIMEOUT_SECONDS = 30
+
+
+class _ToolTimeout(Exception):
+    """**看门狗**超时（区别于工具内部自己抛的 TimeoutError）。
+
+    两者语义不同：工具内部的网络超时属于「该工具执行失败」（TOOL_EXCEPTION，仍可重试）；
+    看门狗超时是「我们等不下去了」（TIMEOUT）。
+    """
+
+
+def _call_tool_fn(fn, kwargs, timeout):
+    """执行工具函数（带可选超时）。
+
+    超时用线程池 `future.result(timeout)` 实现 —— ⚠️ 它**不杀线程**（Python 无法强杀），
+    只是让调用方不再被阻塞，被放弃的线程会在后台自行结束。这是已知折中：
+    换来的是「Agent 对话不会被一个卡住的行情接口拖死」。
+
+    ⚠️ 这里**不能**用 `with ThreadPoolExecutor(...)`：其 `__exit__` 会
+    `shutdown(wait=True)` 等线程跑完，超时控制就形同虚设
+    （2026-09-15 由 P0-4 的超时测试当场抓出，故用 try/finally + wait=False）。
+    """
+    if not timeout or timeout <= 0:
+        return fn(**kwargs)
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        fut = ex.submit(fn, **kwargs)
+        try:
+            return fut.result(timeout=timeout)
+        except TimeoutError:
+            if fut.done():
+                raise          # 工具自己抛的 TimeoutError → 保持原语义（归 TOOL_EXCEPTION）
+            raise _ToolTimeout("工具执行超过 {}s 看门狗上限".format(timeout))
+    finally:
+        ex.shutdown(wait=False)
 
 
 def make_tool_error(message, code, tool_name, exc=None):
@@ -399,6 +439,8 @@ def execute_ai_tool_v2(tool_name, arguments):
 
     - 未知工具 → {"error": "未知工具：…"}（旧文案兼容）+ error_code=UNKNOWN_TOOL
     - 工具返回 None 且有 none_error 模板 → 按模板输出（旧文案兼容）+ error_code=NOT_FOUND
+    - 缺必填参数 → {"error": "缺少必填参数：…"} + error_code=INVALID_ARGS（P0-4，不穿透给工具）
+    - 单次调用超时（TOOL_TIMEOUT_SECONDS）→ error_code=TIMEOUT，retryable=True（P0-4）
     - 执行抛异常 → {"error": "工具执行出错：…"} + error_code=TOOL_EXCEPTION
       （网络/超时类异常额外带 retryable=True，调用方可据此重试）
     - 结果统一 _truncate 截断后 JSON 序列化（default=str 兜底 DataFrame 等）
@@ -415,16 +457,24 @@ def execute_ai_tool_v2(tool_name, arguments):
     if not entry:
         return make_tool_error("未知工具：{}".format(tool_name),
                                TOOL_ERR_UNKNOWN_TOOL, tool_name)
+    # P0-4：必填校验（旧实现会把空值透传给工具 —— 等于用一次真实网络请求换一个看不懂的报错）
+    missing = [k for k in (entry.required or []) if arguments.get(k) in (None, "")]
+    if missing:
+        return make_tool_error("缺少必填参数：{}".format("、".join(missing)),
+                               TOOL_ERR_INVALID_ARGS, tool_name)
     try:
         fn = resolve(entry.fn_ref)
         kwargs = {k: v for k, v in arguments.items() if k in entry.param_names}
-        result = fn(**kwargs)
+        result = _call_tool_fn(fn, kwargs, TOOL_TIMEOUT_SECONDS)
         if result is None and entry.none_error:
             fmt_args = {k: arguments.get(k, "") for k in entry.param_names}
             return make_tool_error(entry.none_error.format(**fmt_args),
                                    TOOL_ERR_NOT_FOUND, tool_name)
         payload = _truncate(result)
         return json.dumps(payload, ensure_ascii=False, default=str)
+    except _ToolTimeout:
+        return make_tool_error("工具执行超时（{}s）：{}".format(TOOL_TIMEOUT_SECONDS, tool_name),
+                               TOOL_ERR_TIMEOUT, tool_name, exc=TimeoutError())
     except Exception as e:
         return make_tool_error("工具执行出错：{}".format(e),
                                TOOL_ERR_EXCEPTION, tool_name, exc=e)
@@ -465,7 +515,8 @@ AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投�
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
               model=None, temperature=0.7, max_tool_rounds=8,
-              continue_question=False, on_progress=None, structured_progress=False):
+              continue_question=False, on_progress=None, structured_progress=False,
+              parallel_tools=False):
     """带规划的 Agent 多轮执行循环（ai_chat / 诊断页"AI 追问"共用入口）。
 
     参数：
@@ -591,6 +642,8 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
 
         tool_calls = result.get("content") or []
         messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+        # 先解析全部调用（P0-4：解析与执行分离，便于并行）
+        _parsed = []
         for tc in tool_calls:
             fn = tc.get("function") or {}
             name = fn.get("name", "")
@@ -599,17 +652,33 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 args = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args or {})
             except Exception:
                 args = {}
+            _parsed.append((tc, name, args))
+
+        # P0-4：并行执行（**默认关**——工具内部对缓存/SQLite 的线程安全性尚未实测）。
+        # 并行只影响「执行」；tool_start/tool_end 事件与 tool_trace 仍**按调用顺序**发出/回填。
+        # 并行模式下 elapsed_ms 记的是整批耗时（顺序模式仍是单次耗时）。
+        if parallel_tools and len(_parsed) > 1:
+            _t0_batch = time.time()
+            with ThreadPoolExecutor(max_workers=min(4, len(_parsed))) as _ex:
+                _outputs = list(_ex.map(lambda _it: execute_ai_tool_v2(_it[1], _it[2]), _parsed))
+            _batch_ms = int((time.time() - _t0_batch) * 1000)
+            _timings = [_batch_ms] * len(_parsed)
+        else:
+            _outputs, _timings = [], []
+            for _tc, _n, _a in _parsed:
+                _t0 = time.time()
+                _outputs.append(execute_ai_tool_v2(_n, _a))
+                _timings.append(int((time.time() - _t0) * 1000))
+
+        for (tc, name, args), output, _ms in zip(_parsed, _outputs, _timings):
             _progress("tool", "{}({})".format(
                 name, ", ".join("{}={}".format(k, v) for k, v in list(args.items())[:2])))
             _progress_structured("tool_start", {"name": name, "arguments": args})
-            # 模块级名调用 → 测试可 patch agent_core.execute_ai_tool_v2
-            _t0 = time.time()
-            output = execute_ai_tool_v2(name, args)
             _err_info = tool_output_error(output)
             _payload = {
                 "name": name,
                 "ok": _err_info is None,
-                "elapsed_ms": int((time.time() - _t0) * 1000),
+                "elapsed_ms": _ms,
             }
             if _err_info:
                 # 失败时带机器码与可重试标记。注意：**当前前端未消费这两个字段**

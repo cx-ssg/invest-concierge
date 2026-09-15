@@ -340,7 +340,7 @@ meta(key, value)                    -- 索引版本、模型名、构建时间
 | P0-1 | ✅ **已完成（2026-09-15）**：`agent_run` 的 model 冻结 → `model=None` + 调用时解析 | 它是**配置链的断点**；不修则后续所有"换模型再测"都不可信 |
 | P0-2 | ✅ **已完成（2026-09-15）**：`tool_end.ok` 判定对齐真实错误契约 + **统一 per-tool 错误码**（`error_code` / `tool` / `retryable`，新增 `make_tool_error()` 与 `tool_output_error()`） | M1 的 `retrieve_docs`、M3 的每个节点都踩在这层；不修则排障被误导 |
 | P0-3 | ✅ **已完成（2026-09-15）**：A 段——golden set `tests/golden/cases.py`（26 条 / 覆盖 23 个工具）+ 离线契约 `tests/test_golden_offline.py`；B 段——`scripts/eval_agent.py`（在线评测，默认 dry-run 不花钱）+ `call_llm`/`agent_run` 的 token 记账（`usage` 跨轮累加） | §10.3 引用的调查：**89% 有可观测、仅 52% 有 eval**，我们两项都空 → 当前最便宜的差异化点 |
-| P0-4 | 工具层契约加固：结构化返回 + schema 校验 + 超时 + 并行执行 | 同上；并发还是"生产级 Agent"标配 |
+| P0-4 | ✅ **已完成（2026-09-15）**：必填参数校验（`INVALID_ARGS`）+ 单次调用看门狗超时（`TOOL_TIMEOUT_SECONDS`=30s → `TIMEOUT` 码，且不破坏工具内部超时的 `TOOL_EXCEPTION`）+ 并行执行能力（`parallel_tools`，**默认关**：工具内缓存/SQLite 的线程安全性待实测）。「结构化返回」已在 P0-2 完成 | 同上；并发还是"生产级 Agent"标配 |
 | P0-5 | `agent_messages` 瘦身：tool 消息只存摘要/引用，不落全文 | 否则 M2 再往里加事实/经验记忆会彻底失控 |
 
 > **P0-1/P0-2 验收证据（2026-09-15）**：

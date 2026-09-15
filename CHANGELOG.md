@@ -19,7 +19,12 @@
   - `scripts/eval_agent.py`：真调模型的**在线评测**（默认 **dry-run 不花钱**，加 `--run` 才跑；支持 `--limit` / `--ids` / `--json` / `--price`）。判定：**工具按集合命中**（顺序不敏感，仅 `order_sensitive` 用例比序列）+ 事实宽松子串命中；**默认只报 token 不报钱**（单价易过时，要报钱须显式 `--price`）
 - `tests/test_tool_error_contract.py`：**12 条错误契约回归锁**（三类 error_code / 网络类 `retryable=True` / 成功路径不含 error 字段 / `tool_output_error()` 四种形态 / `tool_end` 是否携带 code）。
 - `tests/test_usage_accounting.py`：**6 条 usage 回归锁**（三种响应形态带回 usage / 无 usage 不炸 / 跨轮累加 / 兼容旧返回键）。
-- 全量 `pytest` **242 passed**（181 → 189 → 201 → 233 → 236 → 本轮 242）。
+- **P0-4 · 工具层契约加固**：
+  - **必填参数校验**：缺参 → `error_code=INVALID_ARGS` 并点名缺哪个（旧实现会把空值透传给工具 —— 等于用一次真实网络请求换一个看不懂的报错；RED 阶段实测该路径真的会去打行情接口，单跑测试从 4.7s 涨到 53s）
+  - **单次调用超时**：`TOOL_TIMEOUT_SECONDS`（默认 30s，设 0 关闭）。看门狗用线程池 `future.result(timeout)`；⚠️ **不能用 `with ThreadPoolExecutor(...)`**（`__exit__` 会 `shutdown(wait=True)` 等线程跑完，超时控制形同虚设 —— 这个坑由超时测试当场抓出）；并区分**看门狗超时**（`_ToolTimeout` → `TIMEOUT`）与**工具内部超时**（`TimeoutError` → 保持 `TOOL_EXCEPTION`，旧契约不破）
+  - **并行执行能力**：`agent_run(parallel_tools=True)` 时多工具并发执行；**默认关**（工具内部对缓存/SQLite 的线程安全性尚未实测）；无论并行与否，`tool_start`/`tool_end` 事件与 `tool_trace` 仍**按调用顺序**
+- `tests/test_tool_contract_hardening.py`：**10 条回归锁**（缺参 / 空参 / 无必填项工具 / 超时生效与关闭 / 并行默认关 / 顺序基线 / 并行下 trace 顺序）。
+- 全量 `pytest` **252 passed**（181 → 189 → 201 → 233 → 236 → 242 → 本轮 252）。
 
 ### 审计处理（2026-09-15 · 独立子代理审 `4d51a15..HEAD`）
 - 总体判定：**P0-1/P0-2 达标**（行为锚定、revert 即 FAIL、无自证陷阱）；**golden set 仅算阶段性半成品**（`test_golden_case_drives_agent_run` 是编排冒烟，不是评测）—— 已如实标注于本节与 `tests/golden/cases.py` docstring。
