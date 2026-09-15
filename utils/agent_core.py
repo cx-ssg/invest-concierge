@@ -560,6 +560,8 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         record_message(session_id, "user", str(task))
 
     tool_trace = []
+    # P0-3-B：token 记账（跨轮累加；上游没给 usage 的轮次只计 calls）
+    usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
     if tools is None:
         tools = [t.schema for t in TOOL_REGISTRY.values()]
 
@@ -568,6 +570,11 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         # 原生思考流展示走 chat_with_tools/_reasoner_model 链路（那是诊断页 AI 追问）；
         # 若未来要 agent 思考，加 thinking=True 并处理 reasoning_content 回传契约。
         result = ai_helper.call_llm(messages, tools=tools, model=model, temperature=temperature, thinking=False)
+        usage_total["calls"] += 1
+        _u = result.get("usage")
+        if _u:
+            for _k in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                usage_total[_k] += _u.get(_k, 0)
         # 模型原生思考流（reasoner 才有；deepseek-chat 为空）实时透传
         if result.get("reasoning"):
             _progress("reasoning", result["reasoning"])
@@ -579,6 +586,7 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 maybe_summarize_session(session_id)
             result.setdefault("tool_trace", tool_trace)
             result["session_id"] = session_id
+            result["usage"] = usage_total
             return result
 
         tool_calls = result.get("content") or []
@@ -623,7 +631,8 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
     content = "⚠️ 工具调用轮数超限，请把问题拆分后再试。"
     if memory:
         record_message(session_id, "assistant", content)
-    return {"type": "text", "content": content, "tool_trace": tool_trace, "session_id": session_id}
+    return {"type": "text", "content": content, "tool_trace": tool_trace,
+            "session_id": session_id, "usage": usage_total}
 
 
 def build_tool_schemas():

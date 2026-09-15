@@ -14,8 +14,12 @@
 - **P0-2 后半 · 统一 per-tool 错误码**：三类错误返回在**保留旧中文文案**的前提下新增机器可判字段 `error_code` / `tool` / `retryable`（码值 `UNKNOWN_TOOL` / `NOT_FOUND` / `TOOL_EXCEPTION`，兜底 `UNKNOWN_ERROR`）；新增 `make_tool_error()` 与 `tool_output_error()`（兼容新格式 / 老格式 / 非 JSON 三种形态），`tool_output_is_error()` 改为其薄封装；`tool_end` 事件失败时携带 `error_code` + `retryable`。
   > ⚠️ **诚实标注（源自 2026-09-15 独立审计 ⚪ 条）**：这两个字段**当前没有任何消费方**（前端 `useAgentRun` 只读 `name/ok/elapsed_ms`），属**前瞻性附加**，供未来 M3 图节点 / 降级重试使用 —— 不要写成"消费方可按类型分支"。
 - `tests/test_p0_agent_fixes.py`：**8 条 P0 回归锁**（P0-1 model 晚绑定 2 条；P0-2 `ok` 判定 6 条，含空 `error`、非 JSON 等边界）。
+- **P0-3-B · 在线评测 + token 记账**：
+  - `call_llm` 新增 `_extract_usage()`，在两处 return 带回 `usage`（兼容端点不返回 usage 时为 None，不抛异常）；`agent_run` **跨轮累加**，返回值新增 `usage`（`prompt_tokens` / `completion_tokens` / `total_tokens` / `calls`）
+  - `scripts/eval_agent.py`：真调模型的**在线评测**（默认 **dry-run 不花钱**，加 `--run` 才跑；支持 `--limit` / `--ids` / `--json` / `--price`）。判定：**工具按集合命中**（顺序不敏感，仅 `order_sensitive` 用例比序列）+ 事实宽松子串命中；**默认只报 token 不报钱**（单价易过时，要报钱须显式 `--price`）
 - `tests/test_tool_error_contract.py`：**12 条错误契约回归锁**（三类 error_code / 网络类 `retryable=True` / 成功路径不含 error 字段 / `tool_output_error()` 四种形态 / `tool_end` 是否携带 code）。
-- 全量 `pytest` **236 passed**（181 → 189 → 201 → 233 → 本轮 236）。
+- `tests/test_usage_accounting.py`：**6 条 usage 回归锁**（三种响应形态带回 usage / 无 usage 不炸 / 跨轮累加 / 兼容旧返回键）。
+- 全量 `pytest` **242 passed**（181 → 189 → 201 → 233 → 236 → 本轮 242）。
 
 ### 审计处理（2026-09-15 · 独立子代理审 `4d51a15..HEAD`）
 - 总体判定：**P0-1/P0-2 达标**（行为锚定、revert 即 FAIL、无自证陷阱）；**golden set 仅算阶段性半成品**（`test_golden_case_drives_agent_run` 是编排冒烟，不是评测）—— 已如实标注于本节与 `tests/golden/cases.py` docstring。

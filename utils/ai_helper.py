@@ -42,6 +42,22 @@ def _chat_model():
     return get_llm_config()["model"] or DEEPSEEK_MODEL
 
 
+def _extract_usage(response):
+    """提取上游 usage（P0-3-B token 记账）→ dict 或 None。
+
+    部分 OpenAI 兼容端点不返回 usage，或缺字段 → 缺失时按 0 计，整体缺失返回 None
+    （由调用方决定是否计入统计）。
+    """
+    u = getattr(response, "usage", None)
+    if u is None:
+        return None
+    return {
+        "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
+        "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
+        "total_tokens": getattr(u, "total_tokens", 0) or 0,
+    }
+
+
 def call_llm(prompt, tools=None, model=None, temperature=0.7, thinking=False):
     """统一的 LLM 调用函数
 
@@ -104,6 +120,7 @@ def call_llm(prompt, tools=None, model=None, temperature=0.7, thinking=False):
 
         response = client.chat.completions.create(**kwargs)
         choice = response.choices[0]
+        usage = _extract_usage(response)
 
         if tools and choice.finish_reason == "tool_calls":
             tool_calls = []
@@ -118,14 +135,15 @@ def call_llm(prompt, tools=None, model=None, temperature=0.7, thinking=False):
                 })
             # reasoner 模型在决定工具调用时也会返回原生思考流
             reasoning = getattr(choice.message, "reasoning_content", None) or ""
-            return {"type": "tool_call", "content": tool_calls, "reasoning": reasoning}
+            return {"type": "tool_call", "content": tool_calls, "reasoning": reasoning,
+                    "usage": usage}
 
         content = choice.message.content
         if content is None:
             content = ""
         # reasoner 的原生思考流（deepseek-chat 为空字符串）
         reasoning = getattr(choice.message, "reasoning_content", None) or ""
-        return {"type": "text", "content": content, "reasoning": reasoning}
+        return {"type": "text", "content": content, "reasoning": reasoning, "usage": usage}
 
     except Exception as e:
         error_msg = str(e)
