@@ -123,10 +123,15 @@ def test_agent_run_structured_progress_emits_start_end_pair():
 
 
 def test_agent_run_structured_progress_bad_tool_marks_not_ok():
-    """工具输出以「工具执行失败」开头 → tool_end.ok=False"""
+    """工具返回真实错误格式（{"error": ...}）→ tool_end.ok=False
+
+    注：旧版本用例喂的是「工具执行失败：...」字符串——而**真实代码从不产生它**
+    （execute_ai_tool_v2 的错误一律是 {"error": ...} JSON），属于锁定错误契约的测试。
+    故改用真实格式；专项回归锁见 tests/test_p0_agent_fixes.py。
+    """
 
     def fake_execute(name, arguments):
-        return "工具执行失败：数据源不可用"
+        return json.dumps({"error": "工具执行出错：数据源不可用"}, ensure_ascii=False)
 
     seen = []
     with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \

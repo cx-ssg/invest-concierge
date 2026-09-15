@@ -368,6 +368,30 @@ def execute_ai_tool_v2(tool_name, arguments):
         return json.dumps({"error": "工具执行出错：{}".format(e)}, ensure_ascii=False)
 
 
+def tool_output_is_error(output):
+    """判定一次工具输出是否代表失败（tool_end.ok 等消费方统一走这里）。
+
+    与 execute_ai_tool_v2 的返回契约对齐（见其 docstring）：
+    - 非 str（异常路径）→ 失败
+    - 非 JSON 字符串 → 失败（该函数契约上总是返回 JSON 字符串）
+    - JSON 对象且 error 字段为真值 → 失败（未知工具 / none_error 模板 / 执行异常三种）
+    - 其他 → 成功
+
+    背景：旧实现用 `output.startswith("工具执行失败")` 判定，而该字符串真实代码从不
+    产生（错误一律是 {"error": ...} JSON）→ tool_end.ok 恒为 True，排障被误导。
+    详见 docs/COVERAGE_DESIGN.md §11.1；回归锁见 tests/test_p0_agent_fixes.py。
+    """
+    if not isinstance(output, str):
+        return True
+    try:
+        data = json.loads(output)
+    except Exception:
+        return True
+    if isinstance(data, dict) and data.get("error"):
+        return True
+    return False
+
+
 # ==================== 兼容别名 ====================
 # 旧名 + 旧错误文案保持（"未找到基金"/"未知工具"被存量 test_ai_tools 断言）；
 # execute_ai_tool_v2 对 3 旧工具的行为与旧 if/elif 分派完全一致。
@@ -392,7 +416,7 @@ AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投�
 
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
-              model=_reasoner_model(), temperature=0.7, max_tool_rounds=8,
+              model=None, temperature=0.7, max_tool_rounds=8,
               continue_question=False, on_progress=None, structured_progress=False):
     """带规划的 Agent 多轮执行循环（ai_chat / 诊断页"AI 追问"共用入口）。
 
@@ -402,8 +426,10 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         memory: 是否落库记忆（创建/续写 agent_sessions + agent_messages，满 8 轮自动摘要）
         session_id: 续写指定会话；memory=True 且为 None 时新建
         tools: 工具 schema 列表，None 用注册表全量
-        model: 模型名，默认 deepseek-reasoner（返回 reasoning_content 原生思考流，
-            由 on_progress("reasoning", ...) 实时透传给 UI 思考链）
+        model: 模型名；None（默认）= 取当前配置的 reasoner 模型，**在调用时解析**
+            （旧版写成 model=_reasoner_model()，Python 默认参数只在 import 求值一次，
+            导致设置页切换模型对 Agent 链路完全无效）。模型返回 reasoning_content
+            原生思考流，由 on_progress("reasoning", ...) 实时透传给 UI 思考链
         max_tool_rounds: 工具调用轮次上限（默认 8，诊断类多步需要）
         continue_question: 追问链开关——memory 会话有历史时，把最近消息作为上下文带入
         on_progress: 进度回调 fn(stage, detail)——UI 实时思考链用，不传则无副作用。
@@ -416,6 +442,12 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
     返回：
         {"type": "text", "content": "...", "tool_trace": [...], "session_id": id|None}
     """
+
+    # 晚绑定：默认 model 必须在**调用时**解析。
+    # 若写成 model=_reasoner_model()，Python 默认参数只在 import 时求值一次 →
+    # 用户在设置页切换模型后，Agent 对话链路仍用旧模型（配置链断点）。
+    if model is None:
+        model = _reasoner_model()
 
     def _progress(stage, detail):
         if on_progress:
@@ -517,7 +549,7 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
             # 模块级名调用 → 测试可 patch agent_core.execute_ai_tool_v2
             _t0 = time.time()
             output = execute_ai_tool_v2(name, args)
-            _ok = isinstance(output, str) and not output.startswith("工具执行失败")
+            _ok = not tool_output_is_error(output)
             _progress_structured("tool_end", {
                 "name": name,
                 "ok": _ok,

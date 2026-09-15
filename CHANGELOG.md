@@ -2,6 +2,16 @@
 
 本项目遵循 [Semver](https://semver.org/)。发布日如有调整，以 GitHub Release 为准。
 
+## [Unreleased] - 2026-09-15
+
+### Fixed
+- **P0-1 配置链断点**：`agent_run(model=_reasoner_model())` 的默认参数在 **import 时**被求值一次 → 设置页切换模型对 Agent 对话链路**完全无效**。改为 `model=None` + 函数内解析（调用时读配置）；显式传 `model` 仍优先。（来源：2026-09-14 外部评审复核，见 `docs/COVERAGE_DESIGN.md` §11）
+- **P0-2 工具成功标记失真**：`tool_end.ok` 用 `startswith("工具执行失败")` 判定，而真实错误格式是 `{"error": "工具执行出错：..."}`（agent_core.py:368）→ `ok` 恒为 True，排障被误导。新增 `tool_output_is_error()` 统一判定（非 str / 非 JSON / `error` 为真值 → 失败，空 `error` 不误判），`tool_end.ok` 改用之。
+- 测试修正：`tests/test_m0_services.py` 中「以'工具执行失败'开头 → ok=False」的用例喂的是**真实代码从不产生**的字符串（锁定错误契约），已改为真实 JSON 错误格式。
+
+### Added
+- `tests/test_p0_agent_fixes.py`：**8 条 P0 回归锁**（P0-1 model 晚绑定 2 条；P0-2 `ok` 判定 6 条，含空 `error`、非 JSON 等边界）。全量 `pytest` **189 passed**（原 181）。
+
 ## [Unreleased] - 2026-09-08
 
 ### Fixed
