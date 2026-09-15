@@ -339,13 +339,14 @@ meta(key, value)                    -- 索引版本、模型名、构建时间
 |---|---|---|
 | P0-1 | ✅ **已完成（2026-09-15）**：`agent_run` 的 model 冻结 → `model=None` + 调用时解析 | 它是**配置链的断点**；不修则后续所有"换模型再测"都不可信 |
 | P0-2 | ✅ **已完成（2026-09-15）**：`tool_end.ok` 判定对齐真实错误契约 + **统一 per-tool 错误码**（`error_code` / `tool` / `retryable`，新增 `make_tool_error()` 与 `tool_output_error()`） | M1 的 `retrieve_docs`、M3 的每个节点都踩在这层；不修则排障被误导 |
-| P0-3 | 评测骨架：golden set（20-30 条「问题 → 期望工具序列 / 期望事实」）+ pytest 集成 + usage 统计 | §10.3 引用的调查：**89% 有可观测、仅 52% 有 eval**，我们两项都空 → 当前最便宜的差异化点 |
+| P0-3 | 🟡 **A 阶段完成（2026-09-15）**：golden set `tests/golden/cases.py`（26 条 / 覆盖 23 个工具）+ 离线契约 `tests/test_golden_offline.py`（进 CI，含阴性对照验证）；**B 阶段待做**：在线评测脚本 `scripts/eval_agent.py` + usage/token 统计 | §10.3 引用的调查：**89% 有可观测、仅 52% 有 eval**，我们两项都空 → 当前最便宜的差异化点 |
 | P0-4 | 工具层契约加固：结构化返回 + schema 校验 + 超时 + 并行执行 | 同上；并发还是"生产级 Agent"标配 |
 | P0-5 | `agent_messages` 瘦身：tool 消息只存摘要/引用，不落全文 | 否则 M2 再往里加事实/经验记忆会彻底失控 |
 
 > **P0-1/P0-2 验收证据（2026-09-15）**：
 > ① **P0-1**：先写 RED（`tests/test_p0_agent_fixes.py` 8 条 → 4 failed）→ 修 → GREEN；全量 `pytest` **189 passed**（原 181）；同时修正了 `tests/test_m0_services.py` 里锁定**错误契约**的旧用例（它喂的是真实代码从不产生的「工具执行失败」字符串）。
 > ② **P0-2 后半**：先写 RED（`tests/test_tool_error_contract.py` 12 条 → **10 failed**）→ 实现统一错误码 → GREEN；全量 `pytest` **201 passed**（189 + 12）。旧中文文案（"未知工具"/"未找到基金"）**逐字保留**，新字段只增不改。
+> ③ **P0-3-A 离线评测（golden set）**：新增 `tests/golden/cases.py`（26 条，覆盖全部 23 个工具）+ `tests/test_golden_offline.py`（32 条）；全量 `pytest` **233 passed**（201 + 32）。**做了阴性对照**（临时把 4 处 `get_stock_diagnosis` 改成 `_TYPO` → 2 条合法性校验立刻 FAIL → 恢复后全绿），证明这套校验不是空测试 —— 落实 §11.7「测试要能被打破」。
 > 变更记录见 `CHANGELOG.md`。
 
 ### 11.3 模块内小项（并入 M1/M2/M3，不新增一期）
