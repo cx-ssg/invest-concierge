@@ -51,13 +51,48 @@ def test_strong_false_positive_counter_works():
     assert m["strong_fp_rate"] == 1.0
 
 
-def test_weak_is_counted_separately_from_strong():
-    """`weak` 不算 strong 误放行，但要单独计数（它会进生成上下文）。"""
-    irr = [{"query": "模糊问题", "answer_chunk_ids": []}]
+def test_weak_is_delegation_not_failure():
+    """`weak` 是**委派点**（交给 LLM 判官），不是检索失败 —— 单独计为 `delegated_rate`。
+
+    2026-09-17 口径修正：外部评审指出旧名 `weak_fp_rate` 与标注规范矛盾
+    （`tests/golden/rag/README.md` 里三类负例**都允许** `weak`，只有 `strong` 是禁止的）。
+    """
+    irr = [{"query": "模糊问题", "kind": "near_miss", "answer_chunk_ids": []}]
     judge = _FakeJudge({"模糊问题": Evidence(0.08, 0.5, "weak")})
     m = ev.evaluate([], irr, judge, _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
-    assert m["strong_fp_rate"] == 0.0
-    assert m["weak_fp_rate"] == 1.0
+    assert m["strong_fp_rate"] == 0.0, "weak 不算 strong 违规"
+    assert m["delegated_rate"] == 1.0, "但要计入委派率（成本）"
+    assert m["by_kind"]["near_miss"]["weak"] == 1
+
+
+def test_strong_fp_is_reported_per_kind():
+    """`strong_fp` 必须**按 kind 分列** —— 混池会让漂亮的类与违规的类互相抵消。
+
+    外部评审实测：域外类 0/6（完美）与近义干扰类 1/17（真违规）混池后只剩 2.8%，
+    看不出违规究竟出在哪一类。
+    """
+    irr = [{"query": "域外问题", "kind": "out_of_domain", "answer_chunk_ids": []},
+           {"query": "近义问题", "kind": "near_miss", "answer_chunk_ids": []}]
+    judge = _FakeJudge({"域外问题": Evidence(0.0, 0.0, "none"),
+                        "近义问题": Evidence(0.5, 1.0, "strong")})
+    m = ev.evaluate([], irr, judge, _META, _MATRIX,
+                    np.array([[1.0, 0.0], [0.0, 1.0]], dtype="float32"))  # 数量须与查询一致
+    assert m["by_kind"]["out_of_domain"]["strong"] == 0
+    assert m["by_kind"]["near_miss"]["strong"] == 1
+
+
+def test_evaluate_rejects_qvec_length_mismatch():
+    """`qvecs` 条数与查询数不一致时必须**显式报错**。
+
+    ⚠️ 旧实现用 `zip(rows_irr, qvecs[...])` → 长度不匹配会**静默截断**，
+    指标少算一部分而看不出（2026-09-17 本组用例首次运行时真实踩到）。
+    """
+    import pytest
+    irr = [{"query": "a", "kind": "near_miss", "answer_chunk_ids": []},
+           {"query": "b", "kind": "near_miss", "answer_chunk_ids": []}]
+    with pytest.raises(ValueError):
+        ev.evaluate([], irr, _FakeJudge({}), _META, _MATRIX,
+                    np.array([[1.0, 0.0]], dtype="float32"))          # 故意少一行
 
 
 def test_scan_returns_curve_grid():

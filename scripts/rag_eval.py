@@ -43,6 +43,12 @@ def load(split, key):
 
 def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
     """返回指标 dict。qvecs 与 rows 顺序一致（已批量 embed）。"""
+    n_expect = len(rows_rel) + len(rows_irr)
+    if len(qvecs) != n_expect:
+        # ⚠️ 旧实现直接 `zip(rows, qvecs[...])` 配对 → 长度不匹配会**静默截断**，
+        # 指标少算一部分却看不出来（2026-09-17 新增用例时真实踩到）。
+        raise ValueError("qvecs 条数 %d 与查询总数 %d 不一致 —— 静默截断会算错指标"
+                         % (len(qvecs), n_expect))
     chunk_pos = {m["chunk_id"]: i for i, m in enumerate(meta)}
 
     over_abstain = 0
@@ -62,20 +68,29 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         rank = next((j + 1 for j, c in enumerate(all10) if c in gold), None)
         rr.append(1.0 / rank if rank else 0.0)
 
-    strong_fp = weak_fp = 0
+    # 负例：**按 kind 分列**（2026-09-17 修正口径，外部评审指出）
+    # - `strong` 才是违规（A3a 只看 out_of_domain）
+    # - `weak` 是**委派点**（交给 LLM 判官），不是失败 —— 按 kind 的规范它本就允许 weak
+    by_kind = {}
     for r, qv in zip(rows_irr, qvecs[len(rows_rel):]):
         lv = judge.assess(r["query"]).level
-        if lv == LEVEL_STRONG:
-            strong_fp += 1
-        elif lv != LEVEL_NONE:
-            weak_fp += 1
+        d = by_kind.setdefault(r.get("kind", "unknown"),
+                               {"n": 0, "none": 0, "weak": 0, "strong": 0})
+        d["n"] += 1
+        d[lv] += 1
+
+    strong_fp = sum(d["strong"] for d in by_kind.values())
+    delegated = sum(d["weak"] for d in by_kind.values())
 
     n_rel, n_irr = max(len(rows_rel), 1), max(len(rows_irr), 1)
     return {
         "n_rel": len(rows_rel), "n_irr": len(rows_irr),
         "over_abstain_rate": over_abstain / n_rel,
         "strong_fp_rate": strong_fp / n_irr,
-        "weak_fp_rate": weak_fp / n_irr,
+        # 委派率：落 weak 的比例 = **成本指标**（多一次判官调用），**不是失败**。
+        # 旧名 `weak_fp_rate` 与标注规范矛盾（规范里三类负例都允许 weak）。
+        "delegated_rate": delegated / n_irr,
+        "by_kind": by_kind,
         "Recall@%d" % k: recall_hits / n_rel,
         "MRR@10": sum(rr) / n_rel if rr else 0.0,
     }
@@ -139,11 +154,18 @@ def main(argv=None):
     print("[eval] chunks=%d 阈值 sar>=%.2f v1>=%.2f / none 档 sar<%.2f v1<%.2f"
           % (len(meta), ev_mod.SAR_STRONG, ev_mod.V1_STRONG, ev_mod.SAR_NONE, ev_mod.V1_NONE))
     print("[eval] n_rel=%d n_irr=%d" % (m["n_rel"], m["n_irr"]))
-    print("  over_abstain_rate = %.3f   (域内可答被判 none；越低越好)" % m["over_abstain_rate"])
-    print("  strong_fp_rate    = %.3f   (应弃权却 strong；越低越好)" % m["strong_fp_rate"])
-    print("  weak_fp_rate      = %.3f   (应弃权却 weak)" % m["weak_fp_rate"])
+    print("  over_abstain_rate = %.3f   (域内可答被判 none；越低越好)  ← A3c 召回护栏"
+          % m["over_abstain_rate"])
+    print("  strong_fp_rate    = %.3f   (应弃权却 strong；越低越好)  ← A3a 主指标"
+          % m["strong_fp_rate"])
+    print("  delegated_rate    = %.3f   (落 weak = 需 LLM 判官；**成本指标，不是失败**)"
+          % m["delegated_rate"])
     print("  Recall@%d          = %.3f" % (TOP_K, m["Recall@%d" % TOP_K]))
     print("  MRR@10            = %.3f" % m["MRR@10"])
+    print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
+    for kind, d in sorted(m["by_kind"].items()):
+        print("   %-26s n=%-3d none=%-3d weak=%-3d strong=%-3d" %
+              (kind, d["n"], d["none"], d["weak"], d["strong"]))
 
     if args.scan:
         print("[eval] --- none 档扫描 (sar_none, v1_none) -> "
