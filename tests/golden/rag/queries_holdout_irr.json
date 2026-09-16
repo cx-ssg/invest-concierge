@@ -1,0 +1,248 @@
+[
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0002"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司董事会有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0008"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司董事会在海外市场的份额有多大",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0010"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司董事会的员工持股计划具体条款是什么",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0011"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台集团财务有限公司明年的营收目标是多少",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0015"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台集团财务有限公司在海外市场的份额有多大",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0016"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台集团财务有限公司与哪些科技公司建立了战略合作",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0018"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会在人工智能领域的布局进展如何",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0019"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0020"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会明年的营收目标是多少",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0021"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会与哪些科技公司建立了战略合作",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0024"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司管理层有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0026"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司管理层的员工持股计划具体条款是什么",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0029"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "量子计算最新进展",
+  "answer_chunk_ids": [],
+  "id": "irr-0031"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "今天天气怎么样",
+  "answer_chunk_ids": [],
+  "id": "irr-0033"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "世界杯决赛比分是多少",
+  "answer_chunk_ids": [],
+  "id": "irr-0035"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "北京到上海的航班时刻",
+  "answer_chunk_ids": [],
+  "id": "irr-0036"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "怎么写一封求职信",
+  "answer_chunk_ids": [],
+  "id": "irr-0037"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "如何训练一个大语言模型",
+  "answer_chunk_ids": [],
+  "id": "irr-0038"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台的护城河是否在变窄",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0041"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0043"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0044"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司董事会的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0048"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司董事会的长期战略是否清晰",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0050"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台集团财务有限公司的公司治理水平在行业内排第几",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0052"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台集团财务有限公司的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0053"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台集团财务有限公司的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0054"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的护城河是否在变窄",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0056"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的公司治理水平在行业内排第几",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0057"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0058"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0059"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的长期战略是否清晰",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0060"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的护城河是否在变窄",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0061"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的公司治理水平在行业内排第几",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0062"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0064"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的长期战略是否清晰",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0065"
+ }
+]

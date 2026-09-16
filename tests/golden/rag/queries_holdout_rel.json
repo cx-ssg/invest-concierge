@@ -1,0 +1,233 @@
+[
+ {
+  "kind": "in_domain_answerable",
+  "query": "这个业绩说明会是啥时候举行的？",
+  "answer_chunk_ids": [
+   1
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于召开2026年半年度业绩说明会的公告",
+  "coverage_vs_title": 0.308,
+  "coverage_vs_source": 0.308,
+  "id": "rel-0001"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "股东持有财务公司的股份比例是多少？",
+  "answer_chunk_ids": [
+   3
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于贵州茅台集团财务有限公司的风险评估报告",
+  "coverage_vs_title": 0.2,
+  "coverage_vs_source": 0.467,
+  "id": "rel-0002"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "今年公司的总资产增加了多少？",
+  "answer_chunk_ids": [
+   11
+  ],
+  "source_doc": "贵州茅台:贵州茅台2026年半年度报告摘要",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.25,
+  "id": "rel-0003"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "公司的净利润下降了百分之多少？",
+  "answer_chunk_ids": [
+   11
+  ],
+  "source_doc": "贵州茅台:贵州茅台2026年半年度报告摘要",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.385,
+  "id": "rel-0004"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "变更后的会计政策会影响公司的利润吗？",
+  "answer_chunk_ids": [
+   15
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于会计政策变更的公告",
+  "coverage_vs_title": 0.25,
+  "coverage_vs_source": 0.438,
+  "id": "rel-0005"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "新的会计准则什么时候开始实施？",
+  "answer_chunk_ids": [
+   15
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于会计政策变更的公告",
+  "coverage_vs_title": 0.077,
+  "coverage_vs_source": 0.308,
+  "id": "rel-0006"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "划转资产的议案具体内容是什么？",
+  "answer_chunk_ids": [
+   17
+  ],
+  "source_doc": "贵州茅台:贵州茅台第五届董事会2026年度第三次会议决议公告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.385,
+  "id": "rel-0008"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "公司净利润下降的原因是什么？",
+  "answer_chunk_ids": [
+   21
+  ],
+  "source_doc": "贵州茅台:贵州茅台2026年半年度报告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.25,
+  "id": "rel-0010"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "每股能分到多少钱？",
+  "answer_chunk_ids": [
+   25
+  ],
+  "source_doc": "贵州茅台:贵州茅台2025年年度权益分派实施公告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.143,
+  "id": "rel-0014"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "新聘的董事会秘书以前在公司做过哪些职位？",
+  "answer_chunk_ids": [
+   28
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于聘任董事会秘书的公告",
+  "coverage_vs_title": 0.222,
+  "coverage_vs_source": 0.278,
+  "id": "rel-0015"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "新上任的董事会秘书是兼职还是专职？",
+  "answer_chunk_ids": [
+   28
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于聘任董事会秘书的公告",
+  "coverage_vs_title": 0.267,
+  "coverage_vs_source": 0.333,
+  "id": "rel-0016"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "股东大会上关于独立董事述职报告的投票结果怎么样？",
+  "answer_chunk_ids": [
+   34
+  ],
+  "source_doc": "贵州茅台:北京市金杜律师事务所关于贵州茅台酒股份有限公司2025年度股东会之法律意见书",
+  "coverage_vs_title": 0.091,
+  "coverage_vs_source": 0.364,
+  "id": "rel-0017"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "注销的股份具体是多少股？",
+  "answer_chunk_ids": [
+   39
+  ],
+  "source_doc": "贵州茅台:贵州茅台第五届董事会2026年度第一次会议决议公告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.3,
+  "id": "rel-0018"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "章程里的注册资本改成了多少？",
+  "answer_chunk_ids": [
+   39
+  ],
+  "source_doc": "贵州茅台:贵州茅台第五届董事会2026年度第一次会议决议公告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.333,
+  "id": "rel-0019"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "选举出来的职工董事是哪个车间的？",
+  "answer_chunk_ids": [
+   41
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于职工董事选举结果的公告",
+  "coverage_vs_title": 0.286,
+  "coverage_vs_source": 0.357,
+  "id": "rel-0020"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "新任职工董事以前在公司做了多久？",
+  "answer_chunk_ids": [
+   41
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于职工董事选举结果的公告",
+  "coverage_vs_title": 0.214,
+  "coverage_vs_source": 0.357,
+  "id": "rel-0021"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "这个议案里有多少票通过了聘请财务审计机构的决定？",
+  "answer_chunk_ids": [
+   46
+  ],
+  "source_doc": "贵州茅台:贵州茅台2025年度股东会决议公告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.318,
+  "id": "rel-0022"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "今年股东大会什么时候召开？",
+  "answer_chunk_ids": [
+   54
+  ],
+  "source_doc": "贵州茅台:贵州茅台2025年度股东会会议资料",
+  "coverage_vs_title": 0.091,
+  "coverage_vs_source": 0.182,
+  "id": "rel-0026"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "这次回购了多少股股份啊？",
+  "answer_chunk_ids": [
+   63
+  ],
+  "source_doc": "贵州茅台:贵州茅台关于回购股份实施结果暨股份变动的公告",
+  "coverage_vs_title": 0.2,
+  "coverage_vs_source": 0.3,
+  "id": "rel-0027"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "被调查或者侦查的事态发展怎么样了？",
+  "answer_chunk_ids": [
+   66
+  ],
+  "source_doc": "贵州茅台:贵州茅台独立董事候选人声明与承诺(郭田勇)",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.267,
+  "id": "rel-0029"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "关联交易涉及多少商标？",
+  "answer_chunk_ids": [
+   73
+  ],
+  "source_doc": "贵州茅台:贵州茅台第四届董事会2026年度第八次会议决议公告",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.444,
+  "id": "rel-0033"
+ }
+]

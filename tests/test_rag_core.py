@@ -151,10 +151,32 @@ def test_chunker_long_paragraph_hard_max():
     assert all(len(c["text"]) <= 1200 for c in chunks)
 
 
-def test_chunker_seq_increments():
-    """seq 从 0 递增且文档内唯一（store 落库依赖它）。"""
+def test_chunker_aggregates_short_paragraphs():
+    """短段落必须**聚合**成块，不得每段单独成块。
+
+    ⚠️ 实测（2026-09-16）：公告正文是「一行一句 + 空行分隔」格式，
+    旧实现每段独立成块 → 814 块的中位长度只有 **28 字符**（p25=12、min=1），
+    而设计目标是 600 字。碎片块同时损害检索质量 / BM25 长度归一化 / 向量语义。
+    """
     chunks = chunk_document("段落一。\n\n段落二。\n\n段落三。")
+    assert len(chunks) == 1, "600 字内的短段落应聚合成 1 块（实际 %d 块）" % len(chunks)
+    assert chunks[0]["seq"] == 0
+
+
+def test_chunker_flushes_at_target():
+    """聚合到 target 附近必须结算，不能无限累积；每块不得超 hard_max。"""
+    para = "这是一个用于测试聚合行为的段落。" * 5          # ≈ 75 字
+    chunks = chunk_document("\n\n".join([para] * 20), target=600, hard_max=1200)
+    assert len(chunks) >= 3, "≈1500 字应按 target 切成多块（实际 %d）" % len(chunks)
+    assert all(len(c["text"]) <= 1200 for c in chunks)
+
+
+def test_chunker_seq_increments_and_unique():
+    """seq 从 0 递增且文档内唯一（store 落库依赖它）。"""
+    para = "内容段落。" * 40                                # ≈200 字
+    chunks = chunk_document("\n\n".join([para] * 10))
     assert [c["seq"] for c in chunks] == list(range(len(chunks)))
+    assert len({c["seq"] for c in chunks}) == len(chunks)
 
 
 # ==================== 5. embedding 失败必须给可操作指引（K3）====================

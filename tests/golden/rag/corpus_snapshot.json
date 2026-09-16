@@ -1,0 +1,7 @@
+{
+ "n_chunks": 75,
+ "n_docs": 20,
+ "dim": 1024,
+ "drop_by_coverage": 3,
+ "model_for_gen": "qwen2.5:7b"
+}

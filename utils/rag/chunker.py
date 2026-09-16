@@ -75,26 +75,54 @@ def chunk_document(text, target=CHUNK_TARGET, hard_max=CHUNK_HARD_MAX):
     """把文档切成块，返回 `[{"seq": int, "text": str, "is_table": bool}]`。
 
     规则：
-    - 连续表格行合成**一个**表格块，不切碎；超 hard_max*3 时按行拆分并重复表头；
-    - 非表格段落 ≤ hard_max 独立成块；超长则按 target 步长硬拗断。
+    - 连续表格行合成**一个**表格块，不切碎；超 `hard_max*3` 时按行拆分并重复表头；
+    - 非表格段落：**聚合到 `target` 附近再成块**（短段不单独成块）；
+    - 单段超 `hard_max` → 按 `target` 步长硬拗断。
+
+    ⚠️ **聚合是必需的**（2026-09-16 实测发现）：公告正文是「一行一句 + 空行分隔」格式，
+    旧实现「每段独立成块」→ 814 块的中位长度只有 **28 字符**（p25=12、min=1），
+    而设计目标是 600 字。碎片块会同时损害三处：
+    ＊检索质量（短块没有上下文，命中了也看不出在说什么）；
+    ＊BM25 文档长度归一化（dl 方差极大 → 分数被扭曲）；
+    ＊向量嵌入语义（短文本的表示本就弱）。
     """
     if not text or not str(text).strip():
         return []
 
     chunks = []
+    buf, buf_len = [], 0
+
+    def flush():
+        nonlocal buf, buf_len
+        if buf:
+            chunks.append({"text": "\n\n".join(buf), "is_table": False})
+            buf, buf_len = [], 0
+
     for seg in _split_segments(str(text)):
         lines = seg.splitlines()
         table_rows = [ln for ln in lines if _is_table_row(ln)]
         is_table = len(table_rows) >= 2 and len(table_rows) >= len(lines) - 1
+
         if is_table:
+            flush()                                   # 表格前先结算普通缓冲
             for tc in _split_table_keeping_header(lines, hard_max * 3):
                 chunks.append({"text": tc, "is_table": True})
             continue
-        if len(seg) <= hard_max:
-            chunks.append({"text": seg, "is_table": False})
+
+        if len(seg) > hard_max:
+            flush()
+            for i in range(0, len(seg), target):
+                chunks.append({"text": seg[i:i + target], "is_table": False})
             continue
-        for i in range(0, len(seg), target):
-            chunks.append({"text": seg[i:i + target], "is_table": False})
+
+        if buf_len and buf_len + len(seg) + 2 > hard_max:
+            flush()
+        buf.append(seg)
+        buf_len += len(seg) + 2
+        if buf_len >= target:
+            flush()
+
+    flush()
 
     for i, c in enumerate(chunks):
         c["seq"] = i
