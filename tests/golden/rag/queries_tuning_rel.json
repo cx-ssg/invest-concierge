@@ -8,6 +8,7 @@
   "source_doc": "贵州茅台:贵州茅台第五届董事会2026年度第三次会议决议公告",
   "coverage_vs_title": 0.125,
   "coverage_vs_source": 0.25,
+  "note": "检索能力边界（2026-09-17 产线实测）：query 无高 idf 锚词（「会议」「议案」在语料里 df 很高），BM25 与向量都排不进 top-5，top-5 全是别的会议公告。保留作泛化查询对照，锚点版见 rel-0034。",
   "id": "rel-0007"
  },
  {
@@ -130,5 +131,17 @@
   "coverage_vs_title": 0.167,
   "coverage_vs_source": 0.333,
   "id": "rel-0032"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "2026年8月13日召开的董事会审议了哪些议案？",
+  "answer_chunk_ids": [
+   17
+  ],
+  "source_doc": "贵州茅台:贵州茅台第五届董事会2026年度第三次会议决议公告",
+  "coverage_vs_title": 0.2,
+  "coverage_vs_source": 0.533,
+  "note": "rel-0007 的锚点版（2026-09-17 新增）：同一意图但带日期锚词。产线实测 top5=[17,73,31,72,43]，gold#17 排第 1 —— 证明 rel-0007 的检索失败源于 query 无锚点，而非能力缺失。附带再证 V1 伪影：sar=0.154 已过强档线 0.10，但 v1=0.2 未过 0.45 → 仍判 weak。",
+  "id": "rel-0034"
  }
 ]

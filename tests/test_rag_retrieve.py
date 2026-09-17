@@ -41,6 +41,28 @@ def test_retrieve_docs_hits_with_citation_fields(kb):
     assert "茅台" in top["text"]
 
 
+def test_retrieve_docs_results_carry_chunk_id(kb):
+    """每条结果必须带 `chunk_id` —— 这是引用溯源（前端把 [1] 链回具体段落）与
+    离线评测 Recall 判定的**唯一锚点**。
+
+    2026-09-17 实测踩到：返回体缺 `chunk_id` 时评测侧无法判定 gold 是否被召回
+    （33 条正例全被误判为「未召回」）——真实缺陷，不是测试洁癖。
+    """
+    out = json.loads(retrieve_docs("茅台上半年营收", db_path=kb, query_vec=[1.0, 0.0]))
+    assert out["results"], "必须至少命中 1 条"
+    conn = rag_store.get_conn(kb)
+    try:
+        exist = {row[0] for row in conn.execute("SELECT id FROM chunks")}
+    finally:
+        conn.close()
+    for r in out["results"]:
+        assert "chunk_id" in r, "引用溯源需要 chunk_id，缺了前端无法回跳、评测无法判召回"
+        assert r["chunk_id"] in exist, \
+            "chunk_id 必须能在 chunks 表里查到，实得 {}".format(r["chunk_id"])
+    ids = [r["chunk_id"] for r in out["results"]]
+    assert len(ids) == len(set(ids)), "同一 chunk_id 不得在结果里重复"
+
+
 def test_retrieve_docs_irrelevant_query_returns_no_hit(kb):
     """无关查询（相似度全为 0）必须返回 0 条 + 明确提示，**不得凭空补**。"""
     out = json.loads(retrieve_docs("量子计算最新进展", db_path=kb,

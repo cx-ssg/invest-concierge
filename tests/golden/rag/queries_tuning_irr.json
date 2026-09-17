@@ -197,5 +197,411 @@
   "answer_chunk_ids": [],
   "note": "规则生成：词面命中但问的是语料不含的定性判断",
   "id": "irr-0063"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0002"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司董事会有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0008"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司董事会在海外市场的份额有多大",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0010"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司董事会的员工持股计划具体条款是什么",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0011"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台集团财务有限公司明年的营收目标是多少",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0015"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台集团财务有限公司在海外市场的份额有多大",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0016"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "贵州茅台集团财务有限公司与哪些科技公司建立了战略合作",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0018"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会在人工智能领域的布局进展如何",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0019"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0020"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会明年的营收目标是多少",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0021"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司股东会与哪些科技公司建立了战略合作",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0024"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司管理层有没有进军新能源行业的计划",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0026"
+ },
+ {
+  "kind": "in_domain_unanswerable",
+  "query": "公司管理层的员工持股计划具体条款是什么",
+  "answer_chunk_ids": [],
+  "note": "规则生成：域内实体 + 语料不含的事实类型",
+  "id": "irr-0029"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "量子计算最新进展",
+  "answer_chunk_ids": [],
+  "id": "irr-0031"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "今天天气怎么样",
+  "answer_chunk_ids": [],
+  "id": "irr-0033"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "世界杯决赛比分是多少",
+  "answer_chunk_ids": [],
+  "id": "irr-0035"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "北京到上海的航班时刻",
+  "answer_chunk_ids": [],
+  "id": "irr-0036"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "怎么写一封求职信",
+  "answer_chunk_ids": [],
+  "id": "irr-0037"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "如何训练一个大语言模型",
+  "answer_chunk_ids": [],
+  "id": "irr-0038"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台的护城河是否在变窄",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0041"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0043"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0044"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司董事会的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0048"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司董事会的长期战略是否清晰",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0050"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台集团财务有限公司的公司治理水平在行业内排第几",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0052"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台集团财务有限公司的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0053"
+ },
+ {
+  "kind": "near_miss",
+  "query": "贵州茅台集团财务有限公司的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0054"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的护城河是否在变窄",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0056"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的公司治理水平在行业内排第几",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0057"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的品牌溢价还能维持多久",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0058"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0059"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司股东会的长期战略是否清晰",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0060"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的护城河是否在变窄",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0061"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的公司治理水平在行业内排第几",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0062"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的管理层能力该怎么评价",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0064"
+ },
+ {
+  "kind": "near_miss",
+  "query": "公司管理层的长期战略是否清晰",
+  "answer_chunk_ids": [],
+  "note": "规则生成：词面命中但问的是语料不含的定性判断",
+  "id": "irr-0065"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "Python 里怎么把字典按值排序？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0101"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "SQL 的 left join 和 inner join 有什么区别？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0103"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "Docker 容器和虚拟机有什么不同？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0105"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "明天会下雨吗？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0107"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "感冒了吃什么药好得快？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0109"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "去日本旅游需要办什么签证？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0111"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "高铁票提前几天可以买？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0113"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "英语四级听力怎么提高？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0115"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "这部电影的导演是谁？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0117"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "王者荣耀新赛季什么时候更新？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0119"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "NBA 总冠军是哪支球队？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0121"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "梅西现在效力哪个俱乐部？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0123"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "显卡和 CPU 哪个对游戏帧数影响大？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0125"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "红烧肉怎么做才不腻？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0127"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "租房押金不退找谁投诉？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0129"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "护照过期了怎么换新？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0131"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "房子首付一般要付多少比例？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0133"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "快递丢了怎么索赔？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0135"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "自行车链条掉了怎么装回去？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0137"
+ },
+ {
+  "kind": "out_of_domain",
+  "query": "宠物猫打疫苗要打几针？",
+  "answer_chunk_ids": [],
+  "note": "规则生成 v2（2026-09-17 扩量）：与贵州茅台公告语料无关的域外问题，已避开全部域内词",
+  "batch": "v2",
+  "id": "irr-0139"
  }
 ]

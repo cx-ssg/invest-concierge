@@ -10,6 +10,10 @@
   才让 `max_sim` 闸门跑在子集上，而阈值是在全库上定的 → 单标的检索池变小会系统性过度弃权、
   接入第二个标的时反向失真（外部评审读码指出，2026-09-16 确认）。
 
+**2026-09-17 补 `chunk_id`**：返回体此前缺块唯一标识 → ① 前端无法把引用 `[1]` 链回具体段落
+（设计 §3.2 的引用渲染）；② 离线评测无法判定 gold 是否落在 top-k（33 条正例被全判「未召回」）。
+`chunk_id` 是这两件事的唯一锚点，故补入每条结果。
+
 返回 **JSON 字符串**（与项目既有 23 个工具的统一契约一致）。
 """
 import json
@@ -68,6 +72,7 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         results.append({
             "rank": rank,
             "score": round(float(rrf[idx]), 6),
+            "chunk_id": m.get("chunk_id"),
             "text": m.get("text"),
             "title": m.get("title"),
             "url": m.get("url"),
