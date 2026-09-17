@@ -59,6 +59,8 @@ venv/
 # ===== IDE / OS =====
 .vscode/
 .idea/
+# FUSE 挂载环境（Linux 侧读同一仓库）删除文件时留下的隐藏残留，不入库
+.fuse_hidden*
 *.swp
 .DS_Store
 Thumbs.db
