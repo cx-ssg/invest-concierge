@@ -99,8 +99,10 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
 def scan(rows_rel, rows_irr, judge):
     """扫 **none 档**阈值（`SAR_NONE` / `V1_NONE`），输出权衡曲线。
 
-    为什么扫 none 档而不是 strong 档：strong 误放行已经很低（holdout 首跑 2.8%），
+    为什么扫 none 档而不是 strong 档：strong 误放行已经很低
+    （验收组按 kind 分列全为 0：ood 0/20、unans 0/15、near_miss 0/15），
     真正的暴露面在 **weak 档** —— 它仍会把结果送进生成上下文。
+    ⚠️ 2026-09-17 订正：本行原写"holdout 首跑 2.8%"，那是 §4b② 已判定为**口径错误的混池数字**。
     提高 none 门槛能把 weak 压向 none，代价是 `over_abstain`（误杀相关查询）上升。
 
     ⚠️ 口径修正（2026-09-17）：旧版 `oa` 算的是"非 strong"（含 weak），

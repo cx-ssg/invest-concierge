@@ -80,17 +80,6 @@
  },
  {
   "kind": "in_domain_answerable",
-  "query": "公司净利润下降的原因是什么？",
-  "answer_chunk_ids": [
-   21
-  ],
-  "source_doc": "贵州茅台:贵州茅台2026年半年度报告",
-  "coverage_vs_title": 0.0,
-  "coverage_vs_source": 0.25,
-  "id": "rel-0010"
- },
- {
-  "kind": "in_domain_answerable",
   "query": "每股能分到多少钱？",
   "answer_chunk_ids": [
    25
@@ -231,5 +220,17 @@
   "coverage_vs_title": 0.0,
   "coverage_vs_source": 0.444,
   "id": "rel-0033"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "公司的经销商数量有多少家",
+  "answer_chunk_ids": [
+   12
+  ],
+  "source_doc": "贵州茅台:贵州茅台2026年半年度报告摘要",
+  "coverage_vs_title": 0.0,
+  "coverage_vs_source": 0.636,
+  "note": "由已删的 irr-0211 转来（2026-09-17 独立审计 F6）：chunk 12 明确含「2.4 经销商情况／单位：个／国内 2,307 220 266／国外 119 14 21」→ 该问题**可答**，当初判 strong 是正确行为（判据零误报）。转正例而非删除：避免白丢一条 gold 明确的样本（报告正抱怨正例覆盖面不足）。",
+  "id": "rel-0035"
  }
 ]
