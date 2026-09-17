@@ -16,6 +16,7 @@ import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Optional, List, Dict, Any
 
 from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
@@ -405,7 +406,11 @@ def _call_tool_fn(fn, kwargs, timeout):
         fut = ex.submit(fn, **kwargs)
         try:
             return fut.result(timeout=timeout)
-        except TimeoutError:
+        # ⚠️ 2026-09-17：必须**同时**抓 `concurrent.futures.TimeoutError` —— 它到 **3.11 才**成为
+        # 内置 `TimeoutError` 的别名；3.9/3.10 上它是**另一个类**，只写 `except TimeoutError:` 抓不住
+        # 看门狗超时 → 穿透到 `except Exception` → `error_code` 退化成 TOOL_EXCEPTION 且 `retryable=False`
+        # （独立审计在 Python 3.10 上实测；CI 矩阵含 3.9、README 宣称 3.9+）。
+        except (TimeoutError, FutureTimeoutError):
             if fut.done():
                 raise          # 工具自己抛的 TimeoutError → 保持原语义（归 TOOL_EXCEPTION）
             raise _ToolTimeout("工具执行超过 {}s 看门狗上限".format(timeout))

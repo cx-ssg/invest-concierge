@@ -10,12 +10,22 @@
   才让 `max_sim` 闸门跑在子集上，而阈值是在全库上定的 → 单标的检索池变小会系统性过度弃权、
   接入第二个标的时反向失真（外部评审读码指出，2026-09-16 确认）。
 
-**2026-09-17 补 `chunk_id`**：返回体此前缺块唯一标识 → ① 前端无法把引用 `[1]` 链回具体段落
-（设计 §3.2 的引用渲染）；② 离线评测无法判定 gold 是否落在 top-k（33 条正例被全判「未召回」）。
-`chunk_id` 是这两件事的唯一锚点，故补入每条结果。
+**2026-09-17 补 `chunk_id`**：返回体此前缺块唯一标识 → 前端无法把引用 `[1]` 链回具体段落
+（设计 §3.2 的引用渲染要求）。`chunk_id` 因此是引用溯源的必要字段，补入每条结果。
+
+⚠️ **订正（独立审计 P3-1）**：本条曾把「离线评测无法判定 gold 是否召回」也列为理由 ②，
+**该理由不成立** —— `scripts/rag_eval.py` 的 `evaluate()` 直接用 `load_index()` 里的
+`meta[i]["chunk_id"]`，**从不调用 `retrieve_docs`**，故本改动对离线评测**没有影响**。
+（当时"33 条正例全判未召回"是我临时**诊断脚本**缺 id 所致，与产线返回体无关。）
 
 ⚠️ `chunk_id` 就是 `chunks.id`（库内自增），**只在同一个 kb.db 构建内稳定** —— 语料重建后会变。
 它可用于**同一次构建内的引用回跳与离线评测**，**不可**跨构建持久化（前端若缓存引用，需带构建标识）。
+
+**2026-09-17 二次修复（独立审计实测驱动）**：`none` 档**不再清空结果**。此前 `run_hybrid`
+在判 `none` 时直接 `return [], {}`（**检索前硬停**），把**已经检索到的正确证据**一并丢掉 ——
+实测 holdout 21 条正例走裸检索 `Recall@5 = 21/21`，其中 `rel-0015` 的 gold 排在 **rank 1**
+仍被弃权（`rel-0014` 在 rank 4）→ 报告的 `Recall@5 0.905` 与满分的差距**全部**由这个硬停造成。
+现改为「返回候选 + 最强警示语（`NONE_EVIDENCE_NOTE`）」；`evidence_level` 仍照算，评测分档不变。
 
 返回 **JSON 字符串**（与项目既有 23 个工具的统一契约一致）。
 """
@@ -28,6 +38,10 @@ from utils.rag.tokenize import tokenize
 
 # 无命中时的显式提示：把「没有」这件事说清楚，模型才不会拿训练数据硬编
 NO_HIT_MESSAGE = "未找到相关公告或研报 —— 请如实告知用户知识库中没有相关内容，不要凭记忆编造"
+# 证据不足档（A3a）：**不是空结果**，而是「返回候选 + 最强警示」—— 见 `hybrid.run_hybrid` 的注释
+NONE_EVIDENCE_NOTE = ("未找到与问题相关的公告内容（证据不足档）—— "
+                      "以下候选块与问题的关联性很可能不成立，不得据此推断或编造，"
+                      "请如实告知用户知识库中没有相关内容")
 # 证据不足档（A3b 的安全网）：结果照给，但明确要求模型谨慎
 WEAK_EVIDENCE_NOTE = ("检索到的内容与问题只有字面弱相关（证据不足档）—— 引用前请自行核验；"
                       "若无法支撑回答，请如实说明未找到，不要据此推断")
@@ -88,6 +102,8 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
     ev_level = evidence.level if evidence is not None else None
     if not results:
         message = NO_HIT_MESSAGE
+    elif ev_level == LEVEL_NONE:
+        message = NONE_EVIDENCE_NOTE
     elif ev_level == LEVEL_WEAK:
         message = WEAK_EVIDENCE_NOTE
     else:

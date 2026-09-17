@@ -63,8 +63,31 @@ def test_retrieve_docs_results_carry_chunk_id(kb):
     assert len(ids) == len(set(ids)), "同一 chunk_id 不得在结果里重复"
 
 
+def test_retrieve_docs_none_level_still_returns_candidates(kb):
+    """`none` 档**不得物理清空结果**（2026-09-17 产线缺陷修复）。
+
+    独立审计实测证据：holdout 21 条正例走**裸检索**（不带闸门）`Recall@5 = 21/21`，
+    但其中 `rel-0015` 的 gold 排在 **rank 1** 仍被判 `none`（`rel-0014` 在 rank 4）
+    → 闸门把**已经检索到的正确证据丢掉了**；报告的 `Recall@5 0.905` 与满分的差距
+    **全部**由此造成（`over_abstain` 不是小瑕疵，是召回的全部缺口）。
+
+    新契约：`evidence_level` 照算（评测与警示都用它），但候选块照给 ——
+    是否采信交由 message 的警示语与模型判断，而不是在检索层物理删除。
+    真正「检索为空」时才回 `NO_HIT_MESSAGE`。
+    """
+    out = json.loads(retrieve_docs("量子计算最新进展", db_path=kb, query_vec=[0.6, 0.8]))
+    assert out["evidence_level"] == "none", "非域内查询应判证据不足档"
+    assert out["results"], \
+        "none 档仍须返回检索到的候选块 —— 物理清空会丢掉已检索到的正确证据（实测有 gold 排 rank 1 的案例）"
+    assert "未找到" in out["message"], "警示语仍须明确说「未找到」，防止模型硬答"
+
+
 def test_retrieve_docs_irrelevant_query_returns_no_hit(kb):
-    """无关查询（相似度全为 0）必须返回 0 条 + 明确提示，**不得凭空补**。"""
+    """无关查询（相似度全为 0）必须返回 0 条 + 明确提示，**不得凭空补**。
+
+    ⚠️ 与上一条的区别：这里是**零向量**（语义路全 0 分）→ 被 `_top_k` 的
+    `> min_score` 过滤 → 检索**真的**为空。而 `none` 档只标注证据不足，不负责清空。
+    """
     out = json.loads(retrieve_docs("量子计算最新进展", db_path=kb,
                                    query_vec=[0.0, 0.0]))
     assert out["results"] == []

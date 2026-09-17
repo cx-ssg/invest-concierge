@@ -21,7 +21,7 @@ import numpy as np
 
 from utils.rag.bm25 import BM25Index
 from utils.rag.embed import embed_texts
-from utils.rag.evidence import LEVEL_NONE
+from utils.rag.evidence import LEVEL_NONE  # noqa: F401  （保留供调用方/文档引用）
 from utils.rag.tokenize import tokenize
 
 RRF_K = 60
@@ -54,7 +54,7 @@ def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
 
     - `judge`：`EvidenceJudge` 实例（**必须用全库构建**，见其 docstring）；None = 跳过判据
     - `bm25_index`：可复用的 `BM25Index`（避免每次查询重建，扩容后是 O(N·L) 的纯 Python 循环）
-    - `evidence.level == "none"` → `order` 为空（A3a 确定性弃权）
+    - `evidence.level == "none"` → **仍返回候选块**，只标注证据不足（2026-09-17 改，见上）
     - 空查询 / 空语料 → `([], {}, None)`
     """
     if not query or not str(query).strip():
@@ -63,8 +63,11 @@ def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
         return [], {}, None
 
     evidence = judge.assess(query) if judge is not None else None
-    if evidence is not None and evidence.level == LEVEL_NONE:
-        return [], {}, evidence          # A3a：证据缺失 → 弃权
+    # ⚠️ 2026-09-17：`none` 档**不再在这里清空结果**（原 `return [], {}, evidence` 已删）。
+    # 独立审计实测：holdout 21 条正例走裸检索 Recall@5 = **21/21**，但 `rel-0015` 的 gold
+    # 排在 **rank 1** 仍被判 `none` → 闸门把**已经拿到的正确证据物理丢掉**，
+    # 报告的 Recall@5 0.905 与满分的差距**全部**由这个检索前硬停造成。
+    # 新契约：`level` 照算（供评测与警示语使用），候选块照给；是否采信交给上层 message + 模型。
 
     matrix = np.asarray(matrix, dtype="float32")
     if query_vec is None:

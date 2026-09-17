@@ -17,6 +17,8 @@ import json
 import time
 from unittest.mock import patch
 
+import pytest
+
 from services import llm_config
 
 from utils import agent_core, ai_helper
@@ -84,6 +86,47 @@ def test_tool_timeout_zero_disables(monkeypatch):
 
 def test_tool_timeout_default_is_positive():
     assert agent_core.TOOL_TIMEOUT_SECONDS > 0
+
+
+def test_watchdog_timeout_not_masked_on_python_before_311(monkeypatch):
+    """看门狗超时必须在 CPython **3.9/3.10** 上也被识别为 `TIMEOUT` + `retryable=True`。
+
+    背景（独立审计实测发现，2026-09-17）：`concurrent.futures.TimeoutError` 到 **3.11 才**成为
+    内置 `TimeoutError` 的别名；在 3.9/3.10 上它是**另一个类**，因此 `except TimeoutError:`
+    **抓不住** `future.result(timeout)` 抛出的超时 → 穿透到 `execute_ai_tool_v2` 的
+    `except Exception` → `error_code` 从 `TIMEOUT` 退化成 `TOOL_EXCEPTION`，
+    且 `_RETRYABLE_EXCEPTIONS` 也判不上 → `retryable=False`，**超时「可重试」的语义整个失效**
+    （下游 `agent_run` / SSE / M1 检索正是按该字段分支）。
+    而 CI 矩阵是 `["3.9", "3.11"]`、README 宣称「Python 3.9+」。
+
+    本机是 3.11（两者同一类），无法用真实 futures 复现该差别 → 用假执行器 + 假类注入复现类层次。
+    """
+    class FakeFutureTimeout(Exception):
+        """与内置 TimeoutError **无继承关系** —— 复现 3.10 的类层次。"""
+
+    assert hasattr(agent_core, "FutureTimeoutError"), (
+        "agent_core 必须显式引用 concurrent.futures.TimeoutError（别名 FutureTimeoutError）—— "
+        "3.9/3.10 上它与内置 TimeoutError 不是同一个类，只写 `except TimeoutError` 会漏掉看门狗超时"
+    )
+    monkeypatch.setattr(agent_core, "FutureTimeoutError", FakeFutureTimeout)
+
+    class FakeFuture:
+        def result(self, timeout=None):
+            raise FakeFutureTimeout()        # 看门狗到点（future 尚未完成）
+        def done(self):
+            return False
+
+    class FakeExecutor:
+        def __init__(self, max_workers=None):
+            pass
+        def submit(self, fn, **kwargs):
+            return FakeFuture()
+        def shutdown(self, wait=True):
+            pass
+
+    monkeypatch.setattr(agent_core, "ThreadPoolExecutor", FakeExecutor)
+    with pytest.raises(agent_core._ToolTimeout):
+        agent_core._call_tool_fn(lambda **kw: None, {}, 1)
 
 
 # ==================== ③ 并行能力（默认关 + 顺序不乱） ====================

@@ -26,6 +26,8 @@ alert_settings.json
 
 # ===== 内部工作文件（开源仓库不含，本地保留作素材） =====
 .agents/
+# 与 M1 无关的历史草稿（launch 文案稿等），不入库（独立审计 P3-3 提出）
+drafts/
 .zcode/
 .mimosa/
 Obsidian-Vault/

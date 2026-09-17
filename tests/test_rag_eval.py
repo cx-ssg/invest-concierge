@@ -26,12 +26,35 @@ _MATRIX = np.array([[1.0, 0.0], [0.0, 1.0]], dtype="float32")
 
 
 def test_over_abstain_counter_works():
-    """域内可答被判 `none` → over_abstain_rate 上升（**召回护栏** A3c）。"""
+    """域内可答被判 `none` → over_abstain_rate 上升（**闸门标注保守度**）。
+
+    ⚠️ 2026-09-17 契约修正：旧断言还写着 `Recall@5 == 0.0`（"弃权的查询不可能召回"），
+    这个前提被**独立审计实测证伪** —— holdout 的 `rel-0015` 的 gold 排在 **rank 1** 仍被判 none
+    → 「判 none」与「检索不到」是**两件事**。评测器已删掉 none 档的 `continue`：
+    `over_abstain` 记标注保守度、`Recall@k` 记检索器能力、`guarded_recall` 记产线实际拿到 gold 的比例。
+    """
     rel = [{"query": "可答问题", "answer_chunk_ids": [1]}]
     judge = _FakeJudge({"可答问题": Evidence(0.0, 0.0, "none")})   # 故意误弃权
     m = ev.evaluate(rel, [], judge, _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
     assert m["over_abstain_rate"] == 1.0
-    assert m["Recall@5"] == 0.0, "弃权的查询不可能召回"
+    assert m["n_over_abstain"] == 1
+    assert m["Recall@5"] == 1.0, "判 none **不等于**检索不到 —— 两者已解耦"
+    assert m["guarded_recall"] == 1.0, "none 档不再清空结果 → 产线口径也应拿得到 gold"
+
+
+def test_assert_clean_holdout_rejects_v1_sample():
+    """holdout 负例混入 v1 → 必须**显式报错**（独立审计 P2-2）。
+
+    背景：`batch` 字段此前**无任何代码消费**，而「holdout 的 50 条负例全部 `batch=v2`」
+    正是"干净验收组"这个核心卖点的**全部依据** —— 没有强制力的话，
+    未来任何人把调参时看过的样本挪进 holdout，指标都不会报警。
+    """
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        ev.assert_clean_holdout([{"id": "irr-0001", "batch": "v1"}])
+    assert "irr-0001" in str(ei.value), "报错要点名是哪几条，便于修复"
+    ev.assert_clean_holdout([{"id": "irr-0101", "batch": "v2"}])     # 合规 → 不抛
+    ev.assert_clean_holdout([])                                       # 空集 → 不抛
 
 
 def test_recall_and_mrr_when_answer_returned():
