@@ -75,11 +75,29 @@ def test_retrieve_docs_none_level_still_returns_candidates(kb):
     是否采信交由 message 的警示语与模型判断，而不是在检索层物理删除。
     真正「检索为空」时才回 `NO_HIT_MESSAGE`。
     """
-    out = json.loads(retrieve_docs("量子计算最新进展", db_path=kb, query_vec=[0.6, 0.8]))
-    assert out["evidence_level"] == "none", "非域内查询应判证据不足档"
+    # query 必须与语料**有部分字面交集**（`bm25max > 0`），否则会命中 2026-09-18 新增的
+    # 「分层硬停」（零 bigram 交集 → 仍物理回空，见 hybrid.py）。这里要测的是「有交集但判据不通过」。
+    out = json.loads(retrieve_docs("茅台明天的股价是多少", db_path=kb, query_vec=[0.6, 0.8]))
+    assert out["evidence_level"] == "none", "该查询应判证据不足档"
     assert out["results"], \
         "none 档仍须返回检索到的候选块 —— 物理清空会丢掉已检索到的正确证据（实测有 gold 排 rank 1 的案例）"
     assert "未找到" in out["message"], "警示语仍须明确说「未找到」，防止模型硬答"
+    # 审计 B 的 P2-2：none 档候选**不可引用**（设计 §3.3「无引用 = 不算回答」的新执行者）
+    assert all(r["url"] is None and r["title"] is None for r in out["results"]), \
+        "none 档必须剥掉引用凭据（url/title），否则模型仍可据此产出带引用的回答"
+
+
+def test_retrieve_docs_hard_stops_on_zero_lexical_overlap(kb):
+    """**分层硬停**（2026-09-18 新增）：`none` 档 + 与全库零 bigram 交集 → 仍物理回空。
+
+    动机：撤销无条件硬停后，`agent_core.AGENT_SYSTEM_PROMPT` 的防幻觉守则（触发条件=「空数据」）
+    对域外查询不再触发、`evidence_level` 又无下游消费者 → A3a 从「机器强制」退化为「模型自觉」。
+    实测（holdout）：该条件挡住 **5/20** 域外负例、**误杀正例 0/21**（`rel-0014/0015` 的 bm25max 均 > 0）。
+    """
+    out = json.loads(retrieve_docs("量子计算最新进展", db_path=kb, query_vec=[0.6, 0.8]))
+    assert out["evidence_level"] == "none"
+    assert out["results"] == [], "零字面交集必须回空（恢复机器强制，不依赖模型自觉）"
+    assert "未找到" in out["message"]
 
 
 def test_retrieve_docs_irrelevant_query_returns_no_hit(kb):

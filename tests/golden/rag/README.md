@@ -78,7 +78,7 @@ v2 生成时**按 kind 分层奇偶交替分流**，保证两组构成一致 —
 | `strong_fp_rate` | 应弃权却判 `strong` 的比例 | A3a 指标，但**必须与「正例 strong 率」并列看** —— strong 档几乎不触发时它缺乏检验力（实测正例 strong 率仅 2/21 = 0.095） |
 | `out_of_domain` 的 `none` 率 | 域外查询被**主动**判 `none` 的比例 | **A3a 主结论**（不受 strong 档是否可达影响） |
 | `Recall@k` | 答案块出现在 top-k 的比例 | 块级口径（`judge=None` 的**裸检索**）。答案**跨块时必须标全相邻块**，否则低估 |
-| `guarded_recall` | **带闸门跑完后**实际仍拿到 gold 的比例 | **产线口径**。与 `Recall@k` 之差 = 闸门丢掉的已检索证据（修 `none` 硬停前：0.905 vs 1.000） |
+| `trusted_recall` | gold 在 top-k **且** `level != none` 的比例 | **判据采信过的召回**。与 `Recall@k` 之差 = 「检索到了但判据没采信」。⚠️ 2026-09-18 替换掉原 `guarded_recall` —— 两份外部审计**各自实测**证明后者**恒等于 `Recall@k`**（删硬停后 `run_hybrid` 的 `judge` 不参与过滤，构造性恒等；把判据换成「恒返回 none」它纹丝不动） |
 | `MRR@10` | 首个答案块排名倒数的均值 | |
 
 **报告方式**：扫阈值 → 输出 `(strong_fp_rate, over_abstain_rate)` 曲线 → 按代价选工作点 → **给区间**。

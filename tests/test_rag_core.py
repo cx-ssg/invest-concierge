@@ -95,36 +95,62 @@ def test_empty_query_returns_empty():
     assert order == [] and rrf == {}
 
 
-def test_hybrid_none_level_keeps_candidates_and_marks_abstain():
-    """judge 判定 `none` → **仍返回候选块**，但 `level` 必须标为 none（2026-09-17 契约修正）。
+# ==================== 3b. `none` 档的两条分界（2026-09-18 重构）====================
+#
+# 背景：本条原先断言 `order == []`（检索层物理清空），2026-09-17 被**独立审计实测证伪为产线缺陷**：
+# holdout 21 条正例走**裸检索** `Recall@5 = 21/21`，但 `rel-0015` 的 gold 排在 **rank 1**
+# 仍被判 none（`rel-0014` 在 rank 4）→ 闸门把**已经拿到的正确证据**丢掉。
+# 但随后（2026-09-18）两份外部审计又指出：无条件清空撤销后，`agent_core` 的防幻觉守则
+# （触发条件=「空数据」）对域外查询不再触发、`evidence_level` 又无下游消费者 →
+# **A3a 从「机器强制」退化成「模型自觉」**。故加回**分层**硬停。
+#
+# 现在这条边界由 `bm25_scores` 是否全零划分，两条测试分别锁住两侧：
 
-    ⚠️ 本条原先断言 `order == []`（检索层物理清空），2026-09-17 被**独立审计实测证伪为产线缺陷**：
-    holdout 21 条正例走**裸检索** `Recall@5 = 21/21`，但 `rel-0015` 的 gold 排在 **rank 1**
-    仍被判 none（`rel-0014` 在 rank 4）→ 闸门把**已经拿到的正确证据**丢掉，
-    报告的 `Recall@5 0.905` 与满分的差距**全部**由这个硬停造成。**不是为让测试通过而改**。
+def test_hybrid_none_level_keeps_candidates_when_lexically_overlapping():
+    """`none` 档 **但有字面交集**（`bm25_scores` 非全零）→ **仍返回候选块**。
 
-    分工改为：`level` 档位（供评测分档与警示语）仍由 EvidenceJudge 决定；
-    **是否把块送进生成上下文**由上层 `retrieve_docs` 用 `NONE_EVIDENCE_NOTE` 强警示 + 模型判断，
-    而不是在检索层物理删除。
+    这是 2026-09-17 那条修复的保留部分：`rel-0014`(bm25max=4.57) / `rel-0015`(9.21)
+    都属于这一类，它们的正确证据**不得**被丢掉。
+    """
+    from utils.rag.evidence import Evidence
 
-    **仍保留**的关键断言：judge 判 none 时 `level` 必须是 none，且**不受向量相似度左右**
-    （2026-09-16 判据重构的核心 —— 此处故意给满相似度验证）。
+    class _NoneWithScore:
+        """判 none，但**有非零 bm25 分** —— 模拟「有字面交集、只是判据没通过」。"""
+        def assess(self, q):
+            return Evidence(0.0, 0.0, "none", bm25_scores=[1.0, 0.0])
+
+    matrix = np.array([[1.0, 0.0]], dtype="float32")
+    meta = [{"text": "贵州茅台营业收入"}]
+    order, rrf, ev = run_hybrid(
+        "贵州茅台明天股价", matrix, meta, k=5,
+        query_vec=np.array([1.0, 0.0], dtype="float32"),   # 向量相似度故意给满
+        judge=_NoneWithScore(),
+    )
+    assert ev.level == "none", "判据仍须弃权"
+    assert order != [] and rrf != {}, \
+        "**有字面交集**时不得物理清空 —— 会丢掉已检索到的正确证据（实测有 gold 排 rank 1 的案例）"
+
+
+def test_hybrid_hard_stops_on_zero_lexical_overlap():
+    """`none` 档 **且** 与全库零 bigram 交集 → **仍物理回空**（恢复 A3a 机器强制力）。
+
+    2026-09-18 新增。实测（holdout，无需 embedding）：该条件挡住 **5/20** 域外负例、
+    **误杀正例 0/21**；对 `in_domain_unanswerable` / `near_miss` 无效（那两类靠 LLM 判官）。
+    ⚠️ 与上一条的分界正是 `bm25_scores` 是否全零。
     """
     from utils.rag.evidence import EvidenceJudge
     from utils.rag.tokenize import tokenize
 
     judge = EvidenceJudge([tokenize("贵州茅台营业收入")])
-    matrix = np.array([[1.0, 0.0]], dtype="float32")
-    meta = [{"text": "贵州茅台营业收入"}]
     order, rrf, ev = run_hybrid(
-        "量子计算最新进展", matrix, meta, k=5,
-        query_vec=np.array([1.0, 0.0], dtype="float32"),   # 向量相似度故意给满
+        "量子计算最新进展",                                  # 与语料零 bigram 交集
+        np.array([[1.0, 0.0]], dtype="float32"), [{"text": "贵州茅台营业收入"}], k=5,
+        query_vec=np.array([1.0, 0.0], dtype="float32"),
         judge=judge,
     )
-    assert ev.level == "none", "判据仍须弃权"
-    assert ev.sar < 0.06, "判 none 的依据是 SAR/V1，不受满向量相似度左右"
-    assert order != [] and rrf != {}, \
-        "none 档不得物理清空结果 —— 会丢掉已检索到的正确证据（实测有 gold 排 rank 1 的案例）"
+    assert ev.level == "none"
+    assert not any(ev.bm25_scores), "前提：该查询与语料确实零字面交集"
+    assert order == [] and rrf == {}, "零字面交集 → 必须硬停（否则 A3a 只剩模型自觉）"
 
 
 # ==================== 4. 切块器：表格保护 + 硬上限 ====================

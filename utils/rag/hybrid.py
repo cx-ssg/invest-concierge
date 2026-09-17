@@ -63,11 +63,23 @@ def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
         return [], {}, None
 
     evidence = judge.assess(query) if judge is not None else None
-    # ⚠️ 2026-09-17：`none` 档**不再在这里清空结果**（原 `return [], {}, evidence` 已删）。
-    # 独立审计实测：holdout 21 条正例走裸检索 Recall@5 = **21/21**，但 `rel-0015` 的 gold
-    # 排在 **rank 1** 仍被判 `none` → 闸门把**已经拿到的正确证据物理丢掉**，
-    # 报告的 Recall@5 0.905 与满分的差距**全部**由这个检索前硬停造成。
-    # 新契约：`level` 照算（供评测与警示语使用），候选块照给；是否采信交给上层 message + 模型。
+
+    # ① 2026-09-17：`none` 档**整体不再清空结果**（原 `return [], {}, evidence` 已删）。
+    #    独立审计实测：holdout 21 条正例走裸检索 Recall@5 = **21/21**，但 `rel-0015` 的 gold
+    #    排在 **rank 1** 仍被判 `none` → 闸门把**已经拿到的正确证据物理丢掉**。
+    #
+    # ② 2026-09-18 **分层硬停**（审计 A 提出、我独立复算后采纳）：把「机器强制」找回一部分。
+    #    背景：① 之后 `agent_core.AGENT_SYSTEM_PROMPT` 的防幻觉守则（触发条件=「空数据」）
+    #    对域外查询**不再触发**，而 `evidence_level` 又没有任何下游消费者 →
+    #    A3a 从「机器强制」退化成「模型自觉」，且没有任何指标能检测这种退化。
+    #    条件 = `level == none` **且** 与全库**零 bigram 交集**（`bm25max == 0`）。
+    #    实测（holdout，无需 embedding）：域外 **5/20** 命中该条件、**误杀正例 0/21**；
+    #    `rel-0014`(bm25max=4.57) / `rel-0015`(9.21) 都 > 0 → **不会被硬停**，17 日的修复不回退。
+    #    ⚠️ 对 `in_domain_unanswerable` / `near_miss` 无效（各 0/15，词面全是域内词）
+    #    —— 那两类只能靠 LLM 判官，不属本闸门职责。
+    if (evidence is not None and evidence.level == LEVEL_NONE
+            and not any(evidence.bm25_scores)):
+        return [], {}, evidence          # 零字面交集 → 恢复机器强制（A3a）
 
     matrix = np.asarray(matrix, dtype="float32")
     if query_vec is None:

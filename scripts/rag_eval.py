@@ -55,8 +55,29 @@ def assert_clean_holdout(rows_irr):
             "v1 样本曾用于定阈值，混入验收组会让验收失去意义" % bad)
 
 
+def load_holdout():
+    """holdout 的**唯一入口**：读取 + 强制校验（含拒绝空负例）。
+
+    2026-09-18（审计 B 的 P2-1）：原先把校验只放在 `main()` 里 → 任何**绕过 CLI** 的调用方
+    （直接 `load()`）都不受约束，审计实测传入 3 条 `batch=v1` 负例静默通过。
+    更隐蔽的一条：`irr` 为空时断言放行 → `n_irr=0`、`by_kind={}`、`strong_fp=0.000`，
+    且 `main()` 里 A3a 主结论那行因 `ood.get("n")` 为假**根本不打印** ——
+    「没有负例、却看起来干净」的报告可以静默产出。故此处显式拒绝空集。
+    """
+    rel, irr = load("holdout", "rel"), load("holdout", "irr")
+    if not irr:
+        raise ValueError("holdout 负例为空（queries_holdout_irr.json 缺失或为空）—— "
+                         "不得产出「没有负例却看起来干净」的验收报告")
+    assert_clean_holdout(irr)
+    return rel, irr
+
+
 def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
-    """返回指标 dict。qvecs 与 rows 顺序一致（已批量 embed）。"""
+    """返回指标 dict。qvecs 与 rows 顺序一致（已批量 embed）。
+
+    ⚠️ 这是**纯计算函数**：数据入口的干净性校验在 `load_holdout()`，不在这里
+    （它无法区分 tuning / holdout，放进来会误伤 tuning 的 v1 负例）。
+    """
     n_expect = len(rows_rel) + len(rows_irr)
     if len(qvecs) != n_expect:
         # ⚠️ 旧实现直接 `zip(rows, qvecs[...])` 配对 → 长度不匹配会**静默截断**，
@@ -66,7 +87,7 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
     chunk_pos = {m["chunk_id"]: i for i, m in enumerate(meta)}
 
     over_abstain = 0
-    recall_hits, guarded_hits, rr = 0, 0, []
+    recall_hits, trusted_hits, rr = 0, 0, []
     for r, qv in zip(rows_rel, qvecs[:len(rows_rel)]):
         ev = judge.assess(r["query"])
         if ev.level == LEVEL_NONE:
@@ -74,24 +95,27 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
             # ⚠️ 2026-09-17 **删掉了原地的 `continue`**（独立审计实测指出）：
             # 旧写法在 none 档直接跳过检索 → ① Recall/MRR 的**分子被少算**（分母仍是 n_rel）
             # ② 报告里的 `got_top5=[]` 被误读成「检索也失败了」，真相是该条 gold 排在 **rank 1**。
-            # 现在照常检索，三个量各司其职、不可互替：
-            #   Recall@k       = 检索器本身能力（judge=None 的裸检索）
-            #   over_abstain   = 闸门的**标注保守度**（判 none 的比例）
-            #   guarded_recall = **产线口径**：带闸门跑完，实际仍能拿到 gold 的比例
+            # 三个量各司其职、不可互替：
+            #   Recall@k       = 检索器本身能力（judge=None 的**裸检索**）
+            #   trusted_recall = **判据采信过的召回**：gold 在 top-k **且** `level != none`
+            #   over_abstain   = 闸门把可答查询标成 none 的比例
         order, _, _ = run_hybrid(r["query"], matrix, meta, k=max(k, 10),
                                  query_vec=qv, judge=None)
         got = [meta[i]["chunk_id"] for i in order[:k]]
         gold = set(r.get("answer_chunk_ids") or [])
         if gold & set(got):
             recall_hits += 1
+            if ev.level != LEVEL_NONE:
+                trusted_hits += 1
         all10 = [meta[i]["chunk_id"] for i in order[:10]]
         rank = next((j + 1 for j, c in enumerate(all10) if c in gold), None)
         rr.append(1.0 / rank if rank else 0.0)
-        # 产线口径（2026-09-17 新增）：带 judge 再跑一次，量化「闸门是否丢掉了已检索到的证据」。
-        # 修复 none 档硬停之前这个值是 0.905（= 报告里的 Recall），修复后应为 1.000。
-        order_g, _, _ = run_hybrid(r["query"], matrix, meta, k=k, query_vec=qv, judge=judge)
-        if gold & {meta[i]["chunk_id"] for i in order_g}:
-            guarded_hits += 1
+        # ⚠️ 2026-09-18 **删除了 `guarded_recall`**（两份外部审计**各自实测**证明它恒等于 `Recall@k`）：
+        #   删掉 none 档硬停后，`run_hybrid` 的 `judge` **只用于算 evidence、不参与任何过滤/排序**
+        #   （构造性恒等）→「带闸门再跑一次」与「裸检索」返回同一个 order；
+        #   审计 B 的证伪实验：把判据换成「恒返回 none」，`guarded_recall` **纹丝不动**（仍 1.000/0.571）。
+        #   另：当时两侧池大小 `kk` 在 N≤100 时相同、N=150 起才会因**池大小**而非闸门出现差异 —— 该指标在
+        #   任何规模上都不成立。替代量 `trusted_recall` 会随判据退化而变红（判官恒 none → 0/n_rel）。
 
     # 负例：**按 kind 分列**（2026-09-17 修正口径，外部评审指出）
     # - `strong` 才是违规（A3a 只看 out_of_domain）
@@ -117,9 +141,11 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         "delegated_rate": delegated / n_irr,
         "by_kind": by_kind,
         "Recall@%d" % k: recall_hits / n_rel,
-        # 产线口径（2026-09-17 新增）：带闸门跑完后**实际仍能拿到 gold** 的比例。
-        # 与 `Recall@k` 之差 = **闸门丢掉的已检索证据**（修 `none` 档硬停前：guarded 0.905 vs raw 1.000）。
-        "guarded_recall": guarded_hits / n_rel,
+        # `trusted_recall`（2026-09-18 新增，替代已删的 `guarded_recall`）：
+        # **判据采信过的召回** —— gold 在 top-k **且** `level != none`。
+        # 与 `Recall@k` 之差 = 「检索到了但判据没采信」的比例（这才是能随判据退化变红的量：
+        # 判官恒 none → 0/n_rel；而旧 `guarded_recall` 在同样场景下纹丝不动）。
+        "trusted_recall": trusted_hits / n_rel,
         "n_over_abstain": over_abstain,
         "MRR@10": sum(rr) / n_rel if rr else 0.0,
     }
@@ -154,6 +180,16 @@ def scan(rows_rel, rows_irr, judge):
 
 
 def main(argv=None):
+    # 2026-09-18（审计 A 的 P2-1）：本脚本原先在 **GBK 控制台**上直接崩 ——
+    # 新增的 `⚠️`(U+26A0) 无法用 cp936 编码 → `UnicodeEncodeError` + 退出码 1。
+    # 这与本仓「UTF-8 铁律」自相矛盾（`print` 走平台默认编码）。双保险：
+    # ① 这里 reconfigure；② 打印文本改用 ASCII 标记 `[!]`。
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--split", choices=["tuning", "holdout"], default="holdout")
     ap.add_argument("--db", default=None)
@@ -196,18 +232,22 @@ def main(argv=None):
         # 而 ood 的 none 率是**主动弃权率**，不受此问题影响。
         print("  A3a 域外主动弃权  = %d/%d = %.3f   <<< 主结论"
               % (ood["none"], ood["n"], ood["none"] / ood["n"]))
-    print("  strong_fp_rate    = %.3f   (应弃权却 strong；⚠️ 须与「正例 strong 率」并列看)"
+    print("  strong_fp_rate    = %.3f   (应弃权却 strong；[!] 须与「正例 strong 率」并列看)"
           % m["strong_fp_rate"])
     print("  delegated_rate    = %.3f   (落 weak = 需 LLM 判官；**成本指标，不是失败**)"
           % m["delegated_rate"])
     print("  over_abstain_rate = %.3f   (%d/%d 判 none —— **闸门标注保守度**，不是召回损失："
           % (m["over_abstain_rate"], m["n_over_abstain"], m["n_rel"]))
-    print("                                none 档自 2026-09-17 起不再清空结果)")
+    print("                                none 档不再无条件清空结果；零 bigram 交集仍硬停)")
+    if m["over_abstain_rate"] > 0.20:
+        # 2026-09-18（审计 B 的 P1-2）：修复后三个 headline 指标在「判据过度拒绝」时**全是满分**
+        # （A3a 20/20、strong_fp 0.000、Recall 不变）—— 盲区是单向的。这里给一个下限告警。
+        print("  [!] over_abstain_rate > 0.20 —— 闸门可能在过度拒绝（该方向上无其他指标会报警）")
     print("  --- 检索侧（judge=None 裸检索）---")
     print("  Recall@%d          = %.3f   (检索器本身能力 —— 旧版在 none 档 `continue`，分子被少算)"
           % (TOP_K, m["Recall@%d" % TOP_K]))
-    print("  guarded_recall    = %.3f   (带闸门跑完仍拿到 gold = **产线口径**)"
-          % m["guarded_recall"])
+    print("  trusted_recall    = %.3f   (gold 在 top-k **且** 判据采信 —— 判据退化时它会变红)"
+          % m["trusted_recall"])
     print("  MRR@10            = %.3f" % m["MRR@10"])
     print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
     for kind, d in sorted(m["by_kind"].items()):

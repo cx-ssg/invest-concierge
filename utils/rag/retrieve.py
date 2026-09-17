@@ -38,10 +38,15 @@ from utils.rag.tokenize import tokenize
 
 # 无命中时的显式提示：把「没有」这件事说清楚，模型才不会拿训练数据硬编
 NO_HIT_MESSAGE = "未找到相关公告或研报 —— 请如实告知用户知识库中没有相关内容，不要凭记忆编造"
-# 证据不足档（A3a）：**不是空结果**，而是「返回候选 + 最强警示」—— 见 `hybrid.run_hybrid` 的注释
-NONE_EVIDENCE_NOTE = ("未找到与问题相关的公告内容（证据不足档）—— "
-                      "以下候选块与问题的关联性很可能不成立，不得据此推断或编造，"
-                      "请如实告知用户知识库中没有相关内容")
+# 证据不足档（A3a）：**不是无条件空结果**，而是「返回候选 + 最强警示」——
+# 例外见 `hybrid.run_hybrid` 的「分层硬停」（零 bigram 交集 → 仍物理回空）。
+#
+# ⚠️ 2026-09-18 措辞订正（审计 A 的 P1-2）：旧文案写「请如实告知用户**知识库中没有相关内容**」——
+# 这对 `rel-0014`（gold 在 rank 4）/ `rel-0015`（gold 在 **rank 1**）是**假陈述**：语料里明明有答案。
+# 该警示的语义本该是「**我的字面判据没通过**」，而不是关于语料内容的事实断言。
+# 现改为诚实的不确定性措辞：把「没有」降级为「**未能确认**」。
+NONE_EVIDENCE_NOTE = ("证据判据未通过（与问题的字面重合不足）—— 以下候选的关联性**未能确认**，"
+                      "引用前请自行核验；若候选不足以支撑回答，请如实说明未找到，不要据此推断或编造")
 # 证据不足档（A3b 的安全网）：结果照给，但明确要求模型谨慎
 WEAK_EVIDENCE_NOTE = ("检索到的内容与问题只有字面弱相关（证据不足档）—— 引用前请自行核验；"
                       "若无法支撑回答，请如实说明未找到，不要据此推断")
@@ -100,6 +105,14 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         })
 
     ev_level = evidence.level if evidence is not None else None
+    if ev_level == LEVEL_NONE and results:
+        # 2026-09-18（审计 B 的 P2-2）：none 档的候选块**不可引用**。
+        # 设计 §3.3 第 4 条「无引用 = 不算回答」原本由「物理清空」执行；清空撤销后需要新的执行者
+        # —— 剥掉引用凭据（`url` / `title`）：模型即使想引也无处可引，而候选**正文仍保留**
+        # （`rel-0014`/`rel-0015` 那种「判据假阴性、语料确有答案」的情形不能丢证据）。
+        for r in results:
+            r["url"] = None
+            r["title"] = None
     if not results:
         message = NO_HIT_MESSAGE
     elif ev_level == LEVEL_NONE:

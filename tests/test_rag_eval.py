@@ -4,6 +4,8 @@
 重点：三个指标的口径必须**可被打破**（否则又是一组自证测试）——
 每个用例都构造出"指标应当变化"的场景。
 """
+import json
+
 import numpy as np
 
 from scripts import rag_eval as ev
@@ -31,7 +33,7 @@ def test_over_abstain_counter_works():
     ⚠️ 2026-09-17 契约修正：旧断言还写着 `Recall@5 == 0.0`（"弃权的查询不可能召回"），
     这个前提被**独立审计实测证伪** —— holdout 的 `rel-0015` 的 gold 排在 **rank 1** 仍被判 none
     → 「判 none」与「检索不到」是**两件事**。评测器已删掉 none 档的 `continue`：
-    `over_abstain` 记标注保守度、`Recall@k` 记检索器能力、`guarded_recall` 记产线实际拿到 gold 的比例。
+    `over_abstain` 记标注保守度、`Recall@k` 记检索器能力、`trusted_recall` 记判据采信过的召回。
     """
     rel = [{"query": "可答问题", "answer_chunk_ids": [1]}]
     judge = _FakeJudge({"可答问题": Evidence(0.0, 0.0, "none")})   # 故意误弃权
@@ -39,7 +41,8 @@ def test_over_abstain_counter_works():
     assert m["over_abstain_rate"] == 1.0
     assert m["n_over_abstain"] == 1
     assert m["Recall@5"] == 1.0, "判 none **不等于**检索不到 —— 两者已解耦"
-    assert m["guarded_recall"] == 1.0, "none 档不再清空结果 → 产线口径也应拿得到 gold"
+    assert m["trusted_recall"] == 0.0, \
+        "但判据没采信 → `trusted_recall` 归零（这正是它比旧 `guarded_recall` 有用的地方）"
 
 
 def test_assert_clean_holdout_rejects_v1_sample():
@@ -54,7 +57,54 @@ def test_assert_clean_holdout_rejects_v1_sample():
         ev.assert_clean_holdout([{"id": "irr-0001", "batch": "v1"}])
     assert "irr-0001" in str(ei.value), "报错要点名是哪几条，便于修复"
     ev.assert_clean_holdout([{"id": "irr-0101", "batch": "v2"}])     # 合规 → 不抛
-    ev.assert_clean_holdout([])                                       # 空集 → 不抛
+    ev.assert_clean_holdout([])                                       # 空集 → 不抛（函数本身不管空集）
+
+
+def test_trusted_recall_turns_red_when_judge_degrades():
+    """`trusted_recall` 必须能检测「判据退化」—— 这是它替代 `guarded_recall` 的全部理由。
+
+    2026-09-18（两份外部审计**各自实测**）：`guarded_recall` **恒等于** `Recall@k` ——
+    删掉 none 档硬停后 `run_hybrid` 的 judge 只用于算 evidence、不参与过滤（构造性恒等），
+    把判据换成「恒返回 none」它**纹丝不动**。而 `trusted_recall`（gold 在 top-k **且** level != none）
+    在同样场景下会掉到 0 —— 这正是本次要修的那类退化。
+    """
+    rel = [{"query": "可答问题", "answer_chunk_ids": [1]}]
+    m1 = ev.evaluate(rel, [], _FakeJudge({"可答问题": Evidence(0.5, 1.0, "strong")}),
+                     _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
+    assert m1["Recall@5"] == 1.0 and m1["trusted_recall"] == 1.0
+    m2 = ev.evaluate(rel, [], _FakeJudge({"可答问题": Evidence(0.0, 0.0, "none")}),
+                     _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
+    assert m2["Recall@5"] == 1.0, "裸检索能力不受判据影响"
+    assert m2["trusted_recall"] == 0.0, "判据恒 none → 采信召回必须归零（旧 guarded_recall 测不出）"
+
+
+def test_load_holdout_rejects_empty_negative_set(tmp_path, monkeypatch):
+    """`load_holdout()` 是 holdout 的唯一入口：**空负例必须报错**，不得静默产出「干净」报告。
+
+    2026-09-18（审计 B 的 P2-1）：`irr` 为空时旧断言放行 → `n_irr=0`、`by_kind={}`、
+    `strong_fp=0.000`，而 `main()` 里 A3a 主结论那行根本不打印。
+    """
+    import pytest
+    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_irr.json").write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
+    with pytest.raises(ValueError) as ei:
+        ev.load_holdout()
+    assert "负例为空" in str(ei.value)
+
+
+def test_load_holdout_rejects_v1_negative(tmp_path, monkeypatch):
+    """`load_holdout()` 必须对混入的 v1 负例报错 —— 校验下沉到数据入口，绕过 CLI 也绕不过。"""
+    import pytest
+    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_irr.json").write_text(
+        json.dumps([{"id": "irr-0001", "kind": "near_miss", "query": "x",
+                     "answer_chunk_ids": [], "batch": "v1"}], ensure_ascii=False),
+        encoding="utf-8")
+    monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
+    with pytest.raises(ValueError) as ei:
+        ev.load_holdout()
+    assert "irr-0001" in str(ei.value)
 
 
 def test_recall_and_mrr_when_answer_returned():
