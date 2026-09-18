@@ -768,6 +768,64 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 **三次都是"改了一半"。** 共同的形状是：**修复被验证在「被指出的那个具体例子」上就结束了，
 没有回到定义 / 调用面去问「这条规则还覆盖什么」。**
 
+## 4i. 撤下 `strong` 档（2026-09-18 深夜，用户拍板）
+
+### 决策与依据
+
+第六轮审计二 P2-1 的实测：**`strong` 档在生产里不闸任何东西** ——
+
+- `retrieve.py` 里 `strong` 与 `weak` 两条分支返回的 **`results` 完全相同**（同批正文 + `url` + `title`），
+  唯一差别是 `message` 那**一句话**；
+- 而应消费该差别的 **LLM 判官从未实现**（全仓 grep `llm_judge|judge_evidence` → **0 命中**）。
+
+⇒ 第四轮为「提高 strong 可达性」付出的全部代价（`V1_STRONG→0`、`SAR_STRONG→0.15`、
+**用掉唯一干净的 holdout**）换到的产物是**一句提示文案的切换**；
+`delegated_rate 0.810→0.524` 是对**一个不存在的组件**的成本估算。
+
+**用户拍板：撤下 `strong` 档**（采纳审计二的首选建议）。
+
+### 改了什么
+
+| 层 | 改动 |
+|---|---|
+| **行为层（实质）** | `evidence.py`：删 `SAR_STRONG` / `V1_STRONG` / `LEVEL_STRONG`，分档只出 `none` / `weak`；<br>`retrieve.py`：**非 none 一律带 `WEAK_EVIDENCE_NOTE`** ⇒ **"跳过警示"这条通道消失** |
+| 指标层 | 删 `strong_fp_rate` / `strong_rel_rate` / `by_kind` 的 `strong` 列 |
+| 工具层 | `scan()` 的 strong 曲线降级为「**仅历史参考，勿用于定阈值**」 |
+| 测试 | 删 2 条锁 strong 的用例；新增 3 条锁撤档（`test_no_strong_tier_is_produced` /<br>`test_no_strong_tier_in_metrics` / `test_by_kind_has_no_strong_column`）|
+
+### ⚠️ 语义变更（**必须记住**）
+
+**`delegated_rate` 从「委派成本」变成「风险面」**：
+
+- **以前**：落 `weak` = "交给 LLM 判官"，**可接受的中间态**（理由一直是"判官会兜底"）；
+- **现在**：判官不存在 ⇒ 它描述的是「**未通过判据、却仍返回给模型的结果占比**」。
+
+**实测（撤档前后）**：
+
+| 指标 | 撤档前 | 撤档后 | 解释 |
+|---|---|---|---|
+| tuning `delegated_rate` | 0.400 | **0.459** | **+0.059 = 原 `strong_fp` 那 5 条负例**（现归入 weak）|
+| holdout `delegated_rate` | 0.420 | **0.420** | 不变 —— holdout 负例侧本就无 strong |
+| A3a（域外主动弃权） | 1.000 / 1.000 | **1.000 / 1.000** | none 档逻辑未动 |
+| tuning `near_miss` weak | 18 | **22** | +4 = 原 strong 4 条 |
+| tuning `unans` weak | 16 | **17** | +1 |
+| 全量测试 | 341 passed | **340 passed** | 删 2 条 + 加 1 条，净 −1 |
+
+### 撤档的**真实收益**在行为层，不在指标层
+
+**那 5 条负例（tuning）现在一律带警示语** —— 以前它们被判 `strong`、**跳过 `WEAK_EVIDENCE_NOTE`、
+并拿到完整 `url` / `title`**。**这条通道正是第五、六两轮审计反复攻击的入口**
+（`V1_STRONG→0` 移除护栏、`feature` 含 `df=0` 被跨界 bigram 绕过）。
+**撤档让它在结构上不可能再发生 —— 而不是靠把阈值调得更严。**
+
+### 这次我的方法失误（记下来）
+
+**动手前没先量工程量**：撤一个档位听起来像删几行，实际 grep 出 **~80 处 `strong` 引用、跨 5 个文件**
+（`rag_eval.py` ≈35 / `test_rag_eval.py` ≈20 / `test_rag_evidence.py` ≈20 / `rag_threshold_probe.py` 5）。
+半成品一度让仓库"测试跑不起来"，只能先移到分支 `feat/drop-strong-tier` 隔离，再回来收尾。
+
+**教训：结构性改动前先 `grep` 引用面，再决定要不要开分支。**
+
 ## 5. 诚实边界
 
 - **n 仍不均**：rel **34** / neg **135**（tuning 85 + holdout 50）。⚠️ `out_of_domain` **全库 50 条，

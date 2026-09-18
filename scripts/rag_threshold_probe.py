@@ -21,8 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.rag import store as rag_store                              # noqa: E402
-from utils.rag.evidence import (EvidenceJudge, LEVEL_NONE, LEVEL_STRONG,  # noqa: E402
-                                SAR_NONE, SAR_STRONG, V1_NONE, V1_STRONG)
+from utils.rag.evidence import EvidenceJudge, LEVEL_NONE, SAR_NONE, V1_NONE  # noqa: E402
 from utils.rag.tokenize import tokenize                               # noqa: E402
 
 # ① 定值组（参与过阈值调试）

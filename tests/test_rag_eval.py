@@ -190,42 +190,52 @@ def test_recall_and_mrr_when_answer_returned():
     assert m["MRR@10"] == 1.0
 
 
-def test_strong_false_positive_counter_works():
-    """应弃权（无关）却判 `strong` → strong_fp_rate 上升（**A3a 主指标**）。"""
-    irr = [{"query": "无关问题", "answer_chunk_ids": []}]
-    judge = _FakeJudge({"无关问题": Evidence(0.5, 1.0, "strong")})
-    m = ev.evaluate([], irr, judge, _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
-    assert m["strong_fp_rate"] == 1.0
+def test_no_strong_tier_in_metrics():
+    """撤下 `strong` 档后，指标字典里**不再有** `strong_fp_rate` / `strong_rel_rate`（锁撤档）。
 
-
-def test_weak_is_delegation_not_failure():
-    """`weak` 是**委派点**（交给 LLM 判官），不是检索失败 —— 单独计为 `delegated_rate`。
-
-    2026-09-17 口径修正：外部评审指出旧名 `weak_fp_rate` 与标注规范矛盾
-    （`tests/golden/rag/README.md` 里三类负例**都允许** `weak`，只有 `strong` 是禁止的）。
+    背景：这两个量度量的档位已不存在。**但它们要回答的问题没有消失** ——
+    「负例有没有被误放行」现在由 `delegated_rate` 承担：撤档后任何非 none 的负例都落在 `weak`，
+    而 `weak` 一律带 `WEAK_EVIDENCE_NOTE` 警示（**不再有"跳过警示"的通道**）。
     """
     irr = [{"query": "模糊问题", "kind": "near_miss", "answer_chunk_ids": []}]
     judge = _FakeJudge({"模糊问题": Evidence(0.08, 0.5, "weak")})
     m = ev.evaluate([], irr, judge, _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
-    assert m["strong_fp_rate"] == 0.0, "weak 不算 strong 违规"
-    assert m["delegated_rate"] == 1.0, "但要计入委派率（成本）"
+    assert "strong_fp_rate" not in m, "撤档后不应再报 strong_fp_rate"
+    assert "strong_rel_rate" not in m, "撤档后不应再报 strong_rel_rate"
+    assert m["delegated_rate"] == 1.0, "非 none 的负例全部计入（= 未通过判据的结果占比）"
     assert m["by_kind"]["near_miss"]["weak"] == 1
 
 
-def test_strong_fp_is_reported_per_kind():
-    """`strong_fp` 必须**按 kind 分列** —— 混池会让漂亮的类与违规的类互相抵消。
+def test_weak_level_counts_as_non_none():
+    """`weak` = **非 none 的统称** —— 它不再表示"委派给判官"（判官从未实现）。
 
-    外部评审实测：域外类 0/6（完美）与近义干扰类 1/17（真违规）混池后只剩 2.8%，
-    看不出违规究竟出在哪一类。
+    ⚠️ 2026-09-18 语义变更（撤档的副作用）：`delegated_rate` 从「**成本**」变成「**风险面**」。
+    """
+    irr = [{"query": "模糊问题", "kind": "near_miss", "answer_chunk_ids": []},
+           {"query": "域外问题", "kind": "out_of_domain", "answer_chunk_ids": []}]
+    judge = _FakeJudge({"模糊问题": Evidence(0.08, 0.5, "weak"),
+                        "域外问题": Evidence(0.0, 0.0, "none")})
+    m = ev.evaluate([], irr, judge, _META, _MATRIX,
+                    np.array([[1.0, 0.0], [0.0, 1.0]], dtype="float32"))
+    assert m["delegated_rate"] == 0.5, "只有 weak 计入；none 不计"
+    assert m["by_kind"]["out_of_domain"]["none"] == 1
+    assert m["by_kind"]["near_miss"]["weak"] == 1
+
+
+def test_by_kind_has_no_strong_column():
+    """`by_kind` 必须**按 kind 分列** —— 混池会让漂亮的类与糟糕的类互相抵消（外部评审实测）。
+
+    ⚠️ 2026-09-18 撤档后**只有 none / weak 两列**（`strong` 列已删）。
     """
     irr = [{"query": "域外问题", "kind": "out_of_domain", "answer_chunk_ids": []},
            {"query": "近义问题", "kind": "near_miss", "answer_chunk_ids": []}]
     judge = _FakeJudge({"域外问题": Evidence(0.0, 0.0, "none"),
-                        "近义问题": Evidence(0.5, 1.0, "strong")})
+                        "近义问题": Evidence(0.08, 0.5, "weak")})
     m = ev.evaluate([], irr, judge, _META, _MATRIX,
                     np.array([[1.0, 0.0], [0.0, 1.0]], dtype="float32"))  # 数量须与查询一致
-    assert m["by_kind"]["out_of_domain"]["strong"] == 0
-    assert m["by_kind"]["near_miss"]["strong"] == 1
+    assert "strong" not in m["by_kind"]["out_of_domain"], "撤档后 by_kind 不应再有 strong 列"
+    assert m["by_kind"]["out_of_domain"]["none"] == 1
+    assert m["by_kind"]["near_miss"]["weak"] == 1
 
 
 def test_evaluate_rejects_qvec_length_mismatch():
@@ -242,19 +252,22 @@ def test_evaluate_rejects_qvec_length_mismatch():
                     np.array([[1.0, 0.0]], dtype="float32"))          # 故意少一行
 
 
-def test_scan_returns_curve_grid():
-    """扫描必须覆盖多个组合，供按代价选工作点；**两组曲线都要有**（审计二 P2-2）。"""
-    judge = _FakeJudge({"b": Evidence(0.2, 0.8, "strong")})
+def test_scan_returns_none_curve_grid():
+    """扫描必须覆盖多个 none 档阈值组合，供按代价选工作点。
+
+    ⚠️ 2026-09-18 **撤下 `strong` 档**后，`scan()` 的 strong 曲线**不再用于定阈值**
+    （已经没有对象）—— 它保留在返回值里仅作**历史对照**（`curves["strong"]`），
+    故本测试**只对 none 曲线下实质断言**。
+    """
+    judge = _FakeJudge({"b": Evidence(0.2, 0.8, "weak")})
     curves = ev.scan([{"query": "b", "answer_chunk_ids": []}],
                      [{"query": "a", "answer_chunk_ids": []}], judge)
-    # ⚠️ 2026-09-18 第六轮审计二 P2-2：返回结构由 `list` 改为 `{"none": [...], "strong": [...]}` ——
-    # **strong 档此前根本没有扫描器**，`SAR_STRONG` 只能拿 holdout 选，**该验收池因此报废**。
-    none_pts, strong_pts = curves["none"], curves["strong"]
+    none_pts = curves["none"]
     assert len(none_pts) >= 10, "none 档曲线点太少无法选工作点"
     assert all(len(p) == 4 for p in none_pts)
     assert any(fp == 0.0 for _, _, fp, _ in none_pts), "扫描里应存在零误放行的点"
-    assert len(strong_pts) >= 6, "strong 档曲线点太少无法定阈值"
-    assert all(len(p) == 4 for p in strong_pts)
+    # 假想 strong 曲线仍在（8 个点），但**只作历史对照**，不再是可选的阈值工作点
+    assert len(curves["strong"]) >= 6, "（历史对照用）假想 strong 曲线点数不足"
 
 
 def test_load_missing_split_returns_empty(tmp_path, monkeypatch):

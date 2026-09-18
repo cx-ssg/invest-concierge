@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.rag import store as rag_store                      # noqa: E402
 from utils.rag import evidence as ev_mod                      # noqa: E402
 from utils.rag.embed import embed_texts_batched               # noqa: E402
-from utils.rag.evidence import EvidenceJudge, LEVEL_NONE, LEVEL_STRONG  # noqa: E402
+from utils.rag.evidence import EvidenceJudge, LEVEL_NONE  # noqa: E402
 from utils.rag.hybrid import run_hybrid                       # noqa: E402
 from utils.rag.tokenize import tokenize                       # noqa: E402
 
@@ -103,16 +103,12 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
     # 这类"看起来在岗、其实不在岗"的代码是 `load_holdout` 死代码的同族，一并清掉。
 
     over_abstain = 0
-    recall_hits, trusted_hits, strong_rel, rr = 0, 0, 0, []
+    recall_hits, trusted_hits, rr = 0, 0, []
     tool_recall_hits, hard_stop = 0, 0
     for r, qv in zip(rows_rel, qvecs[:len(rows_rel)]):
         ev = judge.assess(r["query"])
-        if ev.level == LEVEL_STRONG:
-            # 2026-09-18（**两份审计都要求**）：**正例 strong 率**是 strong 带上唯一会随改动
-            # 大幅移动的量（holdout 2/21→8/21→14/21；只删 V1 时 14/21），
-            # 而 `strong_fp` 的分母是负例 → 对"档位是否可达"**结构性免疫**。
-            # 此前注释要求读者"与它并列看"，脚本却从不打印它。
-            strong_rel += 1
+        # ⚠️ 2026-09-18 **撤下 `strong` 档**后不再统计「正例 strong 率」——
+        # `LEVEL_STRONG` 已删、分档只出 none / weak，那个量因此**失去对象**。
         if ev.level == LEVEL_NONE:
             over_abstain += 1
             # ⚠️ 2026-09-17 **删掉了原地的 `continue`**（独立审计实测指出）：
@@ -164,20 +160,21 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
     for r, qv in zip(rows_irr, qvecs[len(rows_rel):]):
         lv = judge.assess(r["query"]).level
         d = by_kind.setdefault(r.get("kind", "unknown"),
-                               {"n": 0, "none": 0, "weak": 0, "strong": 0})
+                               {"n": 0, "none": 0, "weak": 0})
         d["n"] += 1
         d[lv] += 1
 
-    strong_fp = sum(d["strong"] for d in by_kind.values())
     delegated = sum(d["weak"] for d in by_kind.values())
 
     n_rel, n_irr = max(len(rows_rel), 1), max(len(rows_irr), 1)
     return {
         "n_rel": len(rows_rel), "n_irr": len(rows_irr),
         "over_abstain_rate": over_abstain / n_rel,
-        "strong_fp_rate": strong_fp / n_irr,
-        # 委派率：落 weak 的比例 = **成本指标**（多一次判官调用），**不是失败**。
-        # 旧名 `weak_fp_rate` 与标注规范矛盾（规范里三类负例都允许 weak）。
+        # ⚠️⚠️ 2026-09-18 **`delegated_rate` 的语义变了**（撤下 strong 档的副作用，必记）：
+        # 以前它是「**委派成本**」—— 落 weak 表示"交给 LLM 判官"，是可接受的中间态
+        # （理由一直是"判官会兜底"）。**但判官从未实现**（全仓 grep `llm_judge|judge_evidence` 0 命中）
+        # ⇒ 现在它描述的是「**未通过判据、却仍返回给模型的结果占比**」= **风险面**，
+        # 不再是成本。**读它的时候不要再按"成本"理解。**
         "delegated_rate": delegated / n_irr,
         "by_kind": by_kind,
         "Recall@%d" % k: recall_hits / n_rel,
@@ -195,10 +192,12 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # 当下 holdout 上它**应当 == trusted_recall**（正例 0 条被硬停）；**一旦不等就是真信号**。
         "tool_recall": tool_recall_hits / n_rel,
         "hard_stop_count": hard_stop,
-        # 2026-09-18（**两份审计都要求打印**）：**正例 strong 率** —— strong 带的正例侧报警量。
-        # `strong_fp` 的分母是负例、本轮改动没碰负例侧 → 它对「strong 档是否仍可达」结构性免疫。
-        "strong_rel_rate": strong_rel / n_rel,
-        "n_rel_strong": strong_rel,
+        # ⚠️ 2026-09-18 **撤下 strong 档**后，`strong_rel_rate` / `strong_fp_rate` 一并移除 ——
+        # 它们度量的档位已不存在（分档只出 none / weak）。
+        # **这不是"指标消失"**：它们要回答的问题（"负例有没有被误放行"）现在**由
+        # `delegated_rate` 全权承担** —— 撤档后任何非 none 的负例都落在 weak，
+        # 而 weak 一律带警示语（不再有"跳过警示"的通道）。
+        # 旧值（**仅存历史，勿再引用**）：holdout `strong_fp=0.000`、正例 strong 率 0.381。
         "n_over_abstain": over_abstain,
         "MRR@10": sum(rr) / n_rel if rr else 0.0,
     }
@@ -297,32 +296,22 @@ def main(argv=None):
     qvecs = np.asarray(embed_texts_batched(qs), dtype="float32")
 
     m = evaluate(rel, irr, judge, meta, matrix, qvecs)
-    print("[eval] chunks=%d 阈值 sar>=%.2f v1>=%.2f / none 档 sar<%.2f v1<%.2f"
-          % (len(meta), ev_mod.SAR_STRONG, ev_mod.V1_STRONG, ev_mod.SAR_NONE, ev_mod.V1_NONE))
+    print("[eval] chunks=%d 阈值：none 档 sar<%.2f v1<%.2f（**strong 档已撤下**：非 none 一律 weak）"
+          % (len(meta), ev_mod.SAR_NONE, ev_mod.V1_NONE))
     print("[eval] n_rel=%d n_irr=%d" % (m["n_rel"], m["n_irr"]))
     ood = m["by_kind"].get("out_of_domain") or {}
     if ood.get("n"):
-        # 2026-09-17（采纳独立审计 P1-1）：**主结论换成域外主动弃权率** ——
-        # `strong_fp` 在 strong 档几乎不触发时缺乏检验力（正例 strong 率仅 2/21 = 0.095），
-        # 0/50 里既可能是"判别力好"，也可能是"门槛根本够不到"，两者不可分离；
-        # 而 ood 的 none 率是**主动弃权率**，不受此问题影响。
         print("  A3a 域外主动弃权  = %d/%d = %.3f   <<< 主结论"
               % (ood["none"], ood["n"], ood["none"] / ood["n"]))
-    print("  strong_fp_rate    = %.3f   ([!] **仅负例侧敏感** —— 只在负例放水时才动；"
-          % m["strong_fp_rate"])
-    print("                                正例档位是否可达看下一行)")
-    print("  正例 strong 率    = %.3f   (%d/%d 可答查询拿到 strong —— **strong 带正例侧报警量**)"
-          % (m["strong_rel_rate"], m["n_rel_strong"], m["n_rel"]))
-    if m["strong_rel_rate"] < 0.20:
-        print("  [!] 正例 strong 率 < 0.20 —— strong 档可能重新不可达（判官成本会回升）")
-    print("  delegated_rate    = %.3f   (落 weak = 需 LLM 判官；**成本指标，不是失败**)"
+    print("  delegated_rate    = %.3f   (**非 none 占比** —— 判据未通过、但结果仍返回给模型；"
           % m["delegated_rate"])
+    print("                                判官从未实现 ⇒ 这是**风险面**不是成本（2026-09-18 撤档后语义已变）)")
     print("  over_abstain_rate = %.3f   (%d/%d 判 none —— **闸门标注保守度**，不是召回损失："
           % (m["over_abstain_rate"], m["n_over_abstain"], m["n_rel"]))
     print("                                none 档不再无条件清空结果；零 bigram 交集仍硬停)")
     if m["over_abstain_rate"] > 0.20:
-        # 2026-09-18（审计 B 的 P1-2）：修复后三个 headline 指标在「判据过度拒绝」时**全是满分**
-        # （A3a 20/20、strong_fp 0.000、Recall 不变）—— 盲区是单向的。这里给一个下限告警。
+        # 2026-09-18（审计 B 的 P1-2）：修复后若干 headline 指标在「判据过度拒绝」时**全是满分**
+        # （A3a 20/20、Recall 不变）—— 盲区是单向的。这里给一个下限告警。
         print("  [!] over_abstain_rate > 0.20 —— 闸门可能在过度拒绝（该方向上无其他指标会报警）")
     print("  --- 检索侧 ---")
     print("  Recall@%d          = %.3f   (judge=None **裸检索**能力 —— 旧版在 none 档 `continue`，分子被少算)"
@@ -346,8 +335,8 @@ def main(argv=None):
     print("  MRR@10            = %.3f" % m["MRR@10"])
     print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
     for kind, d in sorted(m["by_kind"].items()):
-        print("   %-26s n=%-3d none=%-3d weak=%-3d strong=%-3d" %
-              (kind, d["n"], d["none"], d["weak"], d["strong"]))
+        print("   %-26s n=%-3d none=%-3d weak=%-3d"
+              % (kind, d["n"], d["none"], d["weak"]))
 
     if args.scan:
         curves = scan(rel, irr, judge)
@@ -357,16 +346,13 @@ def main(argv=None):
             flag = "  ← 当前" if (abs(sar_n - ev_mod.SAR_NONE) < 1e-9
                                   and abs(v1_n - ev_mod.V1_NONE) < 1e-9) else ""
             print("  sar<%.2f v1<%.2f -> weak_fp=%.3f oa=%.3f%s" % (sar_n, v1_n, wfp, oa, flag))
-        # ⚠️ 2026-09-18 第六轮审计二 P2-2 / U11：**strong 档扫描此前根本不存在** ——
-        # 于是 `SAR_STRONG` 只能用 holdout 选，**该验收池因此报废**。
-        # **纪律**：在 tuning 上定值 → 换另一个池报**一次**；绝不在同一池上既选阈值又报成绩。
-        print("[eval] --- strong 档扫描 (sar_strong, v1>0) -> "
-              "(正例 strong 率, 负例 strong 条数, 负例 strong 率) ---")
-        print("[eval]     ⚠️ 先用 --split tuning 定值，再 --split holdout 报**一次**；别反过来")
+        # ⚠️ 2026-09-18 **撤下 `strong` 档**后，这条曲线**不再用于定阈值**（已经没有对象）。
+        # 保留它只为**历史对照**与「将来若恢复三档时的参考」——
+        # **它不代表系统当前存在 `strong` 档**（当前分档只有 none / weak）。
+        print("[eval] --- （仅历史参考，勿用于定阈值）假想 strong 档曲线 —— 判据同 v1>0 ---")
         for sar_s, rel_rate, irr_n, irr_rate in curves["strong"]:
-            flag = "  ← 当前" if abs(sar_s - ev_mod.SAR_STRONG) < 1e-9 else ""
-            print("  sar>=%.2f -> 正例 %.3f   负例 %d 条 (%.3f)%s"
-                  % (sar_s, rel_rate, irr_n, irr_rate, flag))
+            print("  sar>=%.2f -> 假想正例 %.3f   假想负例 %d 条 (%.3f)"
+                  % (sar_s, rel_rate, irr_n, irr_rate))
     print("[eval] RESULT: OK")
     return 0
 

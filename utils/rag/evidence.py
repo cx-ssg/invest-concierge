@@ -69,14 +69,24 @@ K1 = 1.5
 #   vs 负例 0.182（**分布重叠**）。字级回退修法已实测证伪：V1 被普遍抬高到 ~0.82 →
 #   strong_fp 从 0.000 恶化到 0.100、弃权能力几乎归零。故 strong 只保留 SAR。
 #   收益：正例委派率 0.810 → **0.524**（判官成本大降），而 `strong_fp` / `none` 分布不变。
-SAR_STRONG = 0.15     # 实测分界（旧值 0.10 对应「档位失效」）
-V1_STRONG = 0.0       # **置 0**：V1 在 strong 侧无区分度（见上）；保留常量仅为可调/可追溯
-SAR_NONE = 0.06       # 实测 IRR 上限 0.0490 → 留 margin（none 侧不动）
+#
+# ⚠️⚠️ 2026-09-18 **`strong` 档已撤下**（用户拍板，采纳第六轮审计二 P2-1 的**首选建议**）。
+#   **理由（审计二实测，我复核）**：`strong` 与 `weak` 在生产里返回的 `results` **完全相同**
+#   （同一批正文 + `url` + `title`），唯一差别是 `message` 那一句话；而
+#   **LLM 判官从未实现**（全仓 grep `llm_judge|judge_evidence` → 0 命中）。
+#   ⇒ 第四轮为"提高 strong 可达性"付出的全部代价（`V1_STRONG→0`、`SAR_STRONG→0.15`、
+#     **用掉唯一干净的 holdout**）换到的产物是**一句提示文案的切换**；
+#     `delegated_rate 0.810→0.524` 是**对一个不存在的组件的成本估算**。
+#   撤下后：**任何非 none 的结果都带 `WEAK_EVIDENCE_NOTE`** —— **不再有"跳过警示"的通道**。
+#   这同时关掉了第五、六两轮反复攻击的那条路（weak→strong 越级 + 跳过警示 + 拿到完整引用凭据）。
+#   **曾用常量（已删，勿再引用）**：`SAR_STRONG`（holdout 拟合值）、`V1_STRONG`、`LEVEL_STRONG`。
+SAR_NONE = 0.06       # 实测 IRR 上限 0.0490 → 留 margin
 V1_NONE = 0.35        # 实测 IRR 上限 0.286  → 留 margin（保留；实测 none 侧几乎由 SAR 承担）
 
 LEVEL_NONE = "none"       # 弃权：确定性证据缺失（A3a）
-LEVEL_WEAK = "weak"       # 返回结果 + 标注证据不足，交 LLM 裁决（A3b 的安全网）
-LEVEL_STRONG = "strong"   # 正常返回
+# `weak` = **非弃权**（判据未通过 ⇒ 返回结果 + 警示，由模型自行核验）。
+# ⚠️ `strong` 档已撤下（见上）—— `LEVEL_*` 现在**只有两档**。
+LEVEL_WEAK = "weak"
 
 
 class Evidence:
@@ -174,9 +184,22 @@ class EvidenceJudge:
         # （「注销之后公司的股份总数是多少？」—— 措辞全用常用词、但**确实可答**）降为 weak。
         # 这是词面判据的**固有张力**（无法区分「措辞通俗但可答」与「纯高频词凑数」），
         # 记为**取舍**而非缺陷。
-        if v1 > 0 and sar >= SAR_STRONG and v1 >= V1_STRONG:
-            level = LEVEL_STRONG
-        elif sar < SAR_NONE and v1 < V1_NONE:
+        #
+        # ⚠️⚠️ 2026-09-18 **`strong` 档已撤下**（用户拍板，采纳第六轮审计二 P2-1 的首选建议）。
+        # 分档现在**只有两档**：
+        #   `none` = 判据断定「没有可用证据」（弃权）
+        #   `weak` = **其余全部** —— 判据未通过，但结果仍返回，**并一律附带警示语**
+        # 被删掉的旧逻辑：`if v1 > 0 and sar >= SAR_STRONG and v1 >= V1_STRONG: strong`
+        # 撤它的理由**不是"这个条件写得不好"，而是"它闸的东西不存在"**：
+        # `strong` 与 `weak` 返回的 `results` 完全相同，唯一差别是 `message` 一句话，
+        # 而应当消费这个差别的 **LLM 判官从未实现**（全仓 grep `llm_judge|judge_evidence` 0 命中）。
+        # ⇒ 撤档的真实收益是**行为层面**的：**"跳过警示"这条通道消失了** ——
+        #   非 none 的结果一律带 `WEAK_EVIDENCE_NOTE`，第五、六两轮反复攻击的
+        #   "weak→strong 越级 + 跳过警示 + 拿到完整 url/title"不再可能发生。
+        # ⚠️ 副作用（**语义变更，必须记住**）：`delegated_rate` 从「**委派成本**」
+        #   变成「**未通过判据、但仍返回给模型的结果占比**」—— 判官并不存在，
+        #   所以它现在描述的是**风险面**，不再是成本。
+        if sar < SAR_NONE and v1 < V1_NONE:
             level = LEVEL_NONE
         else:
             level = LEVEL_WEAK

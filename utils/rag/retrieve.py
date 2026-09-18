@@ -32,7 +32,7 @@
 import json
 
 from utils.rag import store as rag_store
-from utils.rag.evidence import LEVEL_NONE, LEVEL_WEAK, EvidenceJudge
+from utils.rag.evidence import LEVEL_NONE, EvidenceJudge
 from utils.rag.hybrid import run_hybrid
 # ⚠️ 2026-09-18 第六轮审计二 P1-1：措辞抽到 `utils/rag/messages.py`（**单一事实源**）。
 # 原委：`NONE_EVIDENCE_NOTE` 改了措辞（「没有」→「未能确认」），但
@@ -103,14 +103,17 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         for r in results:
             r["url"] = None
             r["title"] = None
+    # ⚠️ 2026-09-18 **撤下 `strong` 档**后，只剩「none」与「非 none」两种情况 ——
+    # 后者**一律**带 `WEAK_EVIDENCE_NOTE` 警示。**不再有"跳过警示"的通道**：
+    # 旧 `else: message = "命中 {} 条"` 那条分支正是第五、六两轮反复攻击的入口
+    # （被判 strong 的查询跳过警示，同时拿到完整 `url` / `title` 引用凭据）。
     if not results:
         message = NO_HIT_MESSAGE
     elif ev_level == LEVEL_NONE:
         message = NONE_EVIDENCE_NOTE
-    elif ev_level == LEVEL_WEAK:
-        message = WEAK_EVIDENCE_NOTE
     else:
-        message = "命中 {} 条".format(len(results))
+        # 非 none（含历史 `strong` 取值）= 判据未通过 ⇒ 一律带警示
+        message = WEAK_EVIDENCE_NOTE
     return _payload(query, code, results, message, ev_level, evidence)
 
 

@@ -26,7 +26,7 @@
 """
 import pytest
 
-from utils.rag.evidence import EvidenceJudge, SAR_NONE, SAR_STRONG, V1_NONE, V1_STRONG
+from utils.rag.evidence import EvidenceJudge, SAR_NONE, V1_NONE
 from utils.rag.tokenize import tokenize
 
 
@@ -108,62 +108,58 @@ def test_level_none_for_out_of_domain(judge):
     assert judge.assess("如何学习滑雪").level == "none"
 
 
-def test_level_strong_for_in_domain(judge):
-    """域内可答查询 → level=strong（A3c：不得误弃权）。"""
-    assert judge.assess("茅台上半年营业收入").level == "strong"
+def test_level_weak_for_in_domain(judge):
+    """域内可答查询 → level=**weak**，不是 none（A3c：不得误弃权）。
 
-
-def test_level_weak_in_between(judge):
-    """两信号都不满足 strong、也不都低于 none → weak（交由 LLM 裁决）。"""
-    ev = judge.assess("茅台上半年营业收入")   # 先确认基线
-    assert ev.level == "strong"
-    # 构造中间态：术语部分命中（SAR 低于 strong 门槛但 V1 高于 none）
-    mid = judge.assess("营业收入同比增长测试")
-    assert mid.level in ("weak", "strong")
-
-
-def test_thresholds_are_ordered():
-    """阈值必须有序，否则判定逻辑自相矛盾。
-
-    ⚠️ 2026-09-18 修正：`V1_STRONG` 已置 **0**（V1 在 strong 侧无区分度 —— 见 evidence.py docstring），
-    故不再满足 `0 < V1_NONE < V1_STRONG`。改为：
-      - SAR 侧仍严格有序（`0 < SAR_NONE < SAR_STRONG < 1`）；
-      - `V1_STRONG` 允许为 0（= 不参与 strong 判定）；非 0 时**必须**严格大于 `V1_NONE`。
+    ⚠️ 2026-09-18 **撤下 `strong` 档**后，本用例由「应为 strong」改为「应为 weak」——
+    两档语义下 `weak` = 「判据未通过、但结果仍返回（且**一律带警示**）」；
+    它**不再表示"委派给判官"**（判官从未实现）。这里真正要防的退化是**误判 none**。
     """
-    assert 0 < SAR_NONE < SAR_STRONG < 1
-    assert 0 <= V1_STRONG <= 1
-    assert 0 < V1_NONE <= 1
-    assert V1_STRONG == 0.0 or V1_STRONG > V1_NONE, \
-        "V1_STRONG 为 0 表示弃用；否则必须严格大于 V1_NONE，否则 none/strong 分档会重叠"
+    assert judge.assess("茅台上半年营业收入").level == "weak"
 
 
-def test_strong_depends_only_on_sar_after_recalibration():
-    """`strong` 只依赖 SAR（`V1_STRONG == 0`）—— 锁住 2026-09-18 的实测重标。
+def test_no_strong_tier_is_produced(judge):
+    """**撤下 `strong` 档**：分档只出 `none` / `weak`（锁住 2026-09-18 的撤档决定）。
 
-    依据（holdout 干净验收组，21 rel + 50 neg）：
-      `sar>=0.10 且 v1>=0.45`（旧）→ 正例 **2/21** 判 strong（**档位基本失效**，三份审计都点了）
-      `sar>=0.15`（新，去掉 V1）   → 正例 **8/21**、负例 **0/50**
-      `sar>=0.12`                 → 负例 3/50（开始放水）
-    且 V1 在 strong 侧**无区分度**（正例中位 0.222 vs 负例 0.182）；字级回退修法实测会把
-    `strong_fp` 从 0.000 抬到 0.100。**本测试防止有人无依据地把 V1 加回、或把 SAR 降回 0.10。**
+    背景（第六轮审计二 P2-1）：`strong` 与 `weak` 在生产里返回的 `results` **完全相同**，
+    唯一差别是 `message` 一句话；而应消费该差别的 **LLM 判官从未实现**
+    （全仓 grep `llm_judge|judge_evidence` → 0 命中）⇒ 该档位是纯装饰，
+    却一直在消耗最稀缺的资源（干净数据、测试、说服力）。
+    **本测试防止有人无依据地把三档加回来。**
     """
-    # ⚠️ 2026-09-18（审计二 P1-2 的"加重项"）：**不再固化 `>= 0.15`**。
-    # 原因：0.15 本身是**在 holdout 上选出来的拟合值**（两份审计独立判定为违规）。
-    # 把它写成"不得低于"的硬常量，等于把**数据污染扩散成不可回退的约束** ——
-    # 将来任何诚实的重调（例如新的未触碰数据给出 0.13）都会撞红这条测试。
-    # ⇒ 改为只锁**结论**（V1 不参与 strong 判定），把阈值取值留给在 tuning 上的重调。
-    assert V1_STRONG == 0.0, "V1 不得参与 strong 判定（实测无区分度：AUC≈0.6）"
-    assert SAR_STRONG > SAR_NONE, "strong 与 none 的 SAR 边界必须有序"
+    import utils.rag.evidence as ev_mod
+    assert not hasattr(ev_mod, "LEVEL_STRONG"), "strong 档已撤下，不应再定义 LEVEL_STRONG"
+    assert not hasattr(ev_mod, "SAR_STRONG"), "strong 档已撤下，不应再定义 SAR_STRONG"
+    assert not hasattr(ev_mod, "V1_STRONG"), "strong 档已撤下，不应再定义 V1_STRONG"
+    for q in ("茅台上半年营业收入", "量子计算最新进展", "营业收入同比增长测试"):
+        assert judge.assess(q).level in ("none", "weak"), \
+            "分档只允许 none / weak（问题：%s）" % q
 
 
-def test_only_high_frequency_terms_never_strong():
-    """查询若**全是高频词**（`feature == []` → `v1 = 0.0`）→ **不得判 `strong`**（审计二 P2-2）。
+def test_none_thresholds_are_ordered():
+    """none 档阈值必须有序 —— 两档语义下**只剩这一组**阈值（撤下 strong 之后）。
 
-    机制：`V1_STRONG = 0.0` 让 `v1 >= V1_STRONG` 恒真 → 顺带移除了「**必须有特征词**」这道护栏。
-    2026-09-18 实测（真实 75 块语料）：「公司董事」(`sar=0.81`) /「公司股份」(`0.82`) /
-    「董事会议」(`0.89`) 等 **8 例**从 weak 翻成 strong（旧规则 `v1 >= 0.45` 正是在挡它），
-    且产线 `retrieve_docs` 返回 5 条**带 url** 的结果 —— 跳过警示 + 可被引用。
-    本测试用小型语料复现该机制：让「公司」「董事」成为**全语料高频词**。
+    ⚠️ 2026-09-18 **撤下 `strong` 档**（第六轮审计二 P2-1，用户拍板）：
+    `SAR_STRONG` / `V1_STRONG` **已删**，原先的
+    `test_thresholds_are_ordered` 与 `test_strong_depends_only_on_sar_after_recalibration`
+    随之**失去对象**（它们锁的都是 strong 侧的取值纪律）——后者已删除，前者改成本用例。
+    这里只锁**仍然存在**的约束：none 档两个阈值都落在 (0,1]，且**都不为 0**
+    （为 0 会退化成"恒弃权"或"恒不弃权"）。
+    """
+    assert 0 < SAR_NONE < 1, "SAR_NONE 必须落在 (0,1)"
+    assert 0 < V1_NONE <= 1, "V1_NONE 必须落在 (0,1]"
+
+
+def test_only_high_frequency_terms_yield_zero_v1():
+    """查询若**全是高频词** → `feature == []` → `v1 = 0.0`（**机制**回归锁）。
+
+    ⚠️ 2026-09-18 **撤下 `strong` 档**后，本用例**不再断言 `level != "strong"`** ——
+    那是**空洞断言**（分档已无 strong 取值，恒真）。改为锁**仍然成立的机制**：
+    这类查询的 `v1` 恒为 0，即「语料里一个**真正存在**的特征词都没有」。
+
+    历史背景（仍值得记）：正因 `v1 == 0` 而 `feature` 非空（`feature` 的定义含 `df == 0`
+    的**跨界 OOV bigram**，第六轮审计一 P1 实测），旧规则曾把「公司报告」这类查询判成
+    `strong`、跳过警示并拿到完整 url —— **该通道已随撤档关闭**。
     """
     docs = [tokenize("公司董事会决议公告第{}号".format(i)) for i in range(100)]
     j = EvidenceJudge(docs)
@@ -171,9 +167,9 @@ def test_only_high_frequency_terms_never_strong():
     feature = [t for t in toks if j.index.df.get(t, 0) <= max(1.0, j.N * 0.05)]
     assert feature == [], "前提：该查询应无特征词（全高频），实得 %s" % feature
     ev = j.assess("公司董事")
-    assert ev.v1 == 0.0, "前提：无特征词 → v1 = 0.0"
-    assert ev.level != "strong", \
-        "全高频词查询词面无判别力，不得判 strong（实测 sar=%.3f）" % ev.sar
+    assert ev.v1 == 0.0, "无特征词 → v1 必须为 0.0"
+    # 两档语义下该查询只能是 weak（有字面交集）或 none（无交集）—— **不可能是 strong**
+    assert ev.level in ("none", "weak")
 
 
 # ==================== 与旧判据的对照（防回归到 max_sim）====================
