@@ -503,14 +503,15 @@ def execute_ai_tool_v2(tool_name, arguments):
                                TOOL_ERR_EXCEPTION, tool_name, exc=e)
 
 
-def tool_output_is_error(output):
-    """（保留旧名）输出是否代表失败 —— 等价于 tool_output_error(output) is not None
-
-    背景：旧实现用 `output.startswith("工具执行失败")` 判定，而该字符串真实代码从不
-    产生（错误一律是 {"error": ...} JSON）→ tool_end.ok 恒为 True，排障被误导。
-    详见 docs/COVERAGE_DESIGN.md §11.1；回归锁见 tests/test_p0_agent_fixes.py。
-    """
-    return tool_output_error(output) is not None
+# ⚠️ 2026-09-18 第六轮审计一 P3：此处原有 `tool_output_is_error()` —— **已删除**。
+# 它的来历：P0-2 时代为修 `tool_end.ok` 恒 True 而加（见 CHANGELOG.md 第 9 行），
+# 后来改成 `tool_output_error()` 的薄封装（第 14 行）。
+# **删它的理由**：全仓**零引用** —— 连它 docstring 里写的"回归锁见
+# `tests/test_p0_agent_fixes.py`"也不成立（那个文件断言的是 `payload["ok"]`，
+# 测的是 `tool_output_error`）。**形状与上一轮那条 `load_holdout()` 死代码同族**：
+# 名字留着、指向的保护并不存在。
+# 判定"输出是否代表失败"现在统一走 `tool_output_error(output) is not None`。
+# git 历史里仍可取回本函数。
 
 
 # ==================== 兼容别名 ====================

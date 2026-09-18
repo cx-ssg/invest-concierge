@@ -89,10 +89,10 @@ def embed_texts(texts, model=MODEL, timeout=DEFAULT_TIMEOUT):
     return embs
 
 
-def embed_one(text, model=MODEL, timeout=DEFAULT_TIMEOUT):
-    """单条便捷封装。"""
-    vecs = embed_texts([text], model=model, timeout=timeout)
-    return vecs[0] if vecs else []
+# ⚠️ 2026-09-18 第六轮审计一 P3：此处原有 `embed_one()`（"单条便捷封装"）—— **已删除**。
+# **理由**：全仓**零引用**。它只是 `embed_texts([text])[0]` 的一行糖 ——
+# 将来真要用时一行即可重建（git 历史里可找回）。
+# **留着它的代价不是那三行代码，而是"看起来在岗、其实不在岗"这个信号本身。**
 
 
 def _embed_via_backup(texts, model=BACKUP_EMBED_MODEL, timeout=DEFAULT_TIMEOUT):

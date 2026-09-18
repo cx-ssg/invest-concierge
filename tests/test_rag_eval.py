@@ -162,23 +162,36 @@ def test_main_cli_path_actually_uses_load_holdout(tmp_path, monkeypatch):
     assert "负例为空" in str(ei.value)
 
 
-def test_main_cli_path_rejects_v1_negative(tmp_path, monkeypatch):
-    """CLI 路径同样必须拦住混入的 v1 负例（同上：锁调用链，不锁函数）。
+def test_main_cli_path_routes_through_load_holdout(tmp_path, monkeypatch):
+    """**强锁调用链**：`main()` 必须**真的调用** `load_holdout()`（审计二 U9 的修正）。
 
-    ⚠️ 2026-09-18：`rel` 补成非空（理由同 `test_load_holdout_rejects_v1_negative`）。
+    ⚠️ 本测试原名为 `test_main_cli_path_rejects_v1_negative`，**名不副实**：
+    它只断言「`main()` 抛 `ValueError` 且消息含 `irr-0001`」——
+    而**把接线改回旧写法**（`load()` + `assert_clean_holdout()`）**它照样通过**
+    （因为 `assert_clean_holdout([v1 行])` 本身就会抛）。
+    也就是说，它测的是**那个断言的行为**，**不是 `main()` 的接线** ——
+    与上一轮 `load_holdout()` 死代码事件是同一个盲区。
+
+    本测试改为**直接监视 `load_holdout` 是否被调用** ⇒ 接线一旦改回去必然变红。
+    （姊妹测试 `test_main_cli_path_actually_uses_load_holdout` 仍然有效：
+    **空负例只有 `load_holdout()` 里那道门才拦得住** —— `assert_clean_holdout([])` 不抛。）
     """
     import pytest
     monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
-    (tmp_path / "queries_holdout_rel.json").write_text(
-        json.dumps([{"id": "rel-0001", "query": "x", "answer_chunk_ids": [1],
-                     "batch": "clean"}], ensure_ascii=False), encoding="utf-8")
-    (tmp_path / "queries_holdout_irr.json").write_text(
-        json.dumps([{"id": "irr-0001", "kind": "near_miss", "query": "x",
-                     "answer_chunk_ids": [], "batch": "v1"}], ensure_ascii=False),
-        encoding="utf-8")
-    with pytest.raises(ValueError) as ei:
+    called = []
+    real = ev.load_holdout
+
+    def spy():
+        called.append(True)
+        return real()
+
+    monkeypatch.setattr(ev, "load_holdout", spy)          # ← 模块全局名，正是 main() 调的那个
+    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_irr.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError):
         ev.main(["--split", "holdout"])
-    assert "irr-0001" in str(ei.value)
+    assert called, ("`main()` 没有调用 `load_holdout()` —— 接线被改回了旧写法"
+                    "（`load()` + `assert_clean_holdout()`），审计二 U9 指出的正是这个盲区")
 
 
 def test_recall_and_mrr_when_answer_returned():
