@@ -2,13 +2,20 @@
 """检索评测器 —— 按 `tests/golden/rag/README.md` 的指标口径打分。
 
 指标（替代旧口径的"可分 / 不可分"）：
+
+- `A3a 域外主动弃权`  **主结论** —— 域外查询被主动弃权的比例（**不受 strong 档可达性影响**）
 - `over_abstain_rate` 域内可答却被判 none（**召回护栏** A3c）
-- `strong_fp_rate`     应弃权却判 strong（**A3a 主指标**）
-- `weak_fp_rate`       应弃权判 weak（可接受但不理想：会进生成上下文并标注证据不足）
+- `strong_fp_rate`    应弃权却判 strong —— ⚠️ **仅负例侧敏感**，且在本阈值下 holdout 上
+                      **数学上不可能触发**（最大负例 SAR 0.1382 < 0.15）。它**不是**主指标
+- `正例 strong 率`    strong 档**可达性**的唯一报警量（< 0.20 会打 `[!]`）
+- `delegated_rate`    落 weak 的比例（**成本指标**，不是失败）
 - `Recall@k` / `MRR@10` 答案块是否被召回、排多前（块级标注才有）
+- `trusted_recall`    ⚠️ **派生量** ≡ `Recall@k − over_abstain`，不是独立测量
+
+（旧口径的 `weak_fp_rate` 已删 —— weak 是**委派点**，不是失败；见 README 的标注规范。）
 
 用法：
-  python scripts/rag_eval.py                    # 验收（默认 holdout）
+  python scripts/rag_eval.py                    # holdout（⚠️ 已用于选 strong 阈值 = **拟合集**）
   python scripts/rag_eval.py --split tuning     # 调参（会打印警告）
   python scripts/rag_eval.py --scan             # 扫 SAR/V1 阈值出曲线
 """
@@ -65,6 +72,13 @@ def load_holdout():
     「没有负例、却看起来干净」的报告可以静默产出。故此处显式拒绝空集。
     """
     rel, irr = load("holdout", "rel"), load("holdout", "irr")
+    # ⚠️ 2026-09-18 第六轮审计二 P1-2：**上一轮只堵了负例一侧 —— 正例一侧是镜像洞**。
+    # `rel` 为空时 `n_rel = max(0, 1) = 1` ⇒ `Recall@5 = 0`、`trusted_recall = 0`、
+    # `strong_rel_rate = 0`，**而 A3a 仍打印 `20/20 = 1.000 <<< 主结论`**，无异常、`EXIT=0`
+    # —— 「没有正例、却看起来干净」的报告**仍可静默产出**，形状与上一轮修掉的那条完全一致。
+    if not rel:
+        raise ValueError("holdout 正例为空（queries_holdout_rel.json 缺失或为空）—— "
+                         "空正例会让 Recall/trusted_recall 静默归零，而 A3a 仍显示满分")
     if not irr:
         raise ValueError("holdout 负例为空（queries_holdout_irr.json 缺失或为空）—— "
                          "不得产出「没有负例却看起来干净」的验收报告")
@@ -84,10 +98,13 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # 指标少算一部分却看不出来（2026-09-17 新增用例时真实踩到）。
         raise ValueError("qvecs 条数 %d 与查询总数 %d 不一致 —— 静默截断会算错指标"
                          % (len(qvecs), n_expect))
-    chunk_pos = {m["chunk_id"]: i for i, m in enumerate(meta)}
+    # ⚠️ 2026-09-18 第六轮审计二 P3-1：这里原有 `chunk_pos = {m["chunk_id"]: i ...}`，
+    # 但 `evaluate()` **从未使用它**（全仓仅此一处）→ 已删（死变量）。
+    # 这类"看起来在岗、其实不在岗"的代码是 `load_holdout` 死代码的同族，一并清掉。
 
     over_abstain = 0
     recall_hits, trusted_hits, strong_rel, rr = 0, 0, 0, []
+    tool_recall_hits, hard_stop = 0, 0
     for r, qv in zip(rows_rel, qvecs[:len(rows_rel)]):
         ev = judge.assess(r["query"])
         if ev.level == LEVEL_STRONG:
@@ -113,6 +130,23 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
             recall_hits += 1
             if ev.level != LEVEL_NONE:
                 trusted_hits += 1
+        # ⚠️ 2026-09-18 第六轮审计二（**一处改动同时关掉 U10 与「评测绕过被测对象」**）：
+        # 上面那次是 **`judge=None` 的裸检索**；而**工具的真实形态**是 `judge=judge`
+        # （`retrieve_docs` 就是这么调的）。此前评测**从不经过它**，于是：
+        #   ① **分层硬停**（`hybrid.py`：零 bigram 交集 → 物理回空）在评测里**永不触发**
+        #      —— 它**不改变 `level`**（同一个 evidence 早退），而 `judge=None` 又绕开判据，
+        #      所以覆盖率从 5/20 掉到 0，**没有任何指标会红**；
+        #   ② 工具层的任何退化（返空 / 排序错 / `code` 过滤失效）离线指标**一个都不会动**。
+        # 现在补跑一次真实形态，产出 `tool_recall`（经过被测对象的召回）
+        # 与 `hard_stop_count`（硬停触发数，此前完全不可见）。
+        # 当下 holdout 上 `tool_recall` **应当 == trusted_recall**（0 条正例被硬停）——
+        # **一旦不等，就是真信号**。
+        tool_order, _, _ = run_hybrid(r["query"], matrix, meta, k=max(k, 10),
+                                      query_vec=qv, judge=judge)
+        if not tool_order:
+            hard_stop += 1
+        if gold & {meta[i]["chunk_id"] for i in tool_order[:k]}:
+            tool_recall_hits += 1
         all10 = [meta[i]["chunk_id"] for i in order[:10]]
         rank = next((j + 1 for j, c in enumerate(all10) if c in gold), None)
         rr.append(1.0 / rank if rank else 0.0)
@@ -152,6 +186,15 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # 与 `Recall@k` 之差 = 「检索到了但判据没采信」的比例（这才是能随判据退化变红的量：
         # 判官恒 none → 0/n_rel；而旧 `guarded_recall` 在同样场景下纹丝不动）。
         "trusted_recall": trusted_hits / n_rel,
+        # ⚠️ 2026-09-18 第六轮审计一 P2：`trusted_recall` 是**派生量** ——
+        # 当前数据上它恒等于 `Recall@k − over_abstain`（1.000−0.095=0.905），
+        # 且只依赖 none 边界 ⇒ 对 strong 档改动**完全无反应**。不要在报告里当独立指标并列。
+        # 2026-09-18 第六轮审计二：**唯一经过被测对象的检索指标** ——
+        # `judge=judge` + 分层硬停，即 `retrieve_docs` 的真实调用形态。
+        # 此前评测从不走这条路 ⇒ 工具层退化（返空/排序错/硬停误触发）在离线指标上不可见。
+        # 当下 holdout 上它**应当 == trusted_recall**（正例 0 条被硬停）；**一旦不等就是真信号**。
+        "tool_recall": tool_recall_hits / n_rel,
+        "hard_stop_count": hard_stop,
         # 2026-09-18（**两份审计都要求打印**）：**正例 strong 率** —— strong 带的正例侧报警量。
         # `strong_fp` 的分母是负例、本轮改动没碰负例侧 → 它对「strong 档是否仍可达」结构性免疫。
         "strong_rel_rate": strong_rel / n_rel,
@@ -162,31 +205,44 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
 
 
 def scan(rows_rel, rows_irr, judge):
-    """扫 **none 档**阈值（`SAR_NONE` / `V1_NONE`），输出权衡曲线。
+    """扫**两组阈值**，输出权衡曲线。
 
-    为什么扫 none 档而不是 strong 档：strong 误放行已经很低
-    （验收组按 kind 分列全为 0：ood 0/20、unans 0/15、near_miss 0/15），
-    真正的暴露面在 **weak 档** —— 它仍会把结果送进生成上下文。
-    ⚠️ 2026-09-17 订正：本行原写"holdout 首跑 2.8%"，那是 §4b② 已判定为**口径错误的混池数字**。
-    提高 none 门槛能把 weak 压向 none，代价是 `over_abstain`（误杀相关查询）上升。
+    ⚠️ 2026-09-18 第六轮审计二 P2-2 / U11：此前**只扫 none 档**（`SAR_NONE`/`V1_NONE`），
+    **没有 strong 档维度** —— 而 `evidence.py` 的注释却写「改前必须先重跑
+    `scripts/rag_threshold_probe.py`」，那个工具**从不扫 `SAR_STRONG`**（硬编码 4+4 条老查询）
+    ⇒ **是个死指针**。这正是「`SAR_STRONG=0.15` 只能在 holdout 上选」的**根因**：
+    **标定工具缺失 → 被迫用验收池**。现在补上 strong 维度。
 
-    ⚠️ 口径修正（2026-09-17）：旧版 `oa` 算的是"非 strong"（含 weak），
-    与 `evaluate()` 的 `over_abstain`（只算 none）不是同一个量 —— 两处口径必须一致。
+    **纪律**：两个池**互相留出** —— 在 tuning 上定值，用 holdout 报**一次**（反之亦然）；
+    **绝不在同一个池上既选阈值又报成绩**。
 
-    返回 `[(sar_none, v1_none, weak_fp, over_abstain), ...]`：
-    - `weak_fp` = 应弃权却**未判 none** 的比例（= 会进入生成上下文的暴露面）
-    - `over_abstain` = 域内可答却被判 none 的比例（召回护栏）
+    `weak_fp` 口径订正（2026-09-17）：旧版 `oa` 算的是"非 strong"（含 weak），
+    与 `evaluate()` 的 `over_abstain`（只算 none）**不是同一个量** —— 两处口径必须一致。
+
+    返回 `{"none": [...], "strong": [...]}`：
+    - none 档 `(sar_none, v1_none, weak_fp, over_abstain)`
+      `weak_fp` = 应弃权却**未判 none** 的比例（= 会进入生成上下文的暴露面）
+      `over_abstain` = 域内可答却被判 none 的比例（召回护栏）
+    - strong 档 `(sar_strong, 正例 strong 率, 负例 strong 数, 负例 strong 率)`
+      ⚠️ 判据与生产一致：**`v1 > 0`**（第六轮审计一 P1 起）—— 不是 `feature` 非空。
     """
     a_rel = [judge.assess(r["query"]) for r in rows_rel]
     a_irr = [judge.assess(r["query"]) for r in rows_irr]
     n_rel, n_irr = max(len(a_rel), 1), max(len(a_irr), 1)
-    out = []
+
+    none_out = []
     for sar_n in (0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40):
         for v1_n in (0.35, 0.45, 0.55, 0.65, 0.75):
             irr_none = sum(1 for e in a_irr if e.sar < sar_n and e.v1 < v1_n)
             oa = sum(1 for e in a_rel if e.sar < sar_n and e.v1 < v1_n)
-            out.append((sar_n, v1_n, (len(a_irr) - irr_none) / n_irr, oa / n_rel))
-    return out
+            none_out.append((sar_n, v1_n, (len(a_irr) - irr_none) / n_irr, oa / n_rel))
+
+    strong_out = []
+    for sar_s in (0.10, 0.12, 0.14, 0.15, 0.16, 0.18, 0.20, 0.25):
+        rel_s = sum(1 for e in a_rel if e.v1 > 0 and e.sar >= sar_s)
+        irr_s = sum(1 for e in a_irr if e.v1 > 0 and e.sar >= sar_s)
+        strong_out.append((sar_s, rel_s / n_rel, irr_s, irr_s / n_irr))
+    return {"none": none_out, "strong": strong_out}
 
 
 def main(argv=None):
@@ -209,7 +265,12 @@ def main(argv=None):
     if args.split == "tuning":
         print("[eval] ⚠️ 本组已用于调参，**不得作为验收依据**（只能回答「阈值该定在哪」）")
     else:
-        print("[eval] 验收组（未参与调参）")
+        # ⚠️ 2026-09-18 第六轮审计二 P2-3：此处原印「验收组（未参与调参）」——
+        # 但 holdout **已被用于选择 `SAR_STRONG`**（第五轮两份审计独立判定为违规）。
+        # 报告 §4g 早已改口径，**横幅却还印着旧口径** —— 而横幅是使用者/审计方
+        # **第一眼**看到的字符串。代码与文档的口径必须一致。
+        print("[eval] holdout —— ⚠️ 已用于选择 strong 阈值（**拟合集**），"
+              "strong 档可达性不得作为验收结论")
 
     # ⚠️ 2026-09-18（审计二 P1-1 抓出）：**这里才是 `load_holdout()` 唯一的调用点**。
     # 我上一轮声称「`main()` 改走它」，但那个 edit 被工具拒绝后**我只补发了 reconfigure**，
@@ -263,11 +324,25 @@ def main(argv=None):
         # 2026-09-18（审计 B 的 P1-2）：修复后三个 headline 指标在「判据过度拒绝」时**全是满分**
         # （A3a 20/20、strong_fp 0.000、Recall 不变）—— 盲区是单向的。这里给一个下限告警。
         print("  [!] over_abstain_rate > 0.20 —— 闸门可能在过度拒绝（该方向上无其他指标会报警）")
-    print("  --- 检索侧（judge=None 裸检索）---")
-    print("  Recall@%d          = %.3f   (检索器本身能力 —— 旧版在 none 档 `continue`，分子被少算)"
+    print("  --- 检索侧 ---")
+    print("  Recall@%d          = %.3f   (judge=None **裸检索**能力 —— 旧版在 none 档 `continue`，分子被少算)"
           % (TOP_K, m["Recall@%d" % TOP_K]))
-    print("  trusted_recall    = %.3f   (gold 在 top-k **且** 判据采信 —— 判据退化时它会变红)"
+    print("  tool_recall       = %.3f   (**工具真实形态**：judge 生效 + 分层硬停 —— 评测此前从不走这条路；"
+          % m["tool_recall"])
+    print("                                它是**唯一经过被测对象**的检索指标)")
+    if abs(m["tool_recall"] - m["Recall@%d" % TOP_K]) > 1e-9:
+        # ⚠️ 对照物是 **`Recall@k`**（**同义**：都是"gold 是否在 top-k"），**不是 `trusted_recall`** ——
+        # 后者额外要求 `level != none`，两者**定义不同**，差值反映的是判据弃权、不是工具退化。
+        # （第六轮审计二的建议原文写的是"应当等于 trusted_recall"，此处按定义更正。）
+        # 本阈值下硬停通常为 0 ⇒ 二者**应当相等**；不等即「被测对象」与「裸检索」出现真实分歧。
+        print("  [!] tool_recall != Recall@k —— **被测对象与裸检索出现分歧**（对照下方硬停计数）")
+    print("  硬停触发          = %d/%d   (零 bigram 交集 → 物理回空；此前在评测里**完全不可见** ——"
+          % (m["hard_stop_count"], m["n_rel"]))
+    print("                                覆盖率从 5/20 掉到 0 也不会有别的指标变红)")
+    print("  trusted_recall    = %.3f   (gold 在 top-k **且** 判据采信 —— 判据退化时它会变红；"
           % m["trusted_recall"])
+    print("                                ⚠️ **派生量**：当前恒等于 `Recall@k − over_abstain`，"
+          "对 strong 档改动完全无反应，勿当独立指标并列)")
     print("  MRR@10            = %.3f" % m["MRR@10"])
     print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
     for kind, d in sorted(m["by_kind"].items()):
@@ -275,12 +350,23 @@ def main(argv=None):
               (kind, d["n"], d["none"], d["weak"], d["strong"]))
 
     if args.scan:
+        curves = scan(rel, irr, judge)
         print("[eval] --- none 档扫描 (sar_none, v1_none) -> "
               "(weak_fp=未判 none 的负例比例, over_abstain) ---")
-        for sar_n, v1_n, wfp, oa in scan(rel, irr, judge):
+        for sar_n, v1_n, wfp, oa in curves["none"]:
             flag = "  ← 当前" if (abs(sar_n - ev_mod.SAR_NONE) < 1e-9
                                   and abs(v1_n - ev_mod.V1_NONE) < 1e-9) else ""
             print("  sar<%.2f v1<%.2f -> weak_fp=%.3f oa=%.3f%s" % (sar_n, v1_n, wfp, oa, flag))
+        # ⚠️ 2026-09-18 第六轮审计二 P2-2 / U11：**strong 档扫描此前根本不存在** ——
+        # 于是 `SAR_STRONG` 只能用 holdout 选，**该验收池因此报废**。
+        # **纪律**：在 tuning 上定值 → 换另一个池报**一次**；绝不在同一池上既选阈值又报成绩。
+        print("[eval] --- strong 档扫描 (sar_strong, v1>0) -> "
+              "(正例 strong 率, 负例 strong 条数, 负例 strong 率) ---")
+        print("[eval]     ⚠️ 先用 --split tuning 定值，再 --split holdout 报**一次**；别反过来")
+        for sar_s, rel_rate, irr_n, irr_rate in curves["strong"]:
+            flag = "  ← 当前" if abs(sar_s - ev_mod.SAR_STRONG) < 1e-9 else ""
+            print("  sar>=%.2f -> 正例 %.3f   负例 %d 条 (%.3f)%s"
+                  % (sar_s, rel_rate, irr_n, irr_rate, flag))
     print("[eval] RESULT: OK")
     return 0
 

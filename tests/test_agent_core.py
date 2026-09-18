@@ -49,7 +49,12 @@ def test_agent_run_plan_loop_tool_trace_ge_3_in_order():
     assert all(t["output"] for t in r["tool_trace"])               # 每步结果回填
     # 规划提示词：先计划 + 防幻觉守则已进 system prompt
     assert "执行计划" in calls[0][0]["content"]
-    assert "数据不可得" in calls[0][0]["content"]
+    # ⚠️ 2026-09-18 第六轮审计二 P1-1：本行原为 `assert "数据不可得" in ...` ——
+    # **它锁的正是那句假陈述**。对「判据假阴性、但语料确有答案」的查询
+    # （rel-0014 gold 在 rank 4 / rel-0015 在 rank 1），命令模型说"该数据不可得"
+    # 就是**关于语料内容的假断言**。现改锁新契约（措辞源头：`utils/rag/messages.py`）。
+    assert "未能确认" in calls[0][0]["content"]
+    assert "不得断言" in calls[0][0]["content"]
     # 回填结构：第二轮起 history 含 assistant(tool_calls) 与 role=tool 消息
     assert any(m.get("role") == "tool" for m in calls[1])
     assert any(m.get("role") == "assistant" and m.get("tool_calls") for m in calls[1])

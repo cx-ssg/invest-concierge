@@ -521,22 +521,29 @@ execute_ai_tool = execute_ai_tool_v2
 
 # ==================== Agent 规划循环 ====================
 
-AGENT_SYSTEM_PROMPT = """你是"基金小助手"，一位越用越懂你的投资私人顾问。
+from utils.rag.messages import NONE_EVIDENCE_DIRECTIVE
+
+# ⚠️ 2026-09-18 第六轮审计二 P1-1：第 3 条的命令措辞改为**从 `messages` 取**。
+# 此前这里（**系统提示词，权威高于工具返回值**）写着「必须明确告诉用户"该数据不可得"」，
+# 而 `retrieve.py` 的 `NONE_EVIDENCE_NOTE` 早已改成「关联性**未能确认**」——
+# ⇒ 对「判据假阴性、但语料确有答案」的查询（`rel-0014` gold 在 rank 4 / `rel-0015` 在 rank 1），
+#   模型会照**更高权威**的指令发出**关于语料内容的假断言**。现在两处同源。
+AGENT_SYSTEM_PROMPT = ("""你是"基金小助手"，一位越用越懂你的投资私人顾问。
 你可以调用工具实时查询基金、大盘、个股诊断/估值/排雷/护城河、市场情绪、投资日记等数据。
 
 ## 执行规范（必须遵守）
 1. 复杂问题先简述执行计划（1-3 步：打算做什么、依次调用哪些工具），再逐步执行。
 2. 每一步工具返回后，基于真实返回的数据继续推理，可以连续调用多个工具组合分析。
-3. 防幻觉守则：工具返回 {"error": ...}、空数据/全 None、**或 `evidence_level` 为 "none"**
-   （证据判据未通过）时，必须明确告诉用户"该数据不可得"并说明原因；绝不猜测、绝不编造数据。
+3. 防幻觉守则：""" + NONE_EVIDENCE_DIRECTIVE + """
    注：`retrieve_docs` 的结果里若带 `evidence_level: "none"`，**即使 results 非空**也按本条处理 ——
    2026-09-18 起 none 档不再无条件清空 results（避免丢掉已检索到的正确证据），
-   故本条是该档位的**行为约束**（另见 utils/rag/retrieve.py 的 NONE_EVIDENCE_NOTE）。
+   故本条是该档位的**行为约束**（措辞与 `utils/rag/messages.py` 的 `NONE_EVIDENCE_NOTE` **同源**，
+   不再两处各写一半）。
 4. 合规守则：只做分析辅助，不提供自动交易、不荐股；不给"买入/卖出"指令，
    只给分析依据与风险提示（延续免责声明）。
 
 ## 输出
-用 Markdown 组织回答，简洁清晰，重点突出。"""
+用 Markdown 组织回答，简洁清晰，重点突出。""")
 
 
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,

@@ -77,7 +77,14 @@ def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
     #    `rel-0014`(bm25max=4.57) / `rel-0015`(9.21) 都 > 0 → **不会被硬停**，17 日的修复不回退。
     #    ⚠️ 对 `in_domain_unanswerable` / `near_miss` 无效（各 0/15，词面全是域内词）
     #    —— 那两类只能靠 LLM 判官，不属本闸门职责。
-    if (evidence is not None and evidence.level == LEVEL_NONE
+    #    ⚠️ 2026-09-18 第六轮审计二 U8：本条件有**两处**要记住：
+    #    ① `level == LEVEL_NONE` 这一项**恒被后一项蕴含** —— `bm25max == 0` ⇒ 所有 token
+    #       `df == 0` ⇒ `v1 == 0` 且 `sar == 0` ⇒ level 必为 none。所以「分层硬停」实际
+    #       只有**一层**（纯字面交集检查），且它**完全绕开判据**。这里保留 level 判断是
+    #       **防御式冗余**：若将来 sar 公式变化使「sar>0」与「bm25max>0」不再等价，这层仍能挡。
+    #    ② `is not None` 是必需的（`Evidence.bm25_scores` 默认 **None = 无分数信息**）——
+    #       否则没传 scores 的构造点（测试替身/缓存层）会被**误硬停**。
+    if (evidence is not None and evidence.bm25_scores is not None
             and not any(evidence.bm25_scores)):
         return [], {}, evidence          # 零字面交集 → 恢复机器强制（A3a）
 

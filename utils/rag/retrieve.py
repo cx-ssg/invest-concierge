@@ -34,22 +34,12 @@ import json
 from utils.rag import store as rag_store
 from utils.rag.evidence import LEVEL_NONE, LEVEL_WEAK, EvidenceJudge
 from utils.rag.hybrid import run_hybrid
+# ⚠️ 2026-09-18 第六轮审计二 P1-1：措辞抽到 `utils/rag/messages.py`（**单一事实源**）。
+# 原委：`NONE_EVIDENCE_NOTE` 改了措辞（「没有」→「未能确认」），但
+# `agent_core.AGENT_SYSTEM_PROMPT` 里**权威更高**的同一句仍命令模型
+# 「必须明确告诉用户"该数据不可得"」⇒ 假陈述从高权威处重现。两边现已同源。
+from utils.rag.messages import NO_HIT_MESSAGE, NONE_EVIDENCE_NOTE, WEAK_EVIDENCE_NOTE
 from utils.rag.tokenize import tokenize
-
-# 无命中时的显式提示：把「没有」这件事说清楚，模型才不会拿训练数据硬编
-NO_HIT_MESSAGE = "未找到相关公告或研报 —— 请如实告知用户知识库中没有相关内容，不要凭记忆编造"
-# 证据不足档（A3a）：**不是无条件空结果**，而是「返回候选 + 最强警示」——
-# 例外见 `hybrid.run_hybrid` 的「分层硬停」（零 bigram 交集 → 仍物理回空）。
-#
-# ⚠️ 2026-09-18 措辞订正（审计 A 的 P1-2）：旧文案写「请如实告知用户**知识库中没有相关内容**」——
-# 这对 `rel-0014`（gold 在 rank 4）/ `rel-0015`（gold 在 **rank 1**）是**假陈述**：语料里明明有答案。
-# 该警示的语义本该是「**我的字面判据没通过**」，而不是关于语料内容的事实断言。
-# 现改为诚实的不确定性措辞：把「没有」降级为「**未能确认**」。
-NONE_EVIDENCE_NOTE = ("证据判据未通过（与问题的字面重合不足）—— 以下候选的关联性**未能确认**，"
-                      "引用前请自行核验；若候选不足以支撑回答，请如实说明未找到，不要据此推断或编造")
-# 证据不足档（A3b 的安全网）：结果照给，但明确要求模型谨慎
-WEAK_EVIDENCE_NOTE = ("检索到的内容与问题只有字面弱相关（证据不足档）—— 引用前请自行核验；"
-                      "若无法支撑回答，请如实说明未找到，不要据此推断")
 
 
 def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
@@ -125,12 +115,21 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
 
 
 def _payload(query, code, results, message, evidence_level=None, evidence=None):
+    # ⚠️ 2026-09-18 第六轮审计一 P2：**两个安全字段必须排在 `results` 之前**。
+    # `agent_core._truncate`（`max_len=8000`）对超长返回值是**从尾部**截断的，
+    # 而 `results` 是体积最大的字段：一旦超限，`message`（警示语）与 `evidence_level`（档位）
+    # 会**先被切掉**，且切开后 JSON **不可解析**（模型拿到一段坏 JSON）。
+    # 实测：169 条 golden 查询的最大 payload = **5522** 字符，headroom 仅 **1.45×**。
+    # 可达性：`chunker.CHUNK_HARD_MAX * 3 = 3600` 允许表格块那么大 ——
+    # 接入含 markdown 表格的财报/半年报后，5 个表格块 ≈ 18000 字符即必然触发。
+    # 届时表现是「模型既看不到警示语、也看不到档位」—— 正好打掉 A3a 的两个支点，
+    # 且**没有任何指标会红**。
     return json.dumps({
         "query": query,
         "code": code,
-        "results": results,
         "message": message,
         "evidence_level": evidence_level,
         "evidence": ({"sar": round(evidence.sar, 4), "v1": round(evidence.v1, 3)}
                      if evidence is not None else None),
+        "results": results,
     }, ensure_ascii=False, default=str)

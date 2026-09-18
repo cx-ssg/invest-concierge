@@ -85,7 +85,11 @@ def test_load_holdout_rejects_empty_negative_set(tmp_path, monkeypatch):
     `strong_fp=0.000`，而 `main()` 里 A3a 主结论那行根本不打印。
     """
     import pytest
-    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    # ⚠️ 2026-09-18：`rel` 必须非空 —— 本测试的目标是「空**负例**」，
+    # rel 为空会先撞上另一道门（见 `test_load_holdout_rejects_empty_positive_set`）。
+    (tmp_path / "queries_holdout_rel.json").write_text(
+        json.dumps([{"id": "rel-0001", "query": "x", "answer_chunk_ids": [1],
+                     "batch": "clean"}], ensure_ascii=False), encoding="utf-8")
     (tmp_path / "queries_holdout_irr.json").write_text("[]", encoding="utf-8")
     monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
     with pytest.raises(ValueError) as ei:
@@ -94,9 +98,15 @@ def test_load_holdout_rejects_empty_negative_set(tmp_path, monkeypatch):
 
 
 def test_load_holdout_rejects_v1_negative(tmp_path, monkeypatch):
-    """`load_holdout()` 必须对混入的 v1 负例报错 —— 校验下沉到数据入口，绕过 CLI 也绕不过。"""
+    """`load_holdout()` 必须对混入的 v1 负例报错 —— 校验下沉到数据入口，绕过 CLI 也绕不过。
+
+    ⚠️ 2026-09-18：`rel` 必须**非空** —— 否则会先撞上「空正例」那道门
+    （见 `test_load_holdout_rejects_empty_positive_set`），本测试就测不到它的目标（v1 负例）。
+    """
     import pytest
-    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_rel.json").write_text(
+        json.dumps([{"id": "rel-0001", "query": "x", "answer_chunk_ids": [1],
+                     "batch": "clean"}], ensure_ascii=False), encoding="utf-8")
     (tmp_path / "queries_holdout_irr.json").write_text(
         json.dumps([{"id": "irr-0001", "kind": "near_miss", "query": "x",
                      "answer_chunk_ids": [], "batch": "v1"}], ensure_ascii=False),
@@ -107,6 +117,30 @@ def test_load_holdout_rejects_v1_negative(tmp_path, monkeypatch):
     assert "irr-0001" in str(ei.value)
 
 
+def test_load_holdout_rejects_empty_positive_set(tmp_path, monkeypatch):
+    """**空正例**同样必须被拦 —— 第六轮审计二 P1-2 的「镜像洞」。
+
+    上一轮只堵了负例一侧（`if not irr: raise`），`rel` 完全裸奔：
+    空正例时 `n_rel = max(0, 1) = 1` ⇒ `Recall@5 = 0`、`trusted_recall = 0`、
+    `strong_rel_rate = 0`，**而 A3a 仍打印 `20/20 = 1.000 <<< 主结论`**，
+    无异常、`EXIT=0` —— 「没有正例、却看起来干净」的报告可以**静默产出**。
+    本测试锁这道新门（函数入口 + CLI 入口各一次）。
+    """
+    import pytest
+    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_irr.json").write_text(
+        json.dumps([{"id": "irr-0001", "kind": "near_miss", "query": "x",
+                     "answer_chunk_ids": [], "batch": "clean"}], ensure_ascii=False),
+        encoding="utf-8")
+    monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
+    with pytest.raises(ValueError) as ei:
+        ev.load_holdout()
+    assert "正例为空" in str(ei.value)
+    with pytest.raises(ValueError) as ei2:
+        ev.main(["--split", "holdout"])          # ← CLI 入口也必须拦住
+    assert "正例为空" in str(ei2.value)
+
+
 def test_main_cli_path_actually_uses_load_holdout(tmp_path, monkeypatch):
     """**走 CLI 路径**验证 holdout 校验真的接线了（审计二 P1-1 的回归锁）。
 
@@ -114,10 +148,14 @@ def test_main_cli_path_actually_uses_load_holdout(tmp_path, monkeypatch):
     `load()` + `assert_clean_holdout()`，而上面两条测试测的是**函数本身**，
     于是「`main()` 改走它」这个声称与实际不符、套件却**全绿**。
     ⇒ **本测试锁的是调用链，不是函数**：把 `main()` 里的接线改回去，它必须变红。
+
+    ⚠️ 2026-09-18：`rel` 补成非空 —— 本测试的目标是「空**负例**」，rel 为空会先撞另一道门。
     """
     import pytest
     monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
-    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_rel.json").write_text(
+        json.dumps([{"id": "rel-0001", "query": "x", "answer_chunk_ids": [1],
+                     "batch": "clean"}], ensure_ascii=False), encoding="utf-8")
     (tmp_path / "queries_holdout_irr.json").write_text("[]", encoding="utf-8")
     with pytest.raises(ValueError) as ei:
         ev.main(["--split", "holdout"])          # ← 走 CLI 入口，不是直调函数
@@ -125,10 +163,15 @@ def test_main_cli_path_actually_uses_load_holdout(tmp_path, monkeypatch):
 
 
 def test_main_cli_path_rejects_v1_negative(tmp_path, monkeypatch):
-    """CLI 路径同样必须拦住混入的 v1 负例（同上：锁调用链，不锁函数）。"""
+    """CLI 路径同样必须拦住混入的 v1 负例（同上：锁调用链，不锁函数）。
+
+    ⚠️ 2026-09-18：`rel` 补成非空（理由同 `test_load_holdout_rejects_v1_negative`）。
+    """
     import pytest
     monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
-    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_rel.json").write_text(
+        json.dumps([{"id": "rel-0001", "query": "x", "answer_chunk_ids": [1],
+                     "batch": "clean"}], ensure_ascii=False), encoding="utf-8")
     (tmp_path / "queries_holdout_irr.json").write_text(
         json.dumps([{"id": "irr-0001", "kind": "near_miss", "query": "x",
                      "answer_chunk_ids": [], "batch": "v1"}], ensure_ascii=False),
@@ -200,13 +243,18 @@ def test_evaluate_rejects_qvec_length_mismatch():
 
 
 def test_scan_returns_curve_grid():
-    """扫描必须覆盖多个 (sar, v1) 组合，供按代价选工作点。"""
+    """扫描必须覆盖多个组合，供按代价选工作点；**两组曲线都要有**（审计二 P2-2）。"""
     judge = _FakeJudge({"b": Evidence(0.2, 0.8, "strong")})
-    pts = ev.scan([{"query": "b", "answer_chunk_ids": []}],
-                  [{"query": "a", "answer_chunk_ids": []}], judge)
-    assert len(pts) >= 10, "曲线点太少无法选工作点"
-    assert all(len(p) == 4 for p in pts)
-    assert any(fp == 0.0 for _, _, fp, _ in pts), "扫描里应存在零误放行的点"
+    curves = ev.scan([{"query": "b", "answer_chunk_ids": []}],
+                     [{"query": "a", "answer_chunk_ids": []}], judge)
+    # ⚠️ 2026-09-18 第六轮审计二 P2-2：返回结构由 `list` 改为 `{"none": [...], "strong": [...]}` ——
+    # **strong 档此前根本没有扫描器**，`SAR_STRONG` 只能拿 holdout 选，**该验收池因此报废**。
+    none_pts, strong_pts = curves["none"], curves["strong"]
+    assert len(none_pts) >= 10, "none 档曲线点太少无法选工作点"
+    assert all(len(p) == 4 for p in none_pts)
+    assert any(fp == 0.0 for _, _, fp, _ in none_pts), "扫描里应存在零误放行的点"
+    assert len(strong_pts) >= 6, "strong 档曲线点太少无法定阈值"
+    assert all(len(p) == 4 for p in strong_pts)
 
 
 def test_load_missing_split_returns_empty(tmp_path, monkeypatch):
