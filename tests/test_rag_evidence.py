@@ -115,9 +115,32 @@ def test_level_weak_in_between(judge):
 
 
 def test_thresholds_are_ordered():
-    """阈值必须有序，否则判定逻辑自相矛盾。"""
+    """阈值必须有序，否则判定逻辑自相矛盾。
+
+    ⚠️ 2026-09-18 修正：`V1_STRONG` 已置 **0**（V1 在 strong 侧无区分度 —— 见 evidence.py docstring），
+    故不再满足 `0 < V1_NONE < V1_STRONG`。改为：
+      - SAR 侧仍严格有序（`0 < SAR_NONE < SAR_STRONG < 1`）；
+      - `V1_STRONG` 允许为 0（= 不参与 strong 判定）；非 0 时**必须**严格大于 `V1_NONE`。
+    """
     assert 0 < SAR_NONE < SAR_STRONG < 1
-    assert 0 < V1_NONE < V1_STRONG <= 1
+    assert 0 <= V1_STRONG <= 1
+    assert 0 < V1_NONE <= 1
+    assert V1_STRONG == 0.0 or V1_STRONG > V1_NONE, \
+        "V1_STRONG 为 0 表示弃用；否则必须严格大于 V1_NONE，否则 none/strong 分档会重叠"
+
+
+def test_strong_depends_only_on_sar_after_recalibration():
+    """`strong` 只依赖 SAR（`V1_STRONG == 0`）—— 锁住 2026-09-18 的实测重标。
+
+    依据（holdout 干净验收组，21 rel + 50 neg）：
+      `sar>=0.10 且 v1>=0.45`（旧）→ 正例 **2/21** 判 strong（**档位基本失效**，三份审计都点了）
+      `sar>=0.15`（新，去掉 V1）   → 正例 **8/21**、负例 **0/50**
+      `sar>=0.12`                 → 负例 3/50（开始放水）
+    且 V1 在 strong 侧**无区分度**（正例中位 0.222 vs 负例 0.182）；字级回退修法实测会把
+    `strong_fp` 从 0.000 抬到 0.100。**本测试防止有人无依据地把 V1 加回、或把 SAR 降回 0.10。**
+    """
+    assert V1_STRONG == 0.0, "V1 不得参与 strong 判定（实测无区分度）"
+    assert SAR_STRONG >= 0.15, "SAR_STRONG 必须 ≥ 实测分界 0.15（0.10 失效 / 0.12 放水）"
 
 
 # ==================== 与旧判据的对照（防回归到 max_sim）====================
