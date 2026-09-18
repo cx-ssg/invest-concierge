@@ -107,6 +107,37 @@ def test_load_holdout_rejects_v1_negative(tmp_path, monkeypatch):
     assert "irr-0001" in str(ei.value)
 
 
+def test_main_cli_path_actually_uses_load_holdout(tmp_path, monkeypatch):
+    """**走 CLI 路径**验证 holdout 校验真的接线了（审计二 P1-1 的回归锁）。
+
+    审计二实测：`load_holdout()` 此前**零生产调用点** —— `main()` 走的是
+    `load()` + `assert_clean_holdout()`，而上面两条测试测的是**函数本身**，
+    于是「`main()` 改走它」这个声称与实际不符、套件却**全绿**。
+    ⇒ **本测试锁的是调用链，不是函数**：把 `main()` 里的接线改回去，它必须变红。
+    """
+    import pytest
+    monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
+    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_irr.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError) as ei:
+        ev.main(["--split", "holdout"])          # ← 走 CLI 入口，不是直调函数
+    assert "负例为空" in str(ei.value)
+
+
+def test_main_cli_path_rejects_v1_negative(tmp_path, monkeypatch):
+    """CLI 路径同样必须拦住混入的 v1 负例（同上：锁调用链，不锁函数）。"""
+    import pytest
+    monkeypatch.setattr(ev, "GOLDEN", str(tmp_path))
+    (tmp_path / "queries_holdout_rel.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "queries_holdout_irr.json").write_text(
+        json.dumps([{"id": "irr-0001", "kind": "near_miss", "query": "x",
+                     "answer_chunk_ids": [], "batch": "v1"}], ensure_ascii=False),
+        encoding="utf-8")
+    with pytest.raises(ValueError) as ei:
+        ev.main(["--split", "holdout"])
+    assert "irr-0001" in str(ei.value)
+
+
 def test_recall_and_mrr_when_answer_returned():
     """答案块在 top-k 里 → Recall@5 = 1、MRR@10 = 1。"""
     rel = [{"query": "茅台", "answer_chunk_ids": [1]}]

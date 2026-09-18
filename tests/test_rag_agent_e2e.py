@@ -72,10 +72,19 @@ def test_agent_run_carries_none_evidence_warning_into_model_context(tmp_path):
             return _tool_call("retrieve_docs", {"query": "茅台明天的股价是多少"})
         return {"type": "text", "content": "done"}
 
+    def _must_be_retrieve_docs(name, args):
+        """⚠️ 2026-09-18（**两份审计都指出**）：原 `side_effect` 无条件返回 payload、**不看 name/args**
+        → 把假 agent 的调用改成 `totally_wrong_tool` + 无关 query，测试**仍然全绿**（实测）。
+        这里显式校验，让「调错工具 / 用错 query」也能被这条测试抓住。
+        """
+        assert name == "retrieve_docs", "agent 必须调用 retrieve_docs，实得 %r" % name
+        assert "茅台" in json.dumps(args, ensure_ascii=False), \
+            "工具参数里应带原始问题，实得 %r" % (args,)
+        return json.dumps(payload, ensure_ascii=False)
+
     with patch.object(llm_config, "_TEST_KEY_OVERRIDE", "sk-test"), \
          patch.object(ai_helper, "call_llm", side_effect=fake_llm), \
-         patch.object(agent_core, "execute_ai_tool_v2",
-                      side_effect=lambda name, args: json.dumps(payload, ensure_ascii=False)):
+         patch.object(agent_core, "execute_ai_tool_v2", side_effect=_must_be_retrieve_docs):
         agent_core.agent_run("茅台明天的股价是多少")
 
     blob = json.dumps(captured["last"], ensure_ascii=False)

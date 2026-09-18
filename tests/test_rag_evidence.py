@@ -139,8 +139,33 @@ def test_strong_depends_only_on_sar_after_recalibration():
     且 V1 在 strong 侧**无区分度**（正例中位 0.222 vs 负例 0.182）；字级回退修法实测会把
     `strong_fp` 从 0.000 抬到 0.100。**本测试防止有人无依据地把 V1 加回、或把 SAR 降回 0.10。**
     """
-    assert V1_STRONG == 0.0, "V1 不得参与 strong 判定（实测无区分度）"
-    assert SAR_STRONG >= 0.15, "SAR_STRONG 必须 ≥ 实测分界 0.15（0.10 失效 / 0.12 放水）"
+    # ⚠️ 2026-09-18（审计二 P1-2 的"加重项"）：**不再固化 `>= 0.15`**。
+    # 原因：0.15 本身是**在 holdout 上选出来的拟合值**（两份审计独立判定为违规）。
+    # 把它写成"不得低于"的硬常量，等于把**数据污染扩散成不可回退的约束** ——
+    # 将来任何诚实的重调（例如新的未触碰数据给出 0.13）都会撞红这条测试。
+    # ⇒ 改为只锁**结论**（V1 不参与 strong 判定），把阈值取值留给在 tuning 上的重调。
+    assert V1_STRONG == 0.0, "V1 不得参与 strong 判定（实测无区分度：AUC≈0.6）"
+    assert SAR_STRONG > SAR_NONE, "strong 与 none 的 SAR 边界必须有序"
+
+
+def test_only_high_frequency_terms_never_strong():
+    """查询若**全是高频词**（`feature == []` → `v1 = 0.0`）→ **不得判 `strong`**（审计二 P2-2）。
+
+    机制：`V1_STRONG = 0.0` 让 `v1 >= V1_STRONG` 恒真 → 顺带移除了「**必须有特征词**」这道护栏。
+    2026-09-18 实测（真实 75 块语料）：「公司董事」(`sar=0.81`) /「公司股份」(`0.82`) /
+    「董事会议」(`0.89`) 等 **8 例**从 weak 翻成 strong（旧规则 `v1 >= 0.45` 正是在挡它），
+    且产线 `retrieve_docs` 返回 5 条**带 url** 的结果 —— 跳过警示 + 可被引用。
+    本测试用小型语料复现该机制：让「公司」「董事」成为**全语料高频词**。
+    """
+    docs = [tokenize("公司董事会决议公告第{}号".format(i)) for i in range(100)]
+    j = EvidenceJudge(docs)
+    toks = set(tokenize("公司董事"))
+    feature = [t for t in toks if j.index.df.get(t, 0) <= max(1.0, j.N * 0.05)]
+    assert feature == [], "前提：该查询应无特征词（全高频），实得 %s" % feature
+    ev = j.assess("公司董事")
+    assert ev.v1 == 0.0, "前提：无特征词 → v1 = 0.0"
+    assert ev.level != "strong", \
+        "全高频词查询词面无判别力，不得判 strong（实测 sar=%.3f）" % ev.sar
 
 
 # ==================== 与旧判据的对照（防回归到 max_sim）====================

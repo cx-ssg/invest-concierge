@@ -87,9 +87,15 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
     chunk_pos = {m["chunk_id"]: i for i, m in enumerate(meta)}
 
     over_abstain = 0
-    recall_hits, trusted_hits, rr = 0, 0, []
+    recall_hits, trusted_hits, strong_rel, rr = 0, 0, 0, []
     for r, qv in zip(rows_rel, qvecs[:len(rows_rel)]):
         ev = judge.assess(r["query"])
+        if ev.level == LEVEL_STRONG:
+            # 2026-09-18（**两份审计都要求**）：**正例 strong 率**是 strong 带上唯一会随改动
+            # 大幅移动的量（holdout 2/21→8/21→14/21；只删 V1 时 14/21），
+            # 而 `strong_fp` 的分母是负例 → 对"档位是否可达"**结构性免疫**。
+            # 此前注释要求读者"与它并列看"，脚本却从不打印它。
+            strong_rel += 1
         if ev.level == LEVEL_NONE:
             over_abstain += 1
             # ⚠️ 2026-09-17 **删掉了原地的 `continue`**（独立审计实测指出）：
@@ -146,6 +152,10 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # 与 `Recall@k` 之差 = 「检索到了但判据没采信」的比例（这才是能随判据退化变红的量：
         # 判官恒 none → 0/n_rel；而旧 `guarded_recall` 在同样场景下纹丝不动）。
         "trusted_recall": trusted_hits / n_rel,
+        # 2026-09-18（**两份审计都要求打印**）：**正例 strong 率** —— strong 带的正例侧报警量。
+        # `strong_fp` 的分母是负例、本轮改动没碰负例侧 → 它对「strong 档是否仍可达」结构性免疫。
+        "strong_rel_rate": strong_rel / n_rel,
+        "n_rel_strong": strong_rel,
         "n_over_abstain": over_abstain,
         "MRR@10": sum(rr) / n_rel if rr else 0.0,
     }
@@ -201,10 +211,15 @@ def main(argv=None):
     else:
         print("[eval] 验收组（未参与调参）")
 
-    rel, irr = load(args.split, "rel"), load(args.split, "irr")
+    # ⚠️ 2026-09-18（审计二 P1-1 抓出）：**这里才是 `load_holdout()` 唯一的调用点**。
+    # 我上一轮声称「`main()` 改走它」，但那个 edit 被工具拒绝后**我只补发了 reconfigure**，
+    # 本行没改 → `load_holdout()` 成了**死代码**（全仓零生产调用点），
+    # 而守护它的两条测试测的是**函数本身、不是调用链**，所以套件全绿、缺陷仍在。
+    # 「保护从未被装上，而套件全绿」—— 这条教训比缺陷本身值钱。
     if args.split == "holdout":
-        # 审计 P2-2：给"干净验收组"加强制力 —— 以前 `batch` 无人消费，混入 v1 样本不会报警
-        assert_clean_holdout(irr)
+        rel, irr = load_holdout()          # 读取 + assert_clean_holdout + **拒绝空集**
+    else:
+        rel, irr = load(args.split, "rel"), load(args.split, "irr")
     if not rel and not irr:
         print("[eval] 评测集为空 —— 先跑 scripts/rag_eval_build.py")
         return 2
@@ -232,8 +247,13 @@ def main(argv=None):
         # 而 ood 的 none 率是**主动弃权率**，不受此问题影响。
         print("  A3a 域外主动弃权  = %d/%d = %.3f   <<< 主结论"
               % (ood["none"], ood["n"], ood["none"] / ood["n"]))
-    print("  strong_fp_rate    = %.3f   (应弃权却 strong；[!] 须与「正例 strong 率」并列看)"
+    print("  strong_fp_rate    = %.3f   ([!] **仅负例侧敏感** —— 只在负例放水时才动；"
           % m["strong_fp_rate"])
+    print("                                正例档位是否可达看下一行)")
+    print("  正例 strong 率    = %.3f   (%d/%d 可答查询拿到 strong —— **strong 带正例侧报警量**)"
+          % (m["strong_rel_rate"], m["n_rel_strong"], m["n_rel"]))
+    if m["strong_rel_rate"] < 0.20:
+        print("  [!] 正例 strong 率 < 0.20 —— strong 档可能重新不可达（判官成本会回升）")
     print("  delegated_rate    = %.3f   (落 weak = 需 LLM 判官；**成本指标，不是失败**)"
           % m["delegated_rate"])
     print("  over_abstain_rate = %.3f   (%d/%d 判 none —— **闸门标注保守度**，不是召回损失："

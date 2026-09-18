@@ -134,7 +134,15 @@ class EvidenceJudge:
         else:
             v1 = 0.0
 
-        if sar >= SAR_STRONG and v1 >= V1_STRONG:
+        # ⚠️ 2026-09-18（审计二 P2-2）：`V1_STRONG = 0.0` 使 `v1 >= V1_STRONG` **恒真**，
+        # 于是顺带**移除了「无特征词」这道护栏**：若 query 的 token 全是高频词（df ≥ 4）
+        # → `feature == []` → `v1 = 0.0` → 旧规则 `0.0 >= 0.45` 挡住，新规则**放行**。
+        # 实测（75 块语料）：「公司董事」(`sar=0.81`) /「公司股份」(`0.82`) /「董事会议」(`0.89`)
+        # 等 **8 例**从 weak 翻成 strong，且产线返回 5 条**带 url** 的结果
+        # —— 跳过 `WEAK_EVIDENCE_NOTE` 的警示、拿到完整引用凭据。
+        # 这类查询词面上**毫无判别力**（只匹配最常见块），不该算「证据充分」。
+        # ⇒ 显式保留「**必须有特征词**」这道护栏（`feature` 非空）—— 这是删条件时最容易漏的副作用。
+        if feature and sar >= SAR_STRONG and v1 >= V1_STRONG:
             level = LEVEL_STRONG
         elif sar < SAR_NONE and v1 < V1_NONE:
             level = LEVEL_NONE
