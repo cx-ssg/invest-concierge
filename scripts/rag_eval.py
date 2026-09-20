@@ -154,8 +154,12 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         #   任何规模上都不成立。替代量 `trusted_recall` 会随判据退化而变红（判官恒 none → 0/n_rel）。
 
     # 负例：**按 kind 分列**（2026-09-17 修正口径，外部评审指出）
-    # - `strong` 才是违规（A3a 只看 out_of_domain）
-    # - `weak` 是**委派点**（交给 LLM 判官），不是失败 —— 按 kind 的规范它本就允许 weak
+    # ⚠️ 2026-09-19 第七轮审计一 P2-2：下面两行是**撤档前的口径**，与 20 行之后的
+    # `delegated_rate` 注释**自相矛盾**（那里说 weak 是"风险面"）。已按撤档后重写：
+    # - 撤档后**没有"违规 / 合规"之分**（`strong` 已不存在）—— 负例只有两种落点：
+    #   `none`（判据主动弃权）与 `weak`（判据未通过、但**带完整 `url`/`title` 返回给模型**）；
+    # - `weak` **不再是"可接受的委派点"** —— 那个说法预设了"判官会兜底"，而**判官从未实现**
+    #   ⇒ 它是**暴露面**：负例落 weak 的比例就是 `delegated_rate`（见下方注释）。
     by_kind = {}
     for r, qv in zip(rows_irr, qvecs[len(rows_rel):]):
         lv = judge.assess(r["query"]).level
@@ -176,6 +180,14 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # ⇒ 现在它描述的是「**未通过判据、却仍返回给模型的结果占比**」= **风险面**，
         # 不再是成本。**读它的时候不要再按"成本"理解。**
         "delegated_rate": delegated / n_irr,
+        # ⚠️ 2026-09-19 第七轮审计一 U1：**新增 `abstain_recall`** ——
+        # `tests/golden/rag/README.md` 的指标表**早就定义了它**（「应弃权的查询中，
+        # 实际判 `none` 的比例」）却**从未实现** ⇒ 作者想给 `delegated_rate` 设上限时，
+        # 缺的那个名字**规范里其实已经有了**。二者关系：**`abstain_recall ≡ 1 − delegated_rate`**（负例口径）。
+        # ⚠️ **按 kind 读，不要只看总数**：`out_of_domain` 应当 = 1.0（当前 20/20 ✓），
+        # 而 `in_domain_unanswerable` / `near_miss` 是**字面判据结构上做不到**的那两类 ——
+        # 对它们**只报数、不设门**（设门 = 要求判据做超出其能力的事）。
+        "abstain_recall": (len(rows_irr) - delegated) / n_irr,
         "by_kind": by_kind,
         "Recall@%d" % k: recall_hits / n_rel,
         # `trusted_recall`（2026-09-18 新增，替代已删的 `guarded_recall`）：
@@ -183,13 +195,14 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # 与 `Recall@k` 之差 = 「检索到了但判据没采信」的比例（这才是能随判据退化变红的量：
         # 判官恒 none → 0/n_rel；而旧 `guarded_recall` 在同样场景下纹丝不动）。
         "trusted_recall": trusted_hits / n_rel,
-        # ⚠️ 2026-09-18 第六轮审计一 P2：`trusted_recall` 是**派生量** ——
-        # 当前数据上它恒等于 `Recall@k − over_abstain`（1.000−0.095=0.905），
-        # 且只依赖 none 边界 ⇒ 对 strong 档改动**完全无反应**。不要在报告里当独立指标并列。
-        # 2026-09-18 第六轮审计二：**唯一经过被测对象的检索指标** ——
-        # `judge=judge` + 分层硬停，即 `retrieve_docs` 的真实调用形态。
-        # 此前评测从不走这条路 ⇒ 工具层退化（返空/排序错/硬停误触发）在离线指标上不可见。
-        # 当下 holdout 上它**应当 == trusted_recall**（正例 0 条被硬停）；**一旦不等就是真信号**。
+        # ⚠️ 2026-09-19 第七轮审计一 P3-1 / P3-2：**这段注释与代码不一致，已对齐**。
+        # ① **对照物错了**：`tool_recall` 应与 **`Recall@k`** 比（**同义** —— 都是"gold 是否在 top-k"），
+        #    **不是** `trusted_recall` —— 后者额外要求 `level != none`（holdout 上 1.000 vs 0.905）。
+        #    正文的打印早就改对了（见下方 `[!] tool_recall != Recall@k`），**只有注释漏改** ——
+        #    留着它的风险不是当下出错，而是**下一位编辑者照旧注释把打印改回去**（附录 A #9 第三次）。
+        # ② **它也是派生量**：`tool_recall = Recall@k − (被分层硬停吞掉的召回)/n_rel`，
+        #    与 `trusted_recall` 同构 ⇒ **不要与 `Recall@k` 并列成两个独立证据**。
+        #    它的**独有价值在"路径"**：它是唯一经过被测对象（`judge=judge` + 硬停）的那条。
         "tool_recall": tool_recall_hits / n_rel,
         "hard_stop_count": hard_stop,
         # ⚠️ 2026-09-18 **撤下 strong 档**后，`strong_rel_rate` / `strong_fp_rate` 一并移除 ——
@@ -268,8 +281,11 @@ def main(argv=None):
         # 但 holdout **已被用于选择 `SAR_STRONG`**（第五轮两份审计独立判定为违规）。
         # 报告 §4g 早已改口径，**横幅却还印着旧口径** —— 而横幅是使用者/审计方
         # **第一眼**看到的字符串。代码与文档的口径必须一致。
-        print("[eval] holdout —— ⚠️ 已用于选择 strong 阈值（**拟合集**），"
-              "strong 档可达性不得作为验收结论")
+        # ⚠️ 2026-09-19 第七轮：**`strong` 档已撤下** ⇒ 原横幅末尾的"strong 档可达性"成了残句。
+        # 但它**背后的污染事实仍然成立**（holdout 参与过阈值选择）⇒ 保留"拟合集"口径，
+        # 只去掉已消失的对象。（**这是自查残留时发现的第 9 处，两份审计都没列。**）
+        print("[eval] holdout —— ⚠️ **已用于阈值选择（拟合集）**，"
+              "其上的阈值结论不得作为泛化依据")
 
     # ⚠️ 2026-09-18（审计二 P1-1 抓出）：**这里才是 `load_holdout()` 唯一的调用点**。
     # 我上一轮声称「`main()` 改走它」，但那个 edit 被工具拒绝后**我只补发了 reconfigure**，
@@ -306,6 +322,9 @@ def main(argv=None):
     print("  delegated_rate    = %.3f   (**非 none 占比** —— 判据未通过、但结果仍返回给模型；"
           % m["delegated_rate"])
     print("                                判官从未实现 ⇒ 这是**风险面**不是成本（2026-09-18 撤档后语义已变）)")
+    print("  abstain_recall    = %.3f   (= 1 − delegated_rate；README 早已定义、**本轮才实现** ——"
+          % m["abstain_recall"])
+    print("                                ⚠️ **请按 kind 读**：out_of_domain 应为 1.0，另两类字面判据做不到)")
     print("  over_abstain_rate = %.3f   (%d/%d 判 none —— **闸门标注保守度**，不是召回损失："
           % (m["over_abstain_rate"], m["n_over_abstain"], m["n_rel"]))
     print("                                none 档不再无条件清空结果；零 bigram 交集仍硬停)")

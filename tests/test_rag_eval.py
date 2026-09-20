@@ -69,7 +69,10 @@ def test_trusted_recall_turns_red_when_judge_degrades():
     在同样场景下会掉到 0 —— 这正是本次要修的那类退化。
     """
     rel = [{"query": "可答问题", "answer_chunk_ids": [1]}]
-    m1 = ev.evaluate(rel, [], _FakeJudge({"可答问题": Evidence(0.5, 1.0, "strong")}),
+    # ⚠️ 2026-09-19 第七轮审计一 P3-8：原写 `"strong"` —— **生产已不可能产出该值**
+    # （`LEVEL_STRONG` 已随撤档删除）。测试虽仍通过（`evaluate` 只判 `== LEVEL_NONE`），
+    # 但那样**行使的是一个不可达状态** ⇒ 改为 `"weak"`（撤档后唯一非 none 的档）。
+    m1 = ev.evaluate(rel, [], _FakeJudge({"可答问题": Evidence(0.5, 1.0, "weak")}),
                      _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
     assert m1["Recall@5"] == 1.0 and m1["trusted_recall"] == 1.0
     m2 = ev.evaluate(rel, [], _FakeJudge({"可答问题": Evidence(0.0, 0.0, "none")}),
@@ -197,7 +200,7 @@ def test_main_cli_path_routes_through_load_holdout(tmp_path, monkeypatch):
 def test_recall_and_mrr_when_answer_returned():
     """答案块在 top-k 里 → Recall@5 = 1、MRR@10 = 1。"""
     rel = [{"query": "茅台", "answer_chunk_ids": [1]}]
-    judge = _FakeJudge({"茅台": Evidence(0.5, 1.0, "strong")})
+    judge = _FakeJudge({"茅台": Evidence(0.5, 1.0, "weak")})   # strong 档已撤，改用 weak（见上）
     m = ev.evaluate(rel, [], judge, _META, _MATRIX, np.array([[1.0, 0.0]], dtype="float32"))
     assert m["Recall@5"] == 1.0
     assert m["MRR@10"] == 1.0

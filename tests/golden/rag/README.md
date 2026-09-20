@@ -20,7 +20,7 @@
 | `in_domain_answerable` | 域内**可答**：答案确实在某块里 | 返回结果，**答案块命中 top-k**，不得判 `none` | ≥50 |
 | `in_domain_unanswerable` | 域内**不可答**：词面在域内，但语料没有那个事实 | 不得进入生成上下文（`none` 或 `weak`） | ≥30 |
 | `out_of_domain` | 域外：与本语料无关 | `none`（弃权） | ≥50 |
-| `near_miss` | 近义干扰：词面命中但与问题所指不同 | `weak`/`none`（不得 `strong`） | ≥30 |
+| `near_miss` | 近义干扰：词面命中但与问题所指不同 | `weak` 或 `none`。⚠️ 2026-09-19 更正：旧文案写「`weak`/`none`（**不得 `strong`**）」，而 `strong` 档已撤 ⇒ 该约束**恒真、无约束力**。**现行约束是「落 `weak` 时必须带 `WEAK_EVIDENCE_NOTE`」**（撤档后由代码保证：非 `none` 一律带警示语） | ≥30 |
 
 ## 标注格式（JSON）
 
@@ -75,14 +75,16 @@ v2 生成时**按 kind 分层奇偶交替分流**，保证两组构成一致 —
 | `abstain_precision` | 判 `none` 的查询中，「本来就不该给」的比例 | 域外 + 域内不可答应判 none |
 | `abstain_recall` | 应弃权的查询中，实际判 `none` 的比例 | |
 | `over_abstain_rate` | 域内可答被判 `none` 的比例 | **闸门标注保守度**；⚠️ **不等于召回损失** —— `none` 档自 2026-09-17 起不再清空结果（此前它恰好是召回缺口的全部：`rel-0015` 的 gold 排 **rank 1** 仍被弃权） |
-| `strong_fp_rate` | 应弃权却判 `strong` 的比例 | ⚠️ **不是主指标**，且**仅负例侧敏感** —— 本轮改动只动 strong 档、没碰负例侧，所以它对「档位是否可达」**结构性免疫**；holdout 上该阈值下它**数学上不可能触发**（最大负例 SAR **0.1382** < 0.15）。正例侧要看「**正例 strong 率**」：**实测 8/21 = 0.381**（2026-09-18；旧文案的 2/21 = 0.095 已过时） |
-| `out_of_domain` 的 `none` 率 | 域外查询被**主动**判 `none` 的比例 | **A3a 主结论**（不受 strong 档是否可达影响） |
+| **`delegated_rate`** | 负例**未判 `none`** 的比例（= 落 `weak`） | ⚠️ **撤档后语义已变**：落 `weak` **不再是"委派给判官"**（判官从未实现）⇒ 它是「**未通过判据、却带完整 `url`/`title` 返回给模型的结果占比**」= **暴露面**（第七轮审计二：更准的刻画是"**可被引用的错误断言**"的参数）。按 kind 分列看，不要只看总数 |
+| `out_of_domain` 的 `none` 率 | 域外查询被**主动**判 `none` 的比例 | **A3a 主结论** |
 | `Recall@k` | 答案块出现在 top-k 的比例 | 块级口径（`judge=None` 的**裸检索**）。答案**跨块时必须标全相邻块**，否则低估 |
-| `trusted_recall` | gold 在 top-k **且** `level != none` 的比例 | **判据采信过的召回**。与 `Recall@k` 之差 = 「检索到了但判据没采信」。⚠️ 2026-09-18 替换掉原 `guarded_recall` —— 两份外部审计**各自实测**证明后者**恒等于 `Recall@k`**（删硬停后 `run_hybrid` 的 `judge` 不参与过滤，构造性恒等；把判据换成「恒返回 none」它纹丝不动） |
+| `tool_recall` | 同上，但走**工具真实形态**（`judge=judge` + 分层硬停） | ⚠️ **也是派生量**（= `Recall@k` − 被硬停吞掉的召回）。它**独有的价值在"路径"**：是唯一经过被测对象的检索指标。对照物是 `Recall@k`（**同义**），**不是** `trusted_recall`（后者额外要求 `level != none`） |
+| `trusted_recall` | gold 在 top-k **且** `level != none` 的比例 | **判据采信过的召回**。⚠️ 2026-09-18 替换掉原 `guarded_recall` —— 两份外部审计**各自实测**证明后者**恒等于 `Recall@k`** |
 | `MRR@10` | 首个答案块排名倒数的均值 | |
 
-**报告方式**：扫阈值 → 输出 `(strong_fp_rate, over_abstain_rate)` 曲线 → 按代价选工作点 → **给区间**。
-⚠️ 2026-09-17 起 headline 用 **`out_of_domain` 的主动弃权率**（当前 20/20 = 1.000），而非 `strong_fp`（理由见上表）。
+**报告方式**：扫 **none 档**阈值 → 输出 `(delegated_rate, over_abstain_rate)` 曲线 → 按代价选工作点 → **给区间**。
+⚠️ 2026-09-19 **撤档后更正**：本行原写 `(strong_fp_rate, over_abstain_rate)`，而 `strong_fp_rate` **已随 `strong` 档移除**（分档只剩 none / weak），`scan()` 的 strong 曲线也已降级为「仅历史参考」。
+⚠️ 2026-09-17 起 headline 用 **`out_of_domain` 的主动弃权率**（当前 20/20 = 1.000）。
 n<30 时不写"明显"这类词。
 
 ## 与旧口径的关系

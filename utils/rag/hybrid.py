@@ -9,13 +9,19 @@
 实测 HOLDOUT 组**区间倒挂**（无关 0.6902 > 相关 0.6668）。
 
 **换成什么**：证据判据由 `utils/rag/evidence.py` 的 `EvidenceJudge` 判定
-（`SAR` = BM25 分数达成率 + `V1` = 特征词存在率，均为尺度无关量），
-实测 TUNING 与 HOLDOUT **两组都干净可分**（3.65× gap）。
+（`SAR` = BM25 分数达成率 + `V1` = 特征词存在率，均为尺度无关量）。
+⚠️ **2026-09-19 更正**：本行原写「实测 TUNING 与 HOLDOUT **两组都干净可分**（3.65× gap）」——
+**该说法已被推翻**：只有 **HOLDOUT 单组**呈（REL 0.1791~0.3651 vs IRR 0.0000~0.0490），
+而 **TUNING 组区间倒挂**（正例上限 **0.1540** < 负例上限 **0.2134**，见 `docs/M1_EVAL_REPORT.md` §4g）。
+⇒ **别把 SAR 当"干净分界"**（这也是 `strong` 档最终被撤、以及 `SAR_NONE` 需要重定的背景）。
 
 **向量退回纯排序**（方案 A 原意）：语义路只提供排名，不再做闸门。
 
 **返回值改为三元组** `(order, rrf_scores, evidence)` —— 调用方据 `evidence.level` 分档：
-`none`（弃权）/ `weak`（返回 + 标注证据不足，交 LLM 裁决）/ `strong`（正常返回）。
+**`none`**（弃权）与 **`weak`**（返回 + **一律带警示语**）。
+⚠️ 2026-09-18 **`strong` 档已撤下**：它曾是"正常返回"，但与 `weak` 返回的 `results` **完全相同**、
+唯一差别是 `message` 一句话，而应消费该差别的 **LLM 判官从未实现** ⇒ 是纯装饰档
+（详见 `evidence.py` 文件头与 `docs/M1_EVAL_REPORT.md` §4i）。
 """
 import numpy as np
 

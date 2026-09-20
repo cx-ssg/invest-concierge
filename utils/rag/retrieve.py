@@ -47,7 +47,10 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
 
     - `code`：限定标的（None = 全库检索）。**只影响返回哪些块，不影响判据**（判据恒用全库）
     - `query_vec`：可注入查询向量（单测 / 批量场景复用，避免重复调用 embedding）
-    - 返回体含 `evidence_level`（none / weak / strong）与 `evidence`（sar / v1）
+    - 返回体含 `evidence_level`（**none / weak 两档**）与 `evidence`（sar / v1）
+      ⚠️ 2026-09-18：`strong` 档**已撤下**（`LEVEL_STRONG` 已删 —— 它与 `weak` 返回的
+      `results` 完全相同、唯一差别是 `message` 一句话，而应消费该差别的 LLM 判官从未实现）。
+      本行原写「none / weak / strong」，是撤档的语义残留（第七轮审计二 P3 指出）。
     """
     conn = rag_store.get_conn(db_path)
     try:
