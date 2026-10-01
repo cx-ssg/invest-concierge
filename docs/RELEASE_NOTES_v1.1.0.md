@@ -62,19 +62,22 @@
 **复现命令（严格照此，否则数字对不上）**：
 
 ```bash
-# ① 需旧语料备份（kb.db.20261001.bak 不入库；全新克隆须自行重建旧语料）
-python scripts/rag_eval.py --split holdout --db kb.db.20261001.bak
-# ② 当前库 + 关限额（需 --k 10 才与逐格扫描表吻合）
-python scripts/rag_rerank_probe.py --no-rerank --k 10 --max-per-doc 0 --split holdout
-# ③ 当前库（产线默认 max_per_doc=2）
+# ①②③ 都由 rag_eval.py 一次跑出 Recall@5 + MRR@10（`--max-per-doc 0` = 关闭同文档限额）
+# ① 基线：旧语料 + 关限额（kb.db.20261001.bak 不入库；全新克隆须自行重建旧语料）
+python scripts/rag_eval.py --split holdout --max-per-doc 0 --db kb.db.20261001.bak
+# ② 切换 PDF 全文：当前库 + 关限额
+python scripts/rag_eval.py --split holdout --max-per-doc 0
+# ③ 当前产线（默认 max_per_doc=2）
 python scripts/rag_eval.py --split holdout
-# ④ LLM 重排探针（会调模型）
+# ④ LLM 重排探针（会调模型；只报 MRR —— 重排不改变结果集合，Recall@5 不变）
 python scripts/rag_rerank_probe.py --split holdout
 ```
+> `rag_eval.py` 的 `--max-per-doc` 是 2026-10-02 补的：此前**没有任何 CLI 能关闭限额**，
+> 所以行①「无限额基线」无法复现（旧语料带限额跑会得到 `0.952 / 0.690` —— 表里不存在的状态）。
 
 - **切换 PDF 全文的收益**：报表细节级问题 `hit@5` **0/10 → 8/10**（`hit@10` = 10/10）；阴性对照 0/10。
   代价是块数 75 → 268 带来的排序指标下滑（见上表 ②）。
-- **LLM 重排的代价**：每查询 +k 次模型调用（本机实测 21 题全流程 45~60s，≈**2~3s/题**；会受机器与网络影响），接入前需解决延迟与成本。
+- **LLM 重排的代价**：每查询 +k 次模型调用。**本机实测：21 题全流程 51.8s ≈ 2.5s/题（含检索；重排本身约 105 次模型调用）**，会受机器与网络影响；接入前需解决延迟与成本。
 
 ⚠️ **如实记录**：`A3a`（域外弃权）等指标**未全部达标**。至少包含：A3a 因样本量不足不能称"达成"、`abstain_recall = 0.480`、`MRR@10` 未回基线、rerank 未接产线、以及上面的 holdout 拟合性质。逐项证据见 [docs/M1_EVAL_REPORT.md](docs/M1_EVAL_REPORT.md)（含「5. 诚实边界」）。
 

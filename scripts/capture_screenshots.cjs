@@ -1,5 +1,5 @@
 // Reasonix 正式截图脚本 —— 完整 Chromium（非 headless-shell）
-// 用 NODE_PATH 指向全局 playwright 运行：NODE_PATH="C:/Users/cx101/AppData/Roaming/npm/node_modules" node capture.cjs
+// 用 NODE_PATH 指向全局 playwright 运行：NODE_PATH="%APPDATA%\npm\node_modules" node capture.cjs
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');

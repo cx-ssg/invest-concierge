@@ -68,7 +68,7 @@ def _stock_code_param(desc="6 位数字股票代码，如 600519"):
     return {"stock_code": {"type": "string", "description": desc}}
 
 
-# ==================== Tool Registry（11 个，真名核对过） ====================
+# ==================== Tool Registry（24 个，真名核对过） ====================
 
 TOOL_REGISTRY = {
     # --- 已有 3 工具（迁移 + 晚绑定；schema 与旧 AI_TOOLS 完全一致）---

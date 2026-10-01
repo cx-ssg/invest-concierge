@@ -1,7 +1,7 @@
 # invest-concierge · 能力补全覆盖设计（v0.1 草案）
 
 > 生成：2026-09-14 ｜ 状态：**设计草案，未开工**
-> 依据：2026-09-14 现场核对 `D:/work/python1/fund_agent`（HEAD `4d51a15`）
+> 依据：2026-09-14 现场核对 `<repo>`（HEAD `4d51a15`）
 > 上游缺口清单来源：本轮会话对 `services/`、`utils/agent_core.py`、README、CHANGELOG 的现场核查
 
 ---

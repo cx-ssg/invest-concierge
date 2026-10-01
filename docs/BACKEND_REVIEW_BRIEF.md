@@ -9,10 +9,10 @@
 ## 0. 评审范围（后端代码，16 个数据模块 + 工具层）
 
 ```
-D:/work/python1/fund_agent/data/        ← 16 个数据模块（A股/基金接口封装）
-D:/work/python1/fund_agent/utils/       ← ai_helper/agent_core/agent_memory/common
-D:/work/python1/fund_agent/app.py       ← 入口
-D:/work/python1/fund_agent/web_agent.py ← Streamlit 路由（前端将废弃，但接口面要抽离）
+<repo>/data/        ← 16 个数据模块（A股/基金接口封装）
+<repo>/utils/       ← ai_helper/agent_core/agent_memory/common
+<repo>/app.py       ← 入口
+<repo>/web_agent.py ← Streamlit 路由（前端将废弃，但接口面要抽离）
 ```
 
 **最近关键变更（commit 52d0a06）**：失败缓存 + 腾讯 fallback + 缩短重试（弱网切页 20s→0s）

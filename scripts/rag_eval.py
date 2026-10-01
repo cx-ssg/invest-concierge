@@ -31,7 +31,7 @@ from utils.rag import store as rag_store                      # noqa: E402
 from utils.rag import evidence as ev_mod                      # noqa: E402
 from utils.rag.embed import embed_texts_batched               # noqa: E402
 from utils.rag.evidence import EvidenceJudge, LEVEL_NONE  # noqa: E402
-from utils.rag.hybrid import run_hybrid                       # noqa: E402
+from utils.rag.hybrid import MAX_PER_DOC_DEFAULT, run_hybrid  # noqa: E402
 from utils.rag.tokenize import tokenize                       # noqa: E402
 
 GOLDEN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -85,12 +85,21 @@ def load_holdout():
     return rel, irr
 
 
-def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
+def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K,
+             max_per_doc=MAX_PER_DOC_DEFAULT):
     """返回指标 dict。qvecs 与 rows 顺序一致（已批量 embed）。
 
     ⚠️ 这是**纯计算函数**：数据入口的干净性校验在 `load_holdout()`，不在这里
     （它无法区分 tuning / holdout，放进来会误伤 tuning 的 v1 负例）。
+
+    `max_per_doc`：同文档限额，透传给两次 `run_hybrid`（裸检索 + 工具真实形态）。
+    默认 = 产线默认值 `MAX_PER_DOC_DEFAULT`（2），**不改变既有行为**；
+    传 `0` 或 `None` = **关闭限额**（`None` 是 `hybrid.py` 的「关闭」语义）。
+    ⚠️ 2026-10-02 外部复验 R-2 补：此前无法关闭限额 ⇒ RELEASE_NOTES 表格的
+    「行① 基线（旧语料、无限额 1.000 / 0.702）」**没有任何 CLI 复现路径**
+    （旧语料也只能带限额跑出 0.952/0.690 —— 一个表里不存在的状态）。
     """
+    mpg = None if max_per_doc in (0, None) else max_per_doc
     n_expect = len(rows_rel) + len(rows_irr)
     if len(qvecs) != n_expect:
         # ⚠️ 旧实现直接 `zip(rows, qvecs[...])` 配对 → 长度不匹配会**静默截断**，
@@ -118,7 +127,7 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
             #   trusted_recall = **判据采信过的召回**：gold 在 top-k **且** `level != none`
             #   over_abstain   = 闸门把可答查询标成 none 的比例
         order, _, _ = run_hybrid(r["query"], matrix, meta, k=max(k, 10),
-                                 query_vec=qv, judge=None)
+                                 query_vec=qv, judge=None, max_per_doc=mpg)
         got = [meta[i]["chunk_id"] for i in order[:k]]
         gold = set(r.get("answer_chunk_ids") or [])
         if gold & set(got):
@@ -137,7 +146,7 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
         # 当下 holdout 上 `tool_recall` **应当 == trusted_recall**（0 条正例被硬停）——
         # **一旦不等，就是真信号**。
         tool_order, _, _ = run_hybrid(r["query"], matrix, meta, k=max(k, 10),
-                                      query_vec=qv, judge=judge)
+                                      query_vec=qv, judge=judge, max_per_doc=mpg)
         if not tool_order:
             hard_stop += 1
         if gold & {meta[i]["chunk_id"] for i in tool_order[:k]}:
@@ -282,6 +291,8 @@ def main(argv=None):
     ap.add_argument("--split", choices=["tuning", "holdout"], default="holdout")
     ap.add_argument("--db", default=None)
     ap.add_argument("--scan", action="store_true")
+    ap.add_argument("--max-per-doc", type=int, default=MAX_PER_DOC_DEFAULT,
+                    help="同文档限额（每文档最多几块进 top-k）；0 = 关闭（复现旧行为）")
     args = ap.parse_args(argv)
 
     if args.split == "tuning":
@@ -321,7 +332,8 @@ def main(argv=None):
     qs = [r["query"] for r in rel] + [r["query"] for r in irr]
     qvecs = np.asarray(embed_texts_batched(qs), dtype="float32")
 
-    m = evaluate(rel, irr, judge, meta, matrix, qvecs)
+    m = evaluate(rel, irr, judge, meta, matrix, qvecs,
+                 max_per_doc=args.max_per_doc)
     print("[eval] chunks=%d 阈值：none 档 sar<%.2f v1<%.2f（**strong 档已撤下**：非 none 一律 weak）"
           % (len(meta), ev_mod.SAR_NONE, ev_mod.V1_NONE))
     print("[eval] n_rel=%d n_irr=%d" % (m["n_rel"], m["n_irr"]))

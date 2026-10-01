@@ -13,7 +13,7 @@ v1.0 渲染集（live=true，只渲染真实可跑页）:
     - 通用 2 页：ai_chat(AI 对话) / settings(系统设置)
     - profile / alert live=false 不渲染（进 v1.1）
 
-定案依据：D:/Vault/Handoff/fund_agent-融合版计划-给zcode-20260830.md §6（用户 2026-08-30 拍板）。
+定案依据：<vault>/Handoff/fund_agent-融合版计划-给zcode-20260830.md §6（用户 2026-08-30 拍板）。
 
 使用方式:
     from ui_components.sidebar import render_sidebar

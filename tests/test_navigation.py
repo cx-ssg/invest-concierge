@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 双轨导航 v1.0 渲染集验收测试
-定案：D:/Vault/Handoff/fund_agent-融合版计划-给zcode-20260830.md §6（用户 2026-08-30 拍板）
+定案：<vault>/Handoff/fund_agent-融合版计划-给zcode-20260830.md §6（用户 2026-08-30 拍板）
 
 验收标准（§6 修正版，消除空验）:
   1. v1.0 渲染集精确匹配：#基金轨 3 页（dashboard/portfolio/diary）

@@ -158,7 +158,7 @@ python scripts/rag_migrate_bigdocs_pdf.py --db kb.db --doc-id 6 --code 600519
    向量路更擅长"捞回候选" —— 这正是 **reranker 该接手的地方**。
 
 ⇒ **零依赖杠杆已用尽**：限额拿走了主要收益（`Recall@5` 0.857 → **0.952**）；
-`MRR` 的剩余差距（**0.606 vs 0.702**）必须靠 **cross-encoder reranker**
+`MRR` 的剩余差距（**0.605 vs 0.702**）必须靠 **cross-encoder reranker**
 （本机 `ollama` **没有** reranker 模型：`bge-reranker-v2-m3` 拉取报 `file does not exist`，需另装）。
 
 ### 5.7 LLM rerank 验证：**MRR 0.605 → 0.706**（回到并略超基线，2026-10-02）
@@ -184,7 +184,7 @@ python scripts/rag_migrate_bigdocs_pdf.py --db kb.db --doc-id 6 --code 600519
 
 ⚠️ **这是离线探针，产线尚未接入**（`retrieve_docs` 目前没有 rerank）。接入前必须解决：
 
-1. **延迟**：每查询 +k 次 LLM 调用（实测每题 +5~10s）⇒ 需要异步/流式，或只重排"低置信"的候选；
+1. **延迟**：每查询 +k 次 LLM 调用（**2026-10-02 实测：21 题全流程 51.8s ≈ 2.5s/题，含检索**；早期估算为每题 +5~10s）⇒ 需要异步/流式，或只重排"低置信"的候选；
 2. **成本**：按调用量计；
 3. 重排**救不了"根本没召回"的那 1 条**（`rel-0002`，疑似标注偏早）。
 

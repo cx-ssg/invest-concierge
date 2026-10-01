@@ -502,3 +502,54 @@ def test_load_missing_split_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(ev, "GOLDEN", str(tmp_path / "nope"))
     assert ev.load("holdout", "rel") == []
     assert ev.load("tuning", "irr") == []
+
+
+def test_evaluate_passes_max_per_doc_through(monkeypatch):
+    """`evaluate` 必须把 `max_per_doc` 透传给两次 `run_hybrid`（并把 0 归一到 None = 关闭）。
+
+    根因（2026-10-02 外部复验 R-2）：`rag_eval.py` 原先无法关闭同文档限额
+    ⇒ RELEASE_NOTES 表格「行① 基线（旧语料 75 块、无限额）」**没有任何 CLI 复现路径**
+    （旧语料也只能带限额跑，产出的是 0.952/0.690 —— 一个表里不存在的状态）。
+    """
+    from utils.rag.hybrid import MAX_PER_DOC_DEFAULT
+
+    captured = []
+
+    def fake_run_hybrid(query, matrix, meta, **kw):
+        captured.append(kw.get("max_per_doc", "__MISSING__"))
+        return [0], {}, Evidence(1.0, 1.0, "weak")
+
+    monkeypatch.setattr(ev, "run_hybrid", fake_run_hybrid)
+
+    class _J:
+        def assess(self, q):
+            return Evidence(1.0, 1.0, "weak")
+
+    rows_rel = [{"query": "q1", "answer_chunk_ids": [1]}]
+    qv = np.zeros((1, 2), dtype="float32")
+
+    # ① 默认：保持产线默认值（不改变现有行为）
+    ev.evaluate(rows_rel, [], _J(), _META, _MATRIX, qv)
+    assert captured == [MAX_PER_DOC_DEFAULT, MAX_PER_DOC_DEFAULT], captured
+
+    # ② 传 0 ⇒ 关闭限额（None）
+    captured.clear()
+    ev.evaluate(rows_rel, [], _J(), _META, _MATRIX, qv, max_per_doc=0)
+    assert captured == [None, None], captured
+
+    # ③ 传具体值 ⇒ 原样透传
+    captured.clear()
+    ev.evaluate(rows_rel, [], _J(), _META, _MATRIX, qv, max_per_doc=3)
+    assert captured == [3, 3], captured
+
+
+def test_cli_exposes_max_per_doc():
+    """CLI 必须暴露 `--max-per-doc`，否则「关闭限额才能复现基线」这件事在命令行做不到。"""
+    import subprocess
+    import sys as _sys
+
+    r = subprocess.run([_sys.executable, "scripts/rag_eval.py", "--help"],
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    out = (r.stdout or "") + (r.stderr or "")
+    assert "--max-per-doc" in out, out[:600]

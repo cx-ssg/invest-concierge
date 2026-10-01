@@ -37,7 +37,7 @@ React 页面 → REST/SSE(/api/*) → services/ → data/ 模块 → (AkShare/�
 ## 三、AI 引擎（utils/ai_helper.py + agent_core.py）
 
 - `call_llm(prompt, tools, model)`：统一 LLM 入口，OpenAI SDK 兼容 DeepSeek API；支持工具调用；错误分级返回（timeout/connection/401/429）。
-- `agent_run(...)`：**规划循环**（默认最多 8 轮），Agent 通过 11 个工具（行情/财报/持仓/日记等）自主取数；每轮 error 回填须明说「数据不可得」。
+- `agent_run(...)`：**规划循环**（默认最多 8 轮），Agent 通过 24 个工具（行情/财报/持仓/日记/文档检索等）自主取数；每轮 error 回填须明说「数据不可得」。
 - `agent_memory`：会话消息持久化 + 满 8 轮摘要注入，最近 3 条摘要随对话带入。
 - 工具注册表晚绑定（importlib 按「模块.函数名」解析），存量数据函数无需改造即可被 Agent 调用。
 - 无 Key → 页面显示引导卡，不调用（避免空转）。
