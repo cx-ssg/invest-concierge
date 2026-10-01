@@ -117,15 +117,15 @@ def calc_valuation_percentile(stock_code, years=5):
         return None
 
 
-@cached(CACHE_FUNDAMENTALS)
-def build_diagnosis_payload(stock_code):
-    """一次性统一拉取 6 引擎数据（行情/基本面/财报/排雷/护城河/估值+历史分位）。
+def empty_diagnosis_payload(stock_code):
+    """诊断 payload 的**键骨架**（所有引擎字段置 None）。
 
-    财报引擎无缓存，务必只调一次；首次约 15-40s（本函数整体 24h TTL 缓存，二次秒回）。
-    单引擎失败只记录 errors，不影响其他引擎；停牌分支由 stock_info=None 承载。
-    纯编排、无 st 依赖 —— 页面与 Agent get_stock_diagnosis 工具共用。
+    ⚠️ 单一事实源：`build_diagnosis_payload`（legacy 路径）与
+    `services/diagnosis_service._get_via_graph`（M3 图路径）**必须共用**它 ——
+    否则两条路径的响应键集会漂移（2026-10-02 hermes 审计 A7：图路径在 fallback 分支
+    只返回 5 个键，前端声明的 13 个引擎字段全缺，"前端零改动"不成立）。
     """
-    data = {
+    return {
         "code": stock_code,
         "stock_info": None,
         "fundamentals": None,
@@ -145,6 +145,17 @@ def build_diagnosis_payload(stock_code):
         "percentile": None,
         "errors": [],
     }
+
+
+@cached(CACHE_FUNDAMENTALS)
+def build_diagnosis_payload(stock_code):
+    """一次性统一拉取 6 引擎数据（行情/基本面/财报/排雷/护城河/估值+历史分位）。
+
+    财报引擎无缓存，务必只调一次；首次约 15-40s（本函数整体 24h TTL 缓存，二次秒回）。
+    单引擎失败只记录 errors，不影响其他引擎；停牌分支由 stock_info=None 承载。
+    纯编排、无 st 依赖 —— 页面与 Agent get_stock_diagnosis 工具共用。
+    """
+    data = empty_diagnosis_payload(stock_code)
 
     # 1. 行情（停牌/无行情分支入口）
     try:

@@ -5,6 +5,7 @@
    用 monkeypatch 注入 ⇒ 不触网、不依赖 `kb.db`、不调 LLM。
 ⚠️ 设计依据：`docs/COVERAGE_DESIGN.md` §5.1（图结构）/ §5.2（四条决策）/ §10.5（实现要点）。
 """
+import inspect
 import os
 import sys
 
@@ -527,6 +528,47 @@ def test_graph_path_keeps_response_contract(monkeypatch):
     assert out["_orchestrator"]["branch"] == BRANCH_ANALYZE
     assert out["_orchestrator"]["evidence_count"] == 1
     assert out["_orchestrator"]["report_chars"] == 2
+
+
+def test_graph_response_keys_match_legacy_on_reachable_branch(monkeypatch):
+    """**不打桩 `run_diagnosis_graph`** 的契约测试：走真图（只桩化数据源）时，
+    graph 响应键集必须与 legacy 逐字一致。
+
+    ⚠️ 2026-10-02 hermes 审计 A7：原契约测试把 `run_diagnosis_graph` 整个打桩
+    ⇒ 只测了映射代码、不测**真实可达分支**（fallback 只返回 5 个键，前端 13 个字段全缺）。
+    """
+    monkeypatch.setenv("ORCHESTRATOR", "graph")
+    from services import diagnosis_service as svc
+    from data.diagnosis import empty_diagnosis_payload
+    import utils.orchestrator.graph as gmod
+
+    # 只桩化**数据源**，图本身真跑
+    monkeypatch.setattr(gmod, "_fetch_quote", lambda code: {"code": code})
+    monkeypatch.setattr(gmod, "_fetch_financials", lambda code: {})
+    monkeypatch.setattr(gmod, "_fetch_moneyflow", lambda code: {})
+    monkeypatch.setattr(gmod, "_run_engines", lambda state: {})
+    monkeypatch.setattr(gmod, "_retrieve_evidence",
+                        lambda code: {"items": [], "level": "", "note": ""})
+    monkeypatch.setattr(gmod, "_synthesize_report", lambda state: "报告")
+
+    out = svc.get("600519")
+    expected = set(empty_diagnosis_payload("600519").keys()) | {"ok", "_orchestrator"}
+    missing = expected - set(out.keys())
+    assert not missing, f"graph 响应缺失键（前端契约会断）：{sorted(missing)}"
+    assert out["ok"] is True
+    assert out["_orchestrator"]["branch"] == "fallback", out["_orchestrator"]
+
+
+def test_empty_payload_is_single_source_of_truth(monkeypatch):
+    """键骨架必须是**单一事实源**：legacy 与 graph 两条路径共用同一份键集。"""
+    from data.diagnosis import empty_diagnosis_payload
+    import data.diagnosis as diag
+
+    keys = set(empty_diagnosis_payload("600519").keys())
+    src = inspect.getsource(diag)
+    assert "empty_diagnosis_payload(stock_code)" in src, "legacy 路径未复用骨架"
+    assert "stock_info" in keys and "moat" in keys and "percentile" in keys
+    assert len(keys) == 18, f"骨架键数异常：{len(keys)} -> {sorted(keys)}"
 
 
 def test_graph_path_degrades_when_graph_raises(monkeypatch):

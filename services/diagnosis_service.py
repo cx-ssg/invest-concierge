@@ -77,18 +77,18 @@ def _get_via_graph(code):
     except Exception as e:  # noqa: BLE001 - 图本身失败也要给出可读错误，不能 500
         return {"ok": False, "error": "图编排失败：{}".format(e), "code": code}
 
-    payload = state.get("engines") or {}
-    if not isinstance(payload, dict):
-        payload = {}
-    # 图路径下 engines 即原样 payload；若为空（例如走了 fallback 分支）也要能返回
-    if not payload:
-        payload = {
-            "code": code,
-            "stock_info": state.get("quote"),
-            "errors": list(state.get("errors") or []),
-        }
-    payload = dict(payload)  # 不就地改图状态里的对象
-    payload.setdefault("errors", [])
+    # ⚠️ A7 修复（2026-10-02 hermes 审计）：以 **legacy 的键骨架**为基底再合并图产出，
+    #    这样无论走 analyze 还是 fallback，响应键集都与 legacy 逐字一致 ——
+    #    否则 fallback（当前生产的唯一可达分支）只返回 5 个键，前端 13 个引擎字段全缺。
+    from data.diagnosis import empty_diagnosis_payload
+
+    payload = empty_diagnosis_payload(code)
+    engines = state.get("engines")
+    if isinstance(engines, dict):
+        for k, v in engines.items():
+            payload[k] = v                       # 只覆盖骨架里已有的键 + errors 等
+    else:
+        payload["stock_info"] = state.get("quote") or payload["stock_info"]
     for e in (state.get("errors") or []):
         if e not in payload["errors"]:
             payload["errors"].append(e)
