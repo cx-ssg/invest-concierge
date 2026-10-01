@@ -23,6 +23,8 @@
 唯一差别是 `message` 一句话，而应消费该差别的 **LLM 判官从未实现** ⇒ 是纯装饰档
 （详见 `evidence.py` 文件头与 `docs/M1_EVAL_REPORT.md` §4i）。
 """
+from collections import Counter
+
 import numpy as np
 
 from utils.rag.bm25 import BM25Index
@@ -32,6 +34,13 @@ from utils.rag.tokenize import tokenize
 
 RRF_K = 60
 DEFAULT_POOL_MIN = 50
+# ⚠️ 2026-10-02 **同文档限额**（diversity）：默认每文档最多 **2** 块进入 top-k。
+#   **为什么需要**：语料切到 PDF 全文后（75 → 268 块），`doc#6`「2026 半年报」单篇占 **198 块（74%）**，
+#   同文档的相似块会占满 top-k，把其它文档的正确答案挤出 —— 实测（holdout 21 条正例）：
+#     · `rel-0029`「被调查或者侦查的事态发展怎么样了？」gold 被挤到 **rank 8**，top-5 **全是 doc#6**；
+#     · `rel-0026`「今年股东大会什么时候召开？」gold 被挤到 **rank 6**，top-5 里金杜律所文书占 3 块。
+#   设 `None` 即关闭（**等价旧行为**，用于 A/B 对照）。
+MAX_PER_DOC_DEFAULT = 2
 
 
 def _cosine_scores(query_vec, matrix):
@@ -55,11 +64,13 @@ def _top_k(scores, k, min_score=0.0):
 
 
 def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
-               judge=None, bm25_index=None):
+               judge=None, bm25_index=None, max_per_doc=MAX_PER_DOC_DEFAULT):
     """返回 `(order, rrf_scores, evidence)`。
 
     - `judge`：`EvidenceJudge` 实例（**必须用全库构建**，见其 docstring）；None = 跳过判据
     - `bm25_index`：可复用的 `BM25Index`（避免每次查询重建，扩容后是 O(N·L) 的纯 Python 循环）
+    - `max_per_doc`：**同文档限额**（每文档最多几块进 top-k）；`None` = 关闭（旧行为）。
+      限额后不足 `k` 时按原 RRF 顺序**回填** —— 多样性不以"返回变少"为代价。
     - `evidence.level == "none"` → **仍返回候选块**，只标注证据不足（2026-09-17 改，见上）
     - 空查询 / 空语料 → `([], {}, None)`
     """
@@ -114,4 +125,22 @@ def run_hybrid(query, matrix, meta, k=5, pool=None, query_vec=None,
         rrf[idx] = rrf.get(idx, 0.0) + 1.0 / (RRF_K + rank + 1)
 
     order = sorted(rrf.keys(), key=lambda i: -rrf[i])
-    return order[:k], rrf, evidence
+    # ⚠️ 2026-10-02 **同文档限额**（diversity）：按 RRF 顺序取，但每文档最多 `max_per_doc` 块 ——
+    #   避免单篇大文档（PDF 全文；doc#6 占 74% 的块）用相似块占满 top-k，
+    #   把其它文档的正确答案挤出（实测 rel-0029 → rank 8、rel-0026 → rank 6）。
+    #   **限额导致不足 k 时按原顺序回填** —— 多样性不能以"返回变少"为代价（那会降召回）。
+    if max_per_doc is None:
+        return order[:k], rrf, evidence
+    capped, seen, spill = [], Counter(), []
+    for i in order:
+        doc = meta[i].get("doc_id")
+        if seen[doc] < max_per_doc:
+            seen[doc] += 1
+            capped.append(i)
+        else:
+            spill.append(i)
+        if len(capped) >= k:
+            break
+    if len(capped) < k:
+        capped.extend(spill[: k - len(capped)])
+    return capped[:k], rrf, evidence
