@@ -83,7 +83,8 @@ v2 生成时**按 kind 分层奇偶交替分流**，保证两组构成一致 —
 | `MRR@10` | 首个答案块排名倒数的均值 | |
 
 **报告方式**：扫 **none 档**阈值 → 输出 `(delegated_rate, over_abstain_rate)` 曲线 → 按代价选工作点 → **给区间**。
-⚠️ 2026-09-19 **撤档后更正**：本行原写 `(strong_fp_rate, over_abstain_rate)`，而 `strong_fp_rate` **已随 `strong` 档移除**（分档只剩 none / weak），`scan()` 的 strong 曲线也已降级为「仅历史参考」。
+⚠️ 2026-09-19 **撤档后更正**：本行原写 `(strong_fp_rate, over_abstain_rate)`，而 `strong_fp_rate` **已随 `strong` 档移除**（分档只剩 none / weak）。
+⚠️ 2026-10-01（F1）**再更正**：`scan()` 的 strong 曲线**已于该日彻底删除**（对象不存在），`--scan` 现输出 **none 稠密网格 + `SAR_NONE` 敏感性表**（v1 固定生产值 `V1_NONE`，6 行）—— 后者直接服务「要不要调高 `SAR_NONE`」的决策。
 ⚠️ 2026-09-17 起 headline 用 **`out_of_domain` 的主动弃权率**（当前 20/20 = 1.000）。
 n<30 时不写"明显"这类词。
 

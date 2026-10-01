@@ -4,6 +4,9 @@
 
 ## [Unreleased] - 2026-09-15
 
+### Changed
+- **M1 F1 · `SAR_NONE` 敏感性表**（2026-10-01）：`scripts/rag_eval.py --scan` **删掉「假想 strong 档曲线」**（`strong` 档已于 2026-09-18 撤下，曲线描述的对象不存在 = 语义残留），替换为 **`SAR_NONE` 敏感性表** —— `v1` 固定生产值 `V1_NONE`、6 行 `(sar_none, 负例残留暴露, oa)`，直接服务「**要不要调高 `SAR_NONE`**」这个此前只能靠 35 点稠密网格肉眼判断的决策。实测（tuning）：0.06 → 0.30 时残留暴露 **0.459 → 0.141**、oa **0.000 → 0.923** —— **没有免费方向**。⚠️ 与第七轮审计二那张表**口径不同**（其用 `v1<0.45`，本表用生产值 0.35；已在 `none` 网格逐点复算证实）⇒ 旧表**低估**风险面。新增 4 条回归锁（判别力 / **边界** / **v1 阈值** / **CLI 打印调用链**），并用**变异测试**实证它们真会红（三个变异全部被抓住）；`344 passed`。详见 `docs/M1_EVAL_REPORT.md` §4j 与计划 `docs/M1_F1_SAR_NONE_PLAN.md`
+
 ### Fixed
 - **P0-1 配置链断点**：`agent_run(model=_reasoner_model())` 的默认参数在 **import 时**被求值一次 → 设置页切换模型对 Agent 对话链路**完全无效**。改为 `model=None` + 函数内解析（调用时读配置）；显式传 `model` 仍优先。（来源：2026-09-14 外部评审复核，见 `docs/COVERAGE_DESIGN.md` §11）
 - **P0-2 工具成功标记失真**：`tool_end.ok` 用 `startswith("工具执行失败")` 判定，而真实错误格式是 `{"error": "工具执行出错：..."}`（agent_core.py:368）→ `ok` 恒为 True，排障被误导。新增 `tool_output_is_error()` 统一判定（非 str / 非 JSON / `error` 为真值 → 失败，空 `error` 不误判），`tool_end.ok` 改用之。

@@ -3,21 +3,20 @@
 
 指标（替代旧口径的"可分 / 不可分"）：
 
-- `A3a 域外主动弃权`  **主结论** —— 域外查询被主动弃权的比例（**不受 strong 档可达性影响**）
-- `over_abstain_rate` 域内可答却被判 none（**召回护栏** A3c）
-- `strong_fp_rate`    应弃权却判 strong —— ⚠️ **仅负例侧敏感**，且在本阈值下 holdout 上
-                      **数学上不可能触发**（最大负例 SAR 0.1382 < 0.15）。它**不是**主指标
-- `正例 strong 率`    strong 档**可达性**的唯一报警量（< 0.20 会打 `[!]`）
-- `delegated_rate`    落 weak 的比例（**成本指标**，不是失败）
+- `A3a 域外主动弃权`    **主结论** —— 域外查询被主动弃权的比例（`out_of_domain` 应 = 1.000）
+- `over_abstain_rate`   域内可答却被判 none —— **可答查询被剥夺引用凭据的比例**（A3c 召回护栏）
+- `delegated_rate`      非 none 占比 —— ⚠️ 判官从未实现 ⇒ 这是**风险面**（"可被引用的错误断言"的参数），
+                        **撤档（2026-09-18）后不再是"成本指标"**；补数 `abstain_recall = 1 − delegated_rate`
 - `Recall@k` / `MRR@10` 答案块是否被召回、排多前（块级标注才有）
-- `trusted_recall`    ⚠️ **派生量** ≡ `Recall@k − over_abstain`，不是独立测量
+- `trusted_recall`      ⚠️ **派生量** ≡ `Recall@k − over_abstain`，不是独立测量
 
-（旧口径的 `weak_fp_rate` 已删 —— weak 是**委派点**，不是失败；见 README 的标注规范。）
+（旧口径的 `weak_fp_rate` 已删 —— weak 是**委派点**，不是失败；见 README 的标注规范。
+ 撤下 `strong` 档后，`strong_fp_rate` / `正例 strong 率` 一并**失去对象**，已从上表移除。）
 
 用法：
-  python scripts/rag_eval.py                    # holdout（⚠️ 已用于选 strong 阈值 = **拟合集**）
+  python scripts/rag_eval.py                    # holdout（⚠️ 已用于阈值选择 = **拟合集**，非干净验收组）
   python scripts/rag_eval.py --split tuning     # 调参（会打印警告）
-  python scripts/rag_eval.py --scan             # 扫 SAR/V1 阈值出曲线
+  python scripts/rag_eval.py --scan             # 扫阈值：none 稠密网格 + SAR_NONE 敏感性表
 """
 import argparse
 import json
@@ -216,14 +215,13 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
     }
 
 
-def scan(rows_rel, rows_irr, judge):
-    """扫**两组阈值**，输出权衡曲线。
+# `SAR_NONE` 敏感性表的扫描点（2026-10-01 F1）。**含当前值 0.06**，其上界到 0.30 ——
+# 再往上（0.40）风险面已趋近 0 而 oa 接近 1，对决策无增量信息（见 --scan 的两组实测）。
+SAR_NONE_SWEEP = (0.06, 0.10, 0.15, 0.20, 0.25, 0.30)
 
-    ⚠️ 2026-09-18 第六轮审计二 P2-2 / U11：此前**只扫 none 档**（`SAR_NONE`/`V1_NONE`），
-    **没有 strong 档维度** —— 而 `evidence.py` 的注释却写「改前必须先重跑
-    `scripts/rag_threshold_probe.py`」，那个工具**从不扫 `SAR_STRONG`**（硬编码 4+4 条老查询）
-    ⇒ **是个死指针**。这正是「`SAR_STRONG=0.15` 只能在 holdout 上选」的**根因**：
-    **标定工具缺失 → 被迫用验收池**。现在补上 strong 维度。
+
+def scan(rows_rel, rows_irr, judge):
+    """扫阈值，输出两张权衡表。
 
     **纪律**：两个池**互相留出** —— 在 tuning 上定值，用 holdout 报**一次**（反之亦然）；
     **绝不在同一个池上既选阈值又报成绩**。
@@ -231,12 +229,19 @@ def scan(rows_rel, rows_irr, judge):
     `weak_fp` 口径订正（2026-09-17）：旧版 `oa` 算的是"非 strong"（含 weak），
     与 `evaluate()` 的 `over_abstain`（只算 none）**不是同一个量** —— 两处口径必须一致。
 
-    返回 `{"none": [...], "strong": [...]}`：
-    - none 档 `(sar_none, v1_none, weak_fp, over_abstain)`
+    返回 `{"none": [...], "sar_none": [...]}`：
+    - `none`：5×7 稠密网格 `(sar_none, v1_none, weak_fp, over_abstain)`
       `weak_fp` = 应弃权却**未判 none** 的比例（= 会进入生成上下文的暴露面）
       `over_abstain` = 域内可答却被判 none 的比例（召回护栏）
-    - strong 档 `(sar_strong, 正例 strong 率, 负例 strong 数, 负例 strong 率)`
-      ⚠️ 判据与生产一致：**`v1 > 0`**（第六轮审计一 P1 起）—— 不是 `feature` 非空。
+    - `sar_none`（**2026-10-01 F1 新增**）：把 `v1` 固定为 `V1_NONE`（实测 none 侧几乎由 SAR
+      承担）后的 **6 行干净表** `(sar_none, 负例残留暴露, over_abstain)` ——
+      **直接服务「要不要调高 `SAR_NONE`」**：调高会同时**压低**残留暴露、**抬高** oa
+      （可答查询被剥夺引用凭据的比例）。**纪律：先定"可接受的引用丢失率"，再动 `SAR_NONE`。**
+      ⚠️ 与 `none` 网格在共同点 `(sar_n, V1_NONE)` 上数值必须一致
+      （交叉锁：`tests/test_rag_eval.py::test_sar_none_grid_matches_none_grid_at_v1_none`）。
+
+    ⚠️ **历史**：此处原有一条「假想 strong 档曲线」。该档已于 2026-09-18 撤档（`7270159`），
+    曲线所描述的对象**不存在** ⇒ 已删除（残留清理；计划 `docs/M1_F1_SAR_NONE_PLAN.md` §0）。
     """
     a_rel = [judge.assess(r["query"]) for r in rows_rel]
     a_irr = [judge.assess(r["query"]) for r in rows_irr]
@@ -249,12 +254,14 @@ def scan(rows_rel, rows_irr, judge):
             oa = sum(1 for e in a_rel if e.sar < sar_n and e.v1 < v1_n)
             none_out.append((sar_n, v1_n, (len(a_irr) - irr_none) / n_irr, oa / n_rel))
 
-    strong_out = []
-    for sar_s in (0.10, 0.12, 0.14, 0.15, 0.16, 0.18, 0.20, 0.25):
-        rel_s = sum(1 for e in a_rel if e.v1 > 0 and e.sar >= sar_s)
-        irr_s = sum(1 for e in a_irr if e.v1 > 0 and e.sar >= sar_s)
-        strong_out.append((sar_s, rel_s / n_rel, irr_s, irr_s / n_irr))
-    return {"none": none_out, "strong": strong_out}
+    # ⚠️ 独立计算（**不从 `none` 网格派生**）：将来改稠密网格的取值集合时，本表不得被静默改变。
+    # 两处一致性由测试交叉锁（见 docstring）。
+    sar_none_out = []
+    for sar_n in SAR_NONE_SWEEP:
+        irr_none = sum(1 for e in a_irr if e.sar < sar_n and e.v1 < ev_mod.V1_NONE)
+        oa = sum(1 for e in a_rel if e.sar < sar_n and e.v1 < ev_mod.V1_NONE)
+        sar_none_out.append((sar_n, (len(a_irr) - irr_none) / n_irr, oa / n_rel))
+    return {"none": none_out, "sar_none": sar_none_out}
 
 
 def main(argv=None):
@@ -349,8 +356,8 @@ def main(argv=None):
     print("                                覆盖率从 5/20 掉到 0 也不会有别的指标变红)")
     print("  trusted_recall    = %.3f   (gold 在 top-k **且** 判据采信 —— 判据退化时它会变红；"
           % m["trusted_recall"])
-    print("                                ⚠️ **派生量**：当前恒等于 `Recall@k − over_abstain`，"
-          "对 strong 档改动完全无反应，勿当独立指标并列)")
+    print("                                ⚠️ **派生量**：当前恒等于 `Recall@k − over_abstain`"
+          "（构造性恒等，不是独立测量；判据退化时它会变红，见下方对照用例）")
     print("  MRR@10            = %.3f" % m["MRR@10"])
     print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
     for kind, d in sorted(m["by_kind"].items()):
@@ -365,13 +372,16 @@ def main(argv=None):
             flag = "  ← 当前" if (abs(sar_n - ev_mod.SAR_NONE) < 1e-9
                                   and abs(v1_n - ev_mod.V1_NONE) < 1e-9) else ""
             print("  sar<%.2f v1<%.2f -> weak_fp=%.3f oa=%.3f%s" % (sar_n, v1_n, wfp, oa, flag))
-        # ⚠️ 2026-09-18 **撤下 `strong` 档**后，这条曲线**不再用于定阈值**（已经没有对象）。
-        # 保留它只为**历史对照**与「将来若恢复三档时的参考」——
-        # **它不代表系统当前存在 `strong` 档**（当前分档只有 none / weak）。
-        print("[eval] --- （仅历史参考，勿用于定阈值）假想 strong 档曲线 —— 判据同 v1>0 ---")
-        for sar_s, rel_rate, irr_n, irr_rate in curves["strong"]:
-            print("  sar>=%.2f -> 假想正例 %.3f   假想负例 %d 条 (%.3f)"
-                  % (sar_s, rel_rate, irr_n, irr_rate))
+        # ⚠️ 2026-10-01（F1）：此处原印「假想 strong 档曲线」—— 该档已于 2026-09-18 撤档，
+        # 曲线描述的对象**不存在**（语义残留）⇒ 删除，位置让给**服务真实决策**的敏感性表。
+        print("[eval] --- SAR_NONE 敏感性表（v1 固定 %.2f）—— 服务「要不要调高 SAR_NONE」 ---"
+              % ev_mod.V1_NONE)
+        print("  sar_none   负例残留暴露   oa(可答查询被剥夺引用凭据)")
+        for sar_n, neg, oa in curves["sar_none"]:
+            flag = "  <- 当前" if abs(sar_n - ev_mod.SAR_NONE) < 1e-9 else ""
+            print("  %.2f       %.3f          %.3f%s" % (sar_n, neg, oa, flag))
+        print("  -> 决策提示：先定「可接受的引用丢失率(oa)」，再动 SAR_NONE ——"
+              " 两个方向都有真实代价，没有免费选项")
     print("[eval] RESULT: OK")
     return 0
 

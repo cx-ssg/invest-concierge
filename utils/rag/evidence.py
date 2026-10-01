@@ -52,8 +52,11 @@ K1 = 1.5
 # ---- 阈值（⚠️ 改前必须跑 `python scripts/rag_eval.py --scan --split tuning`）----
 # ⚠️ 2026-09-18 第六轮审计二 P2-2：本行原写「改前必须先重跑 scripts/rag_threshold_probe.py」，
 #   但**那个工具从不扫 `SAR_STRONG`**（硬编码 4+4 条老查询，只输出 REL 误弃权 / IRR 误放行）
-#   ⇒ **是死指针**。现改指 `rag_eval.py --scan`（本轮已补 strong 档维度）。
+#   ⇒ **是死指针**。现改指 `rag_eval.py --scan`。
 #   **这正是「0.15 只能在 holdout 上选」的根因**：标定工具缺失 → 被迫用验收池。
+# ⚠️ 2026-10-01（F1）：`--scan` 现输出 **none 稠密网格 + `SAR_NONE` 敏感性表**
+#   （`v1` 固定本文件的 `V1_NONE`，6 行 `(sar_none, 负例残留暴露, oa)`）。
+#   **调 `SAR_NONE` 前先看这张表** —— 原句"本轮已补 strong 档维度"随撤档作废。
 #
 # ⚠️⚠️ 阈值口径订正（第五轮两份审计独立判定违规后）：
 #   下面这些「实测分界」**全部来自 holdout** —— 而 holdout **已被用于选择 `SAR_STRONG`**，

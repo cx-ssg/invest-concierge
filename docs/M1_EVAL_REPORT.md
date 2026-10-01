@@ -790,7 +790,7 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 |---|---|
 | **行为层（实质）** | `evidence.py`：删 `SAR_STRONG` / `V1_STRONG` / `LEVEL_STRONG`，分档只出 `none` / `weak`；<br>`retrieve.py`：**非 none 一律带 `WEAK_EVIDENCE_NOTE`** ⇒ **"跳过警示"这条通道消失** |
 | 指标层 | 删 `strong_fp_rate` / `strong_rel_rate` / `by_kind` 的 `strong` 列 |
-| 工具层 | `scan()` 的 strong 曲线降级为「**仅历史参考，勿用于定阈值**」 |
+| 工具层 | `scan()` 的 strong 曲线降级为「**仅历史参考，勿用于定阈值**」<br>⚠️ **2026-10-01（F1）已把这条曲线彻底删除** —— 它描述的对象（`strong` 档）不存在 = 语义残留；位置让给 **`SAR_NONE` 敏感性表**，见 **§4j** |
 | 测试 | 删 2 条锁 strong 的用例；新增 3 条锁撤档（`test_no_strong_tier_is_produced` /<br>`test_no_strong_tier_in_metrics` / `test_by_kind_has_no_strong_column`）|
 
 ### ⚠️ 语义变更（**必须记住**）
@@ -826,6 +826,66 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 
 **教训：结构性改动前先 `grep` 引用面，再决定要不要开分支。**
 
+## 4j. F1 · `SAR_NONE` 敏感性表（2026-10-01）
+
+**动机**：调高 `SAR_NONE` 的两难**在输出里看不到** —— `--scan` 原先只有 5×7=35 点稠密网格
+（信息在里面，但被噪声埋住）；而 `curves["strong"]`（§4i 降级为"仅历史参考"的那条）服务的
+是**已撤下的档位**，属语义残留 ⇒ 用一张 6 行干净表**替换**它。
+
+**改了什么**（3 处同步；计划 `docs/M1_F1_SAR_NONE_PLAN.md`）：
+
+| 处 | 改动 |
+|---|---|
+| `scripts/rag_eval.py::scan()` | 删 `strong_out`；新增 `SAR_NONE_SWEEP` + `sar_none_out`（**`v1` 固定 `V1_NONE`**；**独立计算**、不从 `none` 网格派生，避免将来网格变动静默改表） |
+| `scripts/rag_eval.py::main()` | 打印敏感性表（`<- 当前` 标记 + 决策提示）；文件头指标清单清掉撤档遗留条目 |
+| `tests/test_rag_eval.py` | 删旧 strong 断言；新增 3 条：形状+单调性+**判别力**／与 `none` 网格**交叉一致**／无 strong 曲线 |
+
+**实测（2026-10-01，本机）**：
+
+| sar_none | tuning 残留暴露 / oa | holdout 残留暴露 / oa |
+|---|---|---|
+| **0.06（当前）** | **0.459 / 0.000** | **0.420 / 0.095** |
+| 0.10 | 0.318 / 0.615 | 0.120 / 0.333 |
+| 0.15 | 0.200 / 0.692 | 0.080 / 0.619 |
+| 0.20 | 0.153 / 0.923 | 0.080 / 0.857 |
+| 0.25 | 0.141 / 0.923 | 0.080 / 0.857 |
+| 0.30 | 0.141 / 0.923 | 0.080 / 0.857 |
+
+- `oa` = 域内可答却被判 `none` 的比例 = **被剥夺引用凭据的比例**（`none` 是唯一剥 `url`/`title` 的档位）
+- **0.06 是 oa=0 的唯一工作点**（tuning）；holdout 0.06 的 oa=0.095 来自 2 条判据误弃权，与既有记录一致
+- **tuning 到 0.25、holdout 到 0.15 之后，残留暴露基本不再下降**，而 `oa` 已到 0.86~0.92
+  ⇒ 调高只在这之前有意义；再往上纯亏
+
+⚠️ **口径警告（本轮实测发现，重要）**：第七轮审计二给的对照表用的是 **`v1<0.45`**，
+**不是生产值 `v1 < V1_NONE = 0.35`** —— 我在 `none` 网格上逐点复算证实
+（`(0.10, 0.45)` → 0.271/0.615、`(0.15, 0.45)` → 0.082/0.769，与审计二**逐位吻合**）。
+差异落在"残留暴露"列（负例侧有样本在 `v1 ∈ [0.35, 0.45)`）：
+**0.271 vs 生产口径 0.318**（0.10 处）、**0.082 vs 0.200**（0.15 处）
+⇒ **拿审计二那张表做决策会低估风险面**。本表按生产值算，**以本表为准**。
+
+**未做（YAGNI）**：不动 `SAR_NONE` 取值本身 —— 先定「可接受的引用丢失率」，再动手。
+
+**critic 独立审计两轮**（都是外部视角，不是自查）：
+
+1. **第一轮 `REVISIONS_NEEDED(3)`，Score 2/5** —— 三条全部成立，**第一条是本仓第 6 次「只修一半」**：
+   - 🔴 **死代码**：我那一版 edit 只替换了 `scan()` 的 **docstring**，新写的函数体接在后面、**旧函数体（含 `strong_out`）原样留在下方**，被新 `return` 遮住 ⇒ **`strong` 曲线其实没删，而测试全绿**（旧代码在 `return` 之后）。**根因：编辑后没读回**。已删 + 读回验证（函数内现在只有一处 `return`）。
+   - 🟠 **测函数不测调用链**：三条新测试只测 `scan()` 的返回值 ⇒ 新增 `test_main_scan_path_prints_sar_none_table`（走 CLI + `capsys`：锁表头 / `<- 当前` 唯一性 / 6 行 / **列序与标记行** / 输出里不得再有"假想"）。
+   - 🟠 **判别力盲区两处**：原 fixture 的 v1 全相同（v1 阈值写错不会被发现）、且无 sar 恰等于扫描点的样本（`<` 写成 `<=` 不会被发现）⇒ 补 `r10c`（sar=0.10 边界）与 `r10b`（**v1=0.36**，紧贴 `V1_NONE`）。
+2. **第二轮 `REVISIONS_NEEDED(2)`，Score 4/5** —— 两条必改：
+   - 🔴 **我把一句措辞改出了新错误**：把 trusted_recall 的"对 strong 档改动无反应"改成"对阈值档位/判据取值改动完全无反应"——**事实错了**（`trusted_recall` 依赖 `level`，而 `level` 由 `SAR_NONE`/`V1_NONE` 决定；§4h 那条 `test_trusted_recall_turns_red_when_judge_degrades` 正是反证）。已改为只陈述「**构造性恒等，不是独立测量**」。
+   - 🟠 **`V1_NONE` 在 `(0.10, 0.40]` 内漂移仍会漏网**（fixture 用 0.40 时的残留盲区）⇒ `r10b` 的 v1 由 0.40 收紧到 **0.36**。
+   - 另据此补清三处"当前口径"残留：`evidence.py` 阈值注释（"本轮已补 strong 档维度"）、`rag_eval.py` 的"对 strong 档改动"空指代、`COVERAGE_DESIGN.md` §3.3 的三档描述 + 已删常量初值。
+
+**变异测试 —— 判别力是「实测」出来的，不是声称的**：把实现/常量**故意改坏**，看测试红不红：
+
+| 变异 | 结果 |
+|---|---|
+| `sar < sar_n` → `sar <= sar_n` | ✅ 抓住（边界锁 + 两表交叉锁） |
+| `e.v1 < V1_NONE` → `e.v1 < 0.45` | ✅ 抓住（期望值锁 + 交叉锁） |
+| `V1_NONE = 0.35` → `0.40` | ✅ 抓住（期望值锁 + 表头锁）—— **这条正是第二轮审计点出的盲区** |
+
+**验收**：`344 passed`（340+4）｜`--scan` 两组 `RESULT: OK` / `EXIT=0`｜K6 探针 `RESULT: OK` / `EXIT=0`
+
 ## 5. 诚实边界
 
 - **n 仍不均**：rel **34** / neg **135**（tuning 85 + holdout 50）。⚠️ `out_of_domain` **全库 50 条，
@@ -842,11 +902,11 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 ## 6. 复现
 
 ```bash
-python -m pytest -p no:warnings                      # 341 passed
+python -m pytest -p no:warnings                      # 343 passed（2026-10-01）
 python scripts/rag_ingest.py --code 600519 --limit 20   # 重建语料（75 块）
 python scripts/rag_eval_build.py --per-doc 1            # 生成评测集（约 5.5 分钟）
-python scripts/rag_eval.py --split holdout              # ⚠️ holdout 已用于选 strong 阈值（**拟合集**）
-python scripts/rag_eval.py --split tuning --scan        # 调参曲线（**含 strong 档**，2026-09-18 起）
+python scripts/rag_eval.py --split holdout              # ⚠️ holdout 已用于阈值选择（**拟合集**）
+python scripts/rag_eval.py --split tuning --scan        # none 稠密网格 + **SAR_NONE 敏感性表**（2026-10-01 起）
 python scripts/rag_eval.py --split holdout --scan       # 只报**一次**（**别在这里选值**）
 ```
 

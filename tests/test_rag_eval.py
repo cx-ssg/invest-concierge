@@ -9,6 +9,7 @@ import json
 import numpy as np
 
 from scripts import rag_eval as ev
+from utils.rag import evidence as ev_mod
 from utils.rag.evidence import Evidence
 
 
@@ -271,9 +272,9 @@ def test_evaluate_rejects_qvec_length_mismatch():
 def test_scan_returns_none_curve_grid():
     """扫描必须覆盖多个 none 档阈值组合，供按代价选工作点。
 
-    ⚠️ 2026-09-18 **撤下 `strong` 档**后，`scan()` 的 strong 曲线**不再用于定阈值**
-    （已经没有对象）—— 它保留在返回值里仅作**历史对照**（`curves["strong"]`），
-    故本测试**只对 none 曲线下实质断言**。
+    ⚠️ 2026-10-01（F1）：原末尾断言 `curves["strong"]` 已删除 —— 那条"假想 strong 曲线"
+    描述的对象已于 2026-09-18 撤档（`7270159`）后不存在，属**语义残留**。
+    它的位置现由 `curves["sar_none"]`（下方三条测试）承担。
     """
     judge = _FakeJudge({"b": Evidence(0.2, 0.8, "weak")})
     curves = ev.scan([{"query": "b", "answer_chunk_ids": []}],
@@ -282,8 +283,166 @@ def test_scan_returns_none_curve_grid():
     assert len(none_pts) >= 10, "none 档曲线点太少无法选工作点"
     assert all(len(p) == 4 for p in none_pts)
     assert any(fp == 0.0 for _, _, fp, _ in none_pts), "扫描里应存在零误放行的点"
-    # 假想 strong 曲线仍在（8 个点），但**只作历史对照**，不再是可选的阈值工作点
-    assert len(curves["strong"]) >= 6, "（历史对照用）假想 strong 曲线点数不足"
+
+
+# --- F1（2026-10-01）：`SAR_NONE` 敏感性表 -----------------------------------
+# 背景：调高 `SAR_NONE` 会同时压低「负例残留暴露」、抬高「可答查询被剥夺
+# 引用凭据的比例（oa）」。这条权衡在 5×7=35 点的 `curves["none"]` 网格里**存在但被
+# 噪声埋住** ⇒ 单独出一张 v1 固定的 6 行表。计划：docs/M1_F1_SAR_NONE_PLAN.md
+
+
+def _sensitivity_judge():
+    """按 sar/v1 分层的假证据 —— 覆盖**三个判别力维度**（缺一即盲区）：
+
+    | 样本 | sar | v1 | 作用 |
+    |---|---|---|---|
+    | `r05` | 0.05 | 0.10 | 低于所有上界 → 每个点都判 none |
+    | `r10c` | **0.10** | 0.10 | **边界锁**：sar 恰等于扫描点 ⇒ 只有严格 `<` 才不判 none |
+    | `r12` | 0.12 | 0.10 | 仅 `sar_n > 0.12` 的点判 none |
+    | `r10b` | 0.10 | **0.36** | **v1 阈值锁**：只比 `V1_NONE=0.35` 高 0.01 ⇒ 任何 > 0.36 的阈值都会误判它 |
+    | `i03` | 0.03 | 0.10 | 每个点都判 none → 永不暴露 |
+    | `i18` | 0.18 | 0.10 | 仅 `sar_n > 0.18` 的点判 none |
+
+    实测期望（n_rel=4 / n_irr=2）：
+
+    | sar_n | 0.06 | 0.10 | 0.15 | 0.20 | 0.25 | 0.30 |
+    |---|---|---|---|---|---|---|
+    | oa（正例判 none） | 0.25 | 0.25 | 0.75 | 0.75 | 0.75 | 0.75 |
+    | neg（负例未判 none） | 0.5 | 0.5 | 0.5 | 0.0 | 0.0 | 0.0 |
+
+    ⚠️ 两张锁的**具体**含义：
+    - 若实现把 `sar < sar_n` 写成 `<=` ⇒ `sar_n=0.10` 处 oa 从 0.25 变 0.50（`r10c` 被误判）
+    - 若实现用错 v1 阈值（任何 > 0.36 的取值，如 0.40 / 0.45 / 把常量调大）⇒ `sar_n=0.30` 处
+      oa 从 0.75 变 1.00（`r10b` 被误判）
+      ⚠️ 取值特意贴到 **0.36**：第二轮 critic 审计指出，若用 0.40，则 `V1_NONE` 在
+      `(0.10, 0.40]` 内漂移时**六格全不变、四条锁全绿** —— 那是残留的盲区。
+    """
+    return _FakeJudge({
+        "r05": Evidence(0.05, 0.10, "none"),
+        "r10c": Evidence(0.10, 0.10, "none"),   # 边界：恰等于扫描点 0.10
+        "r12": Evidence(0.12, 0.10, "weak"),
+        "r10b": Evidence(0.10, 0.36, "weak"),   # v1 只比 V1_NONE=0.35 高 0.01（见 docstring）
+        "i03": Evidence(0.03, 0.10, "none"),
+        "i18": Evidence(0.18, 0.10, "weak"),
+    })
+
+
+def _sensitivity_rows():
+    rel = [{"query": q, "answer_chunk_ids": []} for q in ("r05", "r10c", "r12", "r10b")]
+    irr = [{"query": q, "answer_chunk_ids": []} for q in ("i03", "i18")]
+    return rel, irr
+
+
+def test_scan_returns_sar_none_sensitivity_grid():
+    """`SAR_NONE` 敏感性表：v1 固定 `V1_NONE`，扫 sar 上界 —— 服务「要不要调高 SAR_NONE」。
+
+    ⚠️ **判别力**（防"恒等摆设"）：除形状外还锁**数值真的随 `sar_n` 变化**、以及
+    **边界与 v1 阈值两处实现细节**（见 `_sensitivity_judge` docstring）——
+    只锁形状的测试在被测函数退化成常量时**不会红**（本仓 2026-09-18 踩过
+    `guarded_recall` 恒等指标的坑；2026-10-01 又因"只测函数不测调用链"被审计打回）。
+    """
+    import pytest
+    rel, irr = _sensitivity_rows()
+    curves = ev.scan(rel, irr, _sensitivity_judge())
+    grid = curves["sar_none"]
+    assert len(grid) == 6, "敏感性表应为 6 行（0.06/0.10/0.15/0.20/0.25/0.30）"
+    assert all(len(p) == 3 for p in grid), "每行应为 (sar_n, 负例残留暴露, oa)"
+    assert any(abs(s - ev_mod.SAR_NONE) < 1e-9 for s, _, _ in grid), "表里必须含当前 SAR_NONE 点"
+    # 单调性（数学必然 —— 写反方向的实现会被抓住）
+    for (s1, n1, o1), (s2, n2, o2) in zip(grid, grid[1:]):
+        assert s2 > s1, "扫描点必须递增"
+        assert n2 <= n1 + 1e-12, "sar_n 增大时负例残留暴露不应上升"
+        assert o2 >= o1 - 1e-12, "sar_n 增大时 oa 不应下降"
+    by_sar = {s: (n, o) for s, n, o in grid}
+    assert by_sar[0.30] != by_sar[0.06], "表不随 sar_n 变化 —— 恒等摆设"
+    assert by_sar[0.06] == pytest.approx((0.5, 0.25)), "当前点数值与期望不符（口径或符号写反）"
+    assert by_sar[0.30] == pytest.approx((0.0, 0.75)), "末点数值与期望不符（口径或符号写反）"
+    # 边界锁：sar 恰等于 0.10 的样本不得被判 none（严格小于）
+    assert by_sar[0.10][1] == pytest.approx(0.25), \
+        "边界写成 `<=` 了 —— sar 恰等于阈值时被误判 none（sar_n=0.10 处 oa 应变 0.50）"
+    # v1 阈值锁：v1=0.40 的样本（≥ V1_NONE=0.35）任何时候都不该判 none
+    assert by_sar[0.30][1] == pytest.approx(0.75), \
+        "v1 阈值用错 —— v1=0.36 被误判 none（任何 > 0.36 的阈值都会让此处 oa 变 1.00）"
+
+
+def test_sar_none_grid_matches_none_grid_at_v1_none():
+    """两张表在共同点 `(sar_n, V1_NONE)` 上必须**逐位一致** —— 防同一事实两处口径漂移。
+
+    （新表是独立循环算的，不是为了"少写代码"从 none 网格派生 —— 独立算 + 交叉锁，
+    既免疫将来 `curves["none"]` 网格变动，又不会静默分叉。）
+    """
+    import pytest
+    rel, irr = _sensitivity_rows()
+    curves = ev.scan(rel, irr, _sensitivity_judge())
+    none_map = {(s, v): (w, o) for s, v, w, o in curves["none"]}
+    for s, neg, oa in curves["sar_none"]:
+        assert (s, ev_mod.V1_NONE) in none_map, "none 网格缺少共同点 sar_n=%.2f" % s
+        assert none_map[(s, ev_mod.V1_NONE)] == pytest.approx((neg, oa)), \
+            "sar_n=%.2f 处两张表不一致 —— 口径已分叉" % s
+
+
+def test_scan_has_no_strong_curve():
+    """撤档后 `--scan` **不应再返回假想 strong 曲线**（对象已不存在，属残留）。
+
+    2026-10-01 F1：它被 `SAR_NONE` 敏感性表替代 —— 而它当初的存在理由（"将来若恢复三档"）
+    已随用户拍板的撤档决定作废。
+    """
+    judge = _FakeJudge({"b": Evidence(0.2, 0.8, "weak")})
+    curves = ev.scan([{"query": "b", "answer_chunk_ids": []}],
+                     [{"query": "a", "answer_chunk_ids": []}], judge)
+    assert "strong" not in curves, "假想 strong 曲线仍在 —— 2026-09-18 撤档的残留未清"
+
+
+class _FakeConn:
+    """只为 `main()` 的 `conn.close()` 提供一个对象。"""
+
+    def close(self):
+        pass
+
+
+_FAKE_METRICS = {
+    "n_rel": 4, "n_irr": 2, "n_over_abstain": 1,
+    "by_kind": {"out_of_domain": {"n": 2, "none": 2, "weak": 0},
+                "near_miss": {"n": 2, "none": 1, "weak": 1}},
+    "delegated_rate": 0.5, "abstain_recall": 0.5, "over_abstain_rate": 0.25,
+    "Recall@%d" % ev.TOP_K: 1.0, "tool_recall": 1.0, "hard_stop_count": 0,
+    "trusted_recall": 0.75, "MRR@10": 1.0,
+}
+
+
+def test_main_scan_path_prints_sar_none_table(monkeypatch, capsys):
+    """**走 CLI 路径**锁 `--scan` 的打印接线（本仓盲区：测试测函数、不测调用链）。
+
+    为什么需要它：F1 把「假想 strong 档曲线」换成 `SAR_NONE` 敏感性表。
+    若只测 `scan()` 的**返回值**，打印这一层**零覆盖** —— 把 `main()` 里的
+    `curves["sar_none"]` 改回旧键、或整段删掉，套件照样全绿。
+    （同源教训：`load_holdout()` 曾是**死代码**，而 340 条测试全绿。）
+    ⚠️ 2026-10-01 critic 审计的 P2 就是「新表三条测试测函数不测调用链」⇒ 本用例即其修法。
+
+    做法：把 `main()` 的上下游全部替换成假对象，**只保留打印逻辑与它的接线**在测。
+    """
+    import re
+    rel, irr = _sensitivity_rows()
+    judge = _sensitivity_judge()
+    monkeypatch.setattr(ev, "load_holdout", lambda: (rel, irr))
+    monkeypatch.setattr(ev.rag_store, "get_conn", lambda db=None: _FakeConn())
+    monkeypatch.setattr(ev.rag_store, "load_index", lambda conn: (_META, _MATRIX))
+    monkeypatch.setattr(ev, "EvidenceJudge", lambda corpus: judge)
+    monkeypatch.setattr(ev, "embed_texts_batched", lambda qs: [[1.0, 0.0] for _ in qs])
+    monkeypatch.setattr(ev, "evaluate", lambda *a, **k: dict(_FAKE_METRICS))
+
+    rc = ev.main(["--scan"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "SAR_NONE 敏感性表" in out, "`--scan` 没打印敏感性表 —— 打印接线断了"
+    assert out.count("<- 当前") == 1, "`<- 当前` 标记应恰好出现一次"
+    assert "假想" not in out, "旧的「假想 strong 曲线」仍在打印 —— 残留未清"
+    rows = re.findall(r"^\s+0\.\d\d\s+[01]\.\d\d\d\s+[01]\.\d\d\d", out, re.M)
+    assert len(rows) == 6, "敏感性表应有 6 行数据，实际 %d 行" % len(rows)
+    # 列序 + 标记行 + 表头口径（第二轮审计指出：只数行数会漏掉"列交换"/"标记打错行"两种改坏方式）
+    assert re.search(r"^\s+0\.06\s+0\.500\s+0\.250\s*<-\s*当前\s*$", out, re.M), \
+        "当前行应为 `0.06  0.500  0.250  <- 当前`（列序或标记行被改坏了）"
+    assert "v1 固定 0.35" in out, "表头应点名 v1 固定为 `V1_NONE`（口径必须写在输出里）"
 
 
 def test_load_missing_split_returns_empty(tmp_path, monkeypatch):
