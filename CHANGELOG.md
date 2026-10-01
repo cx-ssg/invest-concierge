@@ -5,6 +5,34 @@
 > 版本线说明（2026-10-01）：项目内部曾以 `v1.2 / v1.2.1` 称呼「多 provider 模型接入」阶段，而对外 tag 只有 `v1.0.0`。
 > 自本版起对外统一按 **semver `v1.x`** 记录；历史分段内容原样保留，仅重组标题。
 
+## [Unreleased]
+
+> M2 长期记忆层（设计 `docs/COVERAGE_DESIGN.md` §4；施工计划 `docs/M2_MEMORY_PLAN.md`）。
+> 版本号待定（M2 是新功能，按 semver 应为 minor）。
+
+### Added
+- **M2 · 长期记忆层**：三类记忆**分离存储、分离召回**（§4.1）——
+  `preference` 偏好（**每次对话必注入**，小、固定）/ `fact` 事实（**按当前问题涉及的标的召回**）/
+  `experience` 经验（**向量召回 top-3**，无向量时按时间倒序并**如实标注**）。
+  - 新表 `memories` + `memories_pending`（`data/database.py`）；去重的**单一事实源**是
+    `UNIQUE(kind, key)`：偏好/事实按语义键覆盖更新并返回同一 id，经验用**内容指纹**作 key
+    （⚠️ 不能用 `''`：多条 `''` 会互相冲突 —— 定稿时实测确证）
+  - `utils/long_memory.py`：写入 / 三类召回 / 删除 / 候选确认 / 内容指纹 / 向量编码（不可用即降级）/ 隐私开关
+  - **写入时机（§4.2）**：显式（「记住…」）直接落库；隐式由 LLM 抽取 → **`pending` 表 → 用户确认**
+    ⇒ **AI 不自行写记忆**；`llm_fn` 不可用时退到保守规则兜底（只认显式意图）
+  - **注入（`utils/agent_core.py::agent_run`）**：在持仓上下文之后追加 `## 长期记忆` 段；
+    沿用 v1.1 三件套 C 的惯例 —— **无命中不注入、不发事件**（不暗示"我记得"）；
+    `memory_used` 事件的 `sources` 细分为 `preferences` / `facts` / `experiences`
+  - **API（`server/routers/memory.py`）**：列表（按 kind 分组，可审计）/ 新增 / **删除** /
+    pending 列表与确认 / 隐私开关 / **召回预览**（让用户看到"AI 到底看到了什么"）
+  - 验收（§4.3 P2 门禁）：**B1** 说偏好 ⇒ 抽取落库 ✅｜**B2** 再问 ⇒ prompt 体现该偏好 + 发事件 ✅｜
+    **B3** `pytest tests/test_m2_memory.py -q` → **38 passed**（写入/召回/去重/删除四类）✅｜
+    **B4** 删除 ⇒ 再问**不再体现** ✅（含 API 面与 prompt 面双重验证）
+  - 新增 `services/memory_service.py`（薄服务层，业务规则仍在 `long_memory` 单一事实源）
+  - ⚠️ **本版未做前端设置页入口**：记忆的查看/删除/确认目前走 API
+    （`GET/DELETE /api/memory*`、`POST /api/memory/pending/{id}`）——UI 入口待后续；
+    功能面已完整（B4 的删除已由 API 端到端验证）
+
 ## [1.2.0] - 2026-10-02
 
 > M3 编排层（LangGraph 渐进接入）+ F4 人审通道 + 结构拆分。

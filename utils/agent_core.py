@@ -623,6 +623,28 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
             system += ("\n\n## 已知用户上下文（来自用户本地持仓快照，仅供个性化引用；"
                        "引用时自然说明依据，禁止编造未提供的持仓事实）\n" + brief)
             memory_sources.append("holdings")
+
+    # M2 长期记忆（docs/COVERAGE_DESIGN.md §4）：偏好必注入 / 事实按标的 / 经验向量 top-3。
+    # ⚠️ 沿用同一惯例：**无命中不注入、不发事件**（不暗示"我记得"）；
+    #    注入失败也不得影响对话（记忆是增强项，不是依赖项）。
+    if memory and not _demo_mode_on():
+        try:
+            import re as _re
+
+            from utils import long_memory as _lm
+
+            # A 股代码：0/3/4/6/8 开头的 6 位数字（避开年份、长数字串的误匹配）
+            codes = _re.findall(r"(?<!\d)([03468]\d{5})(?!\d)", str(task or ""))
+            block, counts = _lm.build_recall_block(str(task or ""), stock_codes=codes)
+            if block:
+                system += "\n\n" + block
+                memory_sources.append("long_term")
+                for key in ("preferences", "facts", "experiences"):
+                    if counts.get(key):
+                        memory_sources.append(key)
+        except Exception:  # noqa: BLE001 - 记忆注入失败静默跳过（无记忆≠错误）
+            pass
+
     if memory_sources:
         _progress_structured("memory_used", {"sources": memory_sources})
 

@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from data.database import init_db
 from server.routers import agent, core, diary, diagnosis, holdings, settings
 from server.routers import alert, reports
+from server.routers import memory
 
 
 def create_app() -> FastAPI:
@@ -37,7 +38,7 @@ def create_app() -> FastAPI:
         from services import alert_service
         alert_service.stop_scheduler()
 
-    app = FastAPI(title="invest-concierge", version="1.1.0", lifespan=lifespan)
+    app = FastAPI(title="invest-concierge", version="1.2.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router)
     app.include_router(alert.router)
     app.include_router(reports.router)
+    app.include_router(memory.router)
 
     # M1：前端构建产物存在则托管（桌面壳/纯浏览器模式的 UI 入口）
     # 打包(exe)时 __file__ 指向 _MEIPASS 临时解包目录，dist 以 'frontend/dist' 打包在其中
