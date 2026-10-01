@@ -31,6 +31,10 @@ export function StockDiagnosisPage() {
   const [submitted, setSubmitted] = useState<string | null>(null)
   const [inputError, setInputError] = useState<string | null>(null)
   const [tab, setTab] = useState('fundamental')
+  // M3 图编排的人审状态（F4）：仅 `ORCHESTRATOR=graph` 时出现
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+  const [reviewErr, setReviewErr] = useState<string | null>(null)
 
   const { data, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['diagnosis', submitted],
@@ -62,6 +66,23 @@ export function StockDiagnosisPage() {
 
   const d: DiagnosisPayload | undefined = data
   const name = d?.stock_info?.name ? String(d.stock_info.name) : ''
+  const reviewPending = d?._orchestrator?.review_status === 'pending'
+
+  async function submitReview(decision: 'approve' | 'revise') {
+    if (!submitted) return
+    setReviewBusy(true)
+    setReviewErr(null)
+    try {
+      const next = await api.diagnosisReview(submitted, decision, reviewNote)
+      // 直接把新 payload 写进缓存，避免再跑一次昂贵的 GET
+      qc.setQueryData(['diagnosis', submitted], next)
+      if (decision === 'revise') setReviewNote('')
+    } catch (e) {
+      setReviewErr(String(e))
+    } finally {
+      setReviewBusy(false)
+    }
+  }
 
   return (
     <section className="flex min-w-0 flex-1 flex-col gap-4">
@@ -174,6 +195,32 @@ export function StockDiagnosisPage() {
               </div>
             ) : null}
           </div>
+
+          {/* 人审面板（M3 图编排 · F4）：只有 graph 模式跑到 human_review 挂起时才出现 */}
+          {reviewPending ? (
+            <Card className="flex flex-col gap-2 p-3">
+              <div className="text-[12.5px] text-ink-2">
+                本次走<strong>图编排</strong>（第 {d?._orchestrator?.review_round ?? 0} 轮），报告已生成，等待你确认
+                <span className="text-ink-3">（最多 {3} 轮，到限自动通过）</span>
+              </div>
+              <input
+                value={reviewNote}
+                onChange={(e) => setReviewNote(e.target.value)}
+                placeholder="要求修改时写下批注（会带进重跑后的报告；通过可留空）"
+                className="rounded-tile border border-hairline bg-surface px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-3"
+              />
+              <div className="flex flex-wrap gap-2">
+                <Btn variant="primary" disabled={reviewBusy} onClick={() => void submitReview('approve')}>
+                  确认通过
+                </Btn>
+                <Btn disabled={reviewBusy} onClick={() => void submitReview('revise')}>
+                  要求修改并重跑
+                </Btn>
+                {reviewBusy ? <Spinner size={14} /> : null}
+              </div>
+              {reviewErr ? <div className="text-[12px] text-fall">{reviewErr}</div> : null}
+            </Card>
+          ) : null}
 
           {/* 6 tab */}
           <div className="flex flex-col gap-3">

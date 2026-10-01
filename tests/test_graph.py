@@ -585,3 +585,94 @@ def test_graph_path_degrades_when_graph_raises(monkeypatch):
     monkeypatch.setattr(gmod, "run_diagnosis_graph", _boom)
     out = svc.get("600519")
     assert out["ok"] is False and "error" in out
+
+
+# ======================================================================
+# F4 · 人审 resume 通道（服务层 + 路由）
+# ======================================================================
+def test_review_rejects_bad_decision(monkeypatch):
+    """decision 只允许 approve / revise；非法值必须给可读错误（不是悄悄通过）。"""
+    monkeypatch.delenv("ORCHESTRATOR", raising=False)
+    from services import diagnosis_service as svc
+
+    for bad in ("", None, "ok", "同意", "yes"):
+        out = svc.review("600519", bad)
+        assert out.get("ok") is False, f"非法 decision {bad!r} 未被拒：{out}"
+        assert "decision" in out.get("error", "")
+
+
+def test_review_rejects_bad_code(monkeypatch):
+    from services import diagnosis_service as svc
+
+    for bad in ("", None, "60051", "abcdef"):
+        out = svc.review(bad, "approve")
+        assert out.get("ok") is False and "error" in out, f"未拒绝 {bad!r}"
+
+
+def test_review_in_legacy_mode_explains(monkeypatch):
+    """legacy 编排下没有人审环节 —— 必须**明确说明**，而不是假装成功。"""
+    monkeypatch.delenv("ORCHESTRATOR", raising=False)
+    from services import diagnosis_service as svc
+
+    out = svc.review("600519", "approve")
+    assert out.get("ok") is False
+    assert out.get("mode") == "legacy"
+    assert "legacy" in out.get("error", "")
+
+
+def test_review_resumes_suspended_graph(monkeypatch):
+    """graph 模式：`review(approve)` 必须真的把挂起的图推进到 approved 且返回同形 payload。"""
+    monkeypatch.setenv("ORCHESTRATOR", "graph")
+    from services import diagnosis_service as svc
+    from data.diagnosis import empty_diagnosis_payload
+    import utils.orchestrator.adapters as ad
+
+    # 只桩化数据源，图本身真跑
+    monkeypatch.setattr(ad, "_fetch_quote", lambda code: {"code": code})
+    monkeypatch.setattr(ad, "_fetch_financials", lambda code: {})
+    monkeypatch.setattr(ad, "_fetch_moneyflow", lambda code: {})
+    monkeypatch.setattr(ad, "_run_engines", lambda state: {})
+    monkeypatch.setattr(ad, "_retrieve_evidence",
+                        lambda code: {"items": [], "level": "", "note": ""})
+    monkeypatch.setattr(ad, "_synthesize_report", lambda state: "报告")
+
+    first = svc.get("600519")
+    assert first["_orchestrator"]["review_status"] == "pending", first["_orchestrator"]
+
+    out = svc.review("600519", "approve")
+    assert out["ok"] is True
+    assert out["_orchestrator"]["review_status"] == "approved", out["_orchestrator"]
+    # 键集仍必须与 legacy 契约一致（A7 的单一事实源）
+    expected = set(empty_diagnosis_payload("600519").keys()) | {"ok", "_orchestrator"}
+    assert not (expected - set(out.keys())), sorted(expected - set(out.keys()))
+
+
+def test_review_api_endpoint_is_wired(monkeypatch):
+    """POST /api/stocks/{code}/diagnosis/review 必须挂上，且把 body 正确传给服务层。"""
+    from fastapi.testclient import TestClient
+    from server.main import app
+    from services import diagnosis_service as svc
+
+    seen = {}
+
+    def _fake_review(code, decision, note=""):
+        seen.update(code=code, decision=decision, note=note)
+        return {"ok": True}
+
+    monkeypatch.setattr(svc, "review", _fake_review)
+    client = TestClient(app)
+    r = client.post("/api/stocks/600519/diagnosis/review",
+                    json={"decision": "revise", "note": "再补一段估值"})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True}
+    assert seen == {"code": "600519", "decision": "revise", "note": "再补一段估值"}, seen
+
+
+def test_review_api_rejects_missing_decision():
+    """缺 decision ⇒ 422（pydantic 必填），不得进服务层。"""
+    from fastapi.testclient import TestClient
+    from server.main import app
+
+    client = TestClient(app)
+    r = client.post("/api/stocks/600519/diagnosis/review", json={})
+    assert r.status_code == 422, r.text

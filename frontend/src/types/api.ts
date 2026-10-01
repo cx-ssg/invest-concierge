@@ -445,4 +445,14 @@ export interface DiagnosisPayload {
   percentile?: Percentile | null
   errors?: string[]
   error?: string
+  /** M3 图编排（`ORCHESTRATOR=graph`）时可观测元信息；legacy 模式下不存在 */
+  _orchestrator?: {
+    mode: string
+    branch?: string | null
+    trace?: string[]
+    review_status?: 'pending' | 'approved' | 'revise' | string | null
+    review_round?: number
+    evidence_count?: number
+    report_chars?: number
+  } | null
 }

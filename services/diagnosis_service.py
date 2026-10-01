@@ -63,25 +63,16 @@ def _get_legacy(code):
     return to_jsonable(payload)
 
 
-def _get_via_graph(code):
-    """M3 图编排路径（`ORCHESTRATOR=graph`）。
+def _shape_payload(code, state):
+    """把图状态整形为对外 payload —— `get` 与 `review` **共用**（键集恒与 legacy 一致）。
 
-    ⚠️ 契约一致性：从图状态里取回 `analyze` 节点产出的**完整 payload**，
-    形状与 legacy 完全一致 ⇒ 前端零改动。图特有的可观测信息只放在额外键 `_orchestrator`。
+    ⚠️ A7 修复（2026-10-02 hermes 审计）：以 legacy 的键骨架为基底再合并图产出，
+    这样无论走 analyze 还是 fallback，响应键集都与 legacy 逐字一致 ——
+    否则 fallback（当时生产的唯一可达分支）只返回 5 个键，前端 13 个引擎字段全缺。
     """
-    from utils.orchestrator.graph import run_diagnosis_graph
-
-    try:
-        state = run_diagnosis_graph(code, thread_id="diagnosis:{}".format(code),
-                                    checkpointer=_checkpointer())
-    except Exception as e:  # noqa: BLE001 - 图本身失败也要给出可读错误，不能 500
-        return {"ok": False, "error": "图编排失败：{}".format(e), "code": code}
-
-    # ⚠️ A7 修复（2026-10-02 hermes 审计）：以 **legacy 的键骨架**为基底再合并图产出，
-    #    这样无论走 analyze 还是 fallback，响应键集都与 legacy 逐字一致 ——
-    #    否则 fallback（当前生产的唯一可达分支）只返回 5 个键，前端 13 个引擎字段全缺。
     from data.diagnosis import empty_diagnosis_payload
 
+    state = state or {}
     payload = empty_diagnosis_payload(code)
     engines = state.get("engines")
     if isinstance(engines, dict):
@@ -104,3 +95,67 @@ def _get_via_graph(code):
         "report_chars": len(state.get("report") or ""),
     }
     return to_jsonable(payload)
+
+
+#: 同一标的的诊断会话 thread 前缀（`review` 必须用同一个才能续跑）
+def _thread_id(code):
+    return "diagnosis:{}".format(code)
+
+
+def _get_via_graph(code):
+    """M3 图编排路径（`ORCHESTRATOR=graph`）—— **新一轮诊断**，跑到人审处挂起。
+
+    ⚠️ 先 `delete_thread` 清掉同一 thread 的旧检查点：否则若上一次已被人审推到 END，
+    再 GET 会**直接返回上次的已确认结论**（而不是新的一轮 pending）。
+    这同时也避免了检查点按 thread 无界累积（外部审计 F4 提到的问题之一）。
+    """
+    from utils.orchestrator.graph import run_diagnosis_graph
+
+    cp = _checkpointer()
+    try:
+        cp.delete_thread(_thread_id(code))
+    except Exception:  # noqa: BLE001 - 清理失败不该阻断诊断本身
+        pass
+    try:
+        state = run_diagnosis_graph(code, thread_id=_thread_id(code), checkpointer=cp)
+    except Exception as e:  # noqa: BLE001 - 图本身失败也要给出可读错误，不能 500
+        return {"ok": False, "error": "图编排失败：{}".format(e), "code": code}
+    return _shape_payload(code, state)
+
+
+#: 人审决定（F4）—— 与 `utils/orchestrator/nodes.py` 的判别保持同一套取值
+REVIEW_APPROVE = "approve"
+REVIEW_REVISE = "revise"
+VALID_REVIEWS = (REVIEW_APPROVE, REVIEW_REVISE)
+
+
+def review(stock_code, decision, note=""):
+    """人审提交（F4）：把 `interrupt()` 挂起的图**继续推进**。
+
+    根因：没有这条通道，图的人审节点在产品路径上永远停在 pending，
+    且每次 GET 都整轮重跑（外部审计 F4）。
+    """
+    code, err = _validate(stock_code)
+    if err:
+        return err
+
+    d = str(decision or "").strip().lower()
+    if d not in VALID_REVIEWS:
+        return {"ok": False, "code": code,
+                "error": "decision 必须是 {} 之一".format(" 或 ".join(VALID_REVIEWS))}
+
+    from utils.orchestrator.flags import use_graph
+
+    if not use_graph():
+        return {"ok": False, "code": code, "mode": "legacy",
+                "error": "当前编排为 legacy（`ORCHESTRATOR` 未设为 graph），没有人工确认环节"}
+
+    from utils.orchestrator.graph import run_diagnosis_graph
+
+    try:
+        state = run_diagnosis_graph(code, thread_id=_thread_id(code),
+                                    checkpointer=_checkpointer(),
+                                    resume=str(note or ""), review=d)
+    except Exception as e:  # noqa: BLE001 - 提交失败要给可读错误，不能 500
+        return {"ok": False, "error": "人审提交失败：{}".format(e), "code": code}
+    return _shape_payload(code, state)

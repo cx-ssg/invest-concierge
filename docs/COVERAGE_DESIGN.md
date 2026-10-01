@@ -191,11 +191,19 @@ meta(key, value)                             -- 索引版本、模型名、token
 > ✅ **实现状态（2026-10-02，commit `f88ad52`）**：本节的图结构、四条决策与 §10.5 五条实现要点
 > **已全部落地**；验收 **C1/C2/C3/C4 四项全过**（详见 `CHANGELOG.md [Unreleased]`）。
 > 实现文件：`utils/orchestrator/{flags,state,graph}.py`；测试：`tests/test_graph.py`（25 条）。
-> ⚠️ **如实标注两处边界**：① **C2 只真跑了 `fallback` 分支**——本机 akshare 大面积不可用
-> （`RemoteDisconnected` / 多个旧接口已下线），`analyze` 分支只有离线测试覆盖，
-> **其归一契约（`_fetch_financials` → `{income,balance,cashflow}`）尚未在真实数据源上验证**；
-> ② **exe 打包验证**：spec 已补 `hiddenimports`（`utils.orchestrator.*` + `langgraph.*`），
-> 真构建结果见本节末/后续提交。**若打包出问题，按 §6 约定 M3 不进 exe。**
+> **后续进展（2026-10-02 当日）**
+> - ✅ **F4 已补齐**：新增 `POST /api/stocks/{code}/diagnosis/review` + 诊断页人审面板，
+>   人审节点在产品路径上**可被推进**（此前永远 pending）；`get()` 改为每次都是**新一轮诊断**
+>   （先清同 thread 检查点），顺带消除检查点无界累积。
+> - ✅ **结构拆分**：`graph.py` 579 → **179 行**（+ `adapters.py` 238 / `nodes.py` 224），
+>   满足「模块 ≤500 行」。
+> - ✅ **exe 打包已验证**：`dist_m3/invest-concierge.exe`（433 MB，真 PE）构建成功，
+>   TOC 核对 `utils.orchestrator` / `langgraph.graph` / `langgraph.types` /
+>   `langgraph.checkpoint.sqlite` / `langchain_core` **全部打入**；`sqlite_vec` 虽为
+>   `langgraph-checkpoint-sqlite` 的声明依赖但**SqliteSaver 源码 0 次使用**（实测构造+setup OK）⇒ 无害。
+> - ⚠️ **仍然成立的边界**：C2 真跑的仍是 `fallback` 分支（本机 akshare 不可用）；
+>   `analyze` 分支由**离线测试 + 桩化可用数据源**覆盖（已加反例锁：
+>   喂真 DataFrame 时 `branch=analyze` 且引擎被调用）。
 
 ### 5.1 接入策略：**只接一条链路，不重写**
 

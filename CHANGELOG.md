@@ -31,6 +31,20 @@
   - ⚠️ **未验证项（如实标注）**：C2 只真跑了 `fallback` 分支 —— 本机 akshare 大面积不可用
     （`RemoteDisconnected` 等），`analyze`（6 引擎）分支**仅有离线测试覆盖**；
     exe 打包验证见下。
+- **M3 · 人审 resume 通道（F4）**：外部审计指出「`git grep resume -- server/ services/` 零命中」
+  ⇒ 图的人审节点在**产品路径上永远停在 pending**，且每次 GET 整轮重跑。本次补齐：
+  - 新增 `POST /api/stocks/{code}/diagnosis/review`（`decision=approve|revise` + 可选 `note`）；
+    服务层新增 `diagnosis_service.review()`，与 `get()` **共用** `_shape_payload()`（沿用 A7 的单一事实源）。
+  - 前端：`api.diagnosisReview()` + 诊断页人审面板（`_orchestrator.review_status == "pending"` 时出现，
+    带批注输入框与「确认通过 / 要求修改并重跑」两个按钮），提交后直接把新 payload 写入 react-query 缓存。
+  - **`get()` 语义修正**：每次 GET 都是**新一轮诊断**（先 `delete_thread` 清掉同一 thread 的旧检查点），
+    否则「上次已被人审推到 END」会让本次 GET **直接返回旧结论**而非挂起新的 pending；
+    这同时缓解了审计指出的「检查点按 thread 无界累积」。
+  - 验收：C1 **38 passed**（新增 6 条 F4 锁，含 API 接线与 422 校验）/ C4 **393 passed**；
+    前端 `npx tsc --noEmit` 通过 + `npm run build` 成功。
+- **M3 · 结构拆分**：`utils/orchestrator/graph.py` **579 → 179 行**，新增
+  `adapters.py`（238 行，薄封装 = 打桩落点）与 `nodes.py`（224 行，节点/条件边/判据），
+  满足项目自定的「模块 ≤500 行」约束；`graph.py` 保留 re-export 与组装入口。
 
 ## [1.1.0] - 2026-10-02
 

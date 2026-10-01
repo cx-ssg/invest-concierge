@@ -118,6 +118,14 @@ export const api = {
   diagnosis: (code: string, signal?: AbortSignal) =>
     request<DiagnosisPayload>(`/api/stocks/${code}/diagnosis`, {}, 90_000, signal),
 
+  /** M3 图编排的人审提交（F4）：approve 收口 / revise 带批注重跑（可能 15-40s） */
+  diagnosisReview: (code: string, decision: 'approve' | 'revise', note = '') =>
+    request<DiagnosisPayload>(
+      `/api/stocks/${code}/diagnosis/review`,
+      jsonInit('POST', { decision, note }),
+      120_000,
+    ),
+
   // ==================== 持仓 ====================
   holdings: {
     list: () => request<FundHolding[]>('/api/holdings/funds'),
