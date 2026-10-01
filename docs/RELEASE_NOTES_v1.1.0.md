@@ -1,6 +1,6 @@
 # invest-concierge v1.1.0
 
-**发布日**：2026-10-01 · 上一个版本：[v1.0.0](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0)
+**发布日**：2026-10-02 · 上一个版本：[v1.0.0](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0)
 
 本次更新的主题是 **私域知识层（M1）**：让助手在回答时能**给出原文出处**，而不是「听起来很确定地编一段」。
 

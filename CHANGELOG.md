@@ -4,7 +4,8 @@
 
 > 版本线说明（2026-10-01）：项目内部曾以 `v1.2 / v1.2.1` 称呼「多 provider 模型接入」阶段，而对外 tag 只有 `v1.0.0`。
 > 自本版起对外统一按 **semver `v1.x`** 记录；历史分段内容原样保留，仅重组标题。
-## [1.1.0] - 2026-10-01
+
+## [1.1.0] - 2026-10-02
 
 ### Changed
 - **双轨语料对照实验（PDF 全文 vs API 正文，2026-10-01）**：新增 `scripts/rag_ingest_pdf.py`（走**巨潮**官方平台下 PDF → `pypdf` 抽全文 → 复用 `chunk_document` 切块 → 写**独立库** `kb_pdf.db`；东财 PDF 有反爬不可用）与 `scripts/rag_pdf_ab.py`（**预注册**问题集的对照评测）+ `tests/test_pdf_ingest.py`（4 条纯逻辑测试）。
