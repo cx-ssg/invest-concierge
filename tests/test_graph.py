@@ -12,7 +12,9 @@ import sys
 import pytest
 
 from utils.orchestrator import flags
+from utils.orchestrator import adapters as ad
 from utils.orchestrator import graph as g
+from utils.orchestrator import nodes as N
 from utils.orchestrator.state import (
     BRANCH_ANALYZE,
     BRANCH_FALLBACK,
@@ -97,16 +99,16 @@ def test_graph_nodes_are_the_designed_six():
 # ======================================================================
 def _stub_all(monkeypatch, *, financials, **kw):
     """把所有外部依赖替换为纯桩；`trace` 由真实节点函数产生。"""
-    monkeypatch.setattr(g, "_fetch_quote", lambda code: {"code": code, "price": 1.0})
-    monkeypatch.setattr(g, "_fetch_financials", lambda code: financials)
-    monkeypatch.setattr(g, "_fetch_moneyflow", lambda code: {"main_net": 0.0})
-    monkeypatch.setattr(g, "_run_engines", lambda state: {"fundamental": "ok"})
-    monkeypatch.setattr(g, "_retrieve_evidence",
+    monkeypatch.setattr(ad, "_fetch_quote", lambda code: {"code": code, "price": 1.0})
+    monkeypatch.setattr(ad, "_fetch_financials", lambda code: financials)
+    monkeypatch.setattr(ad, "_fetch_moneyflow", lambda code: {"main_net": 0.0})
+    monkeypatch.setattr(ad, "_run_engines", lambda state: {"fundamental": "ok"})
+    monkeypatch.setattr(ad, "_retrieve_evidence",
                         lambda code: {"items": [{"chunk_id": 1, "source": "doc", "text": "t"}],
                                       "level": "weak", "note": "证据不足档"})
-    monkeypatch.setattr(g, "_synthesize_report", lambda state: "报告正文")
+    monkeypatch.setattr(ad, "_synthesize_report", lambda state: "报告正文")
     for k, v in kw.items():
-        monkeypatch.setattr(g, k, v)
+        monkeypatch.setattr(ad, k, v)   # 节点走 adapters 晚绑定
 
 
 def test_branch_fallback_when_financials_incomplete(monkeypatch):
@@ -170,7 +172,7 @@ def test_human_review_node_cap_does_not_interrupt(monkeypatch):
         raise AssertionError("已达上限却仍调用了 interrupt()")
 
     monkeypatch.setattr(lt, "interrupt", _boom)
-    monkeypatch.setattr(g, "interrupt", _boom)
+    monkeypatch.setattr(N, "interrupt", _boom)
 
     # 入口判断：round=MAX-1 时"本轮之后即达上限" ⇒ 必须直接收口
     out = g._node_human_review({"stock_code": "600519", "trace": [],
@@ -186,7 +188,7 @@ def test_human_review_node_cap_does_not_interrupt(monkeypatch):
         seen["n"] += 1
         return {"review": "approve"}
 
-    monkeypatch.setattr(g, "interrupt", _capture)
+    monkeypatch.setattr(N, "interrupt", _capture)
     out2 = g._node_human_review({"stock_code": "600519", "trace": [],
                                  "review_round": 0, "errors": []})
     assert seen["n"] == 1, "未到上限却没有 interrupt"
@@ -283,12 +285,12 @@ def test_branch_analyze_reachable_with_real_shaped_source(monkeypatch):
         engines_called["n"] += 1
         return {"fundamental": "ok"}
 
-    monkeypatch.setattr(g, "_fetch_quote", lambda code: {"code": code, "price": 1.0})
-    monkeypatch.setattr(g, "_fetch_moneyflow", lambda code: {})
-    monkeypatch.setattr(g, "_run_engines", _engines)
-    monkeypatch.setattr(g, "_retrieve_evidence",
+    monkeypatch.setattr(ad, "_fetch_quote", lambda code: {"code": code, "price": 1.0})
+    monkeypatch.setattr(ad, "_fetch_moneyflow", lambda code: {})
+    monkeypatch.setattr(ad, "_run_engines", _engines)
+    monkeypatch.setattr(ad, "_retrieve_evidence",
                         lambda code: {"items": [], "level": "", "note": ""})
-    monkeypatch.setattr(g, "_synthesize_report", lambda state: "报告")
+    monkeypatch.setattr(ad, "_synthesize_report", lambda state: "报告")
 
     out = g.run_diagnosis_graph("600519", thread_id="real-shape-analyze")
     assert out["branch"] == BRANCH_ANALYZE, f"完美数据源仍降级 ⇒ 永久降级未修：{out['branch']}"
@@ -361,7 +363,7 @@ def test_thin_adapters_reference_real_symbols():
         m = importlib.import_module(mod)
         assert hasattr(m, fn), f"底层符号不存在：{mod}.{fn}"
 
-    src = inspect.getsource(g)
+    src = inspect.getsource(ad)
     for needle in (
         "from data.stock_api import get_stock_info",
         "from data.stock_api import get_stock_moneyflow",
