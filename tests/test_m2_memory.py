@@ -469,3 +469,166 @@ def test_api_recall_preview(iso):
     # 无关标的 ⇒ 不召回该事实
     r2 = c.get("/api/memory/recall-preview", params={"question": "怎么样"}).json()
     assert "1450" not in r2["block"]
+
+
+# ======================================================================
+# 9. 审计整改回归锁（F1 / F2 / F3 / F4 / F5）
+# ======================================================================
+def test_embed_text_accepts_list_of_floats(iso, monkeypatch):
+    """⚠️ F1 读侧锁：真实 `embed_texts_batched` 返回 `list[list[float]]`。
+
+    原实现要求 numpy 的 `.tobytes` ⇒ 恒返回 None ⇒ 向量召回**永远降级**。
+    这里只桩 Ollama 边界（`embed_texts_batched`），**不桩 `embed_text`**。
+    """
+    import utils.rag.embed as re_mod
+
+    monkeypatch.setattr(re_mod, "embed_texts_batched", lambda texts: [[0.1, 0.2, 0.3]])
+    out = lm.embed_text("任意文本")
+    assert isinstance(out, bytes), f"真实形态未被接受：{out!r}"
+    assert len(out) == 3 * 4, f"float32 3 维应为 12 字节，实际 {len(out)}"
+
+
+def test_embed_text_accepts_ndarray_too(iso, monkeypatch):
+    """两种真实形态（list / ndarray）都要能吃。"""
+    import numpy as np
+    import utils.rag.embed as re_mod
+
+    monkeypatch.setattr(re_mod, "embed_texts_batched",
+                        lambda texts: [np.asarray([0.5, 0.5], dtype="float32")])
+    assert isinstance(lm.embed_text("x"), bytes)
+
+
+def test_experience_stores_embedding_column(iso, monkeypatch):
+    """⚠️ F1 写侧锁：experience 必须**真的**把向量落进 `memories.embedding`。
+
+    原实现的 `INSERT` 语句里根本没有 embedding 列 ⇒ 写侧从不产向量。
+    """
+    monkeypatch.setattr(lm, "embed_text", lambda t: b"\x00" * 16)
+    mid = lm.add(lm.KIND_EXPERIENCE, "某条经验")
+
+    conn = db.get_conn()
+    try:
+        raw = conn.execute("SELECT embedding FROM memories WHERE id = ?", (mid,)).fetchone()[0]
+    finally:
+        conn.close()
+    assert raw is not None, "experience 未落向量（写侧仍有缺陷）"
+    assert lm.get(mid)["embedded"] is True
+
+
+def test_recall_experiences_uses_vectors_when_available(iso, monkeypatch):
+    """⚠️ F1 核心锁：**有向量时必须走向量**（`embedded=True`），而不是永远时间倒序。"""
+    import numpy as np
+
+    vecs = {"甲": [1.0, 0.0], "乙": [0.0, 1.0]}
+    monkeypatch.setattr(lm, "embed_text",
+                        lambda t: np.asarray(vecs.get(str(t).strip(), [0.0, 0.0]),
+                                             dtype="float32").tobytes())
+    lm.add(lm.KIND_EXPERIENCE, "甲")
+    lm.add(lm.KIND_EXPERIENCE, "乙")
+
+    got = lm.recall_experiences("甲", top_k=1)
+    assert len(got) == 1
+    assert got[0]["content"] == "甲", f"向量排序未生效：{[g['content'] for g in got]}"
+    assert got[0]["embedded"] is True, "应标注为已向量化"
+
+
+def test_blank_key_facts_do_not_overwrite(iso):
+    """⚠️ F3 锁：两条**不同内容**的无 key fact 必须共存（原实现静默覆盖 = 数据丢失）。"""
+    a = lm.add(lm.KIND_FACT, "事实甲")
+    b = lm.add(lm.KIND_FACT, "事实乙")
+    assert a != b, "不同内容被静默覆盖成同一条"
+    rows = lm.list_all(lm.KIND_FACT)
+    assert len(rows) == 2, f"应共存 2 条，实际 {len(rows)}"
+    assert {r["content"] for r in rows} == {"事实甲", "事实乙"}
+
+
+def test_same_blank_key_content_still_dedups(iso):
+    """同内容（都无 key）重复写 ⇒ 仍是同一条（指纹相同）。"""
+    a = lm.add(lm.KIND_FACT, "事实甲")
+    b = lm.add(lm.KIND_FACT, "  事实甲  ")
+    assert a == b
+    assert len(lm.list_all(lm.KIND_FACT)) == 1
+
+
+def test_blank_key_pending_accept_does_not_overwrite(iso):
+    """⚠️ F3 锁（候选路径）：两条无 key 候选逐条 accept ⇒ 必须共存。"""
+    p1 = lm.propose(lm.KIND_PREFERENCE, "偏好甲")
+    p2 = lm.propose(lm.KIND_PREFERENCE, "偏好乙")
+    m1 = lm.accept_pending(p1)
+    m2 = lm.accept_pending(p2)
+    assert m1 != m2, "候选 accept 时互相覆盖"
+    assert len(lm.list_all(lm.KIND_PREFERENCE)) == 2
+
+
+def test_fact_recalled_by_code_in_key(iso):
+    """⚠️ F5 锁：key 里带代码但**没有 meta** 的事实，必须按标的召回。"""
+    lm.add(lm.KIND_FACT, "600519 成本 1450", key="stock:600519")
+    assert any("1450" in r["content"] for r in lm.recall_facts(["600519"])), "未按 key 召回"
+    assert not any("1450" in r["content"] for r in lm.recall_facts(["300750"])), \
+        "无关标的仍被注入（退化成全局事实）"
+
+
+def test_fund_and_etf_codes_are_recognized(iso):
+    """⚠️ F4 锁：基金/ETF（1/5 开头）也要能被标的抽取识别。"""
+    import re
+    pat = re.compile(r"(?<!\d)([0134568]\d{5})(?!\d)")
+    for code in ("161725", "510300", "600519", "000001", "300750"):
+        assert pat.findall(code) == [code], f"{code} 未被识别"
+    # 年份类短数字与长数字串不得误匹配
+    assert pat.findall("2026 年") == []
+    assert pat.findall("12345678901") == []
+
+
+def test_api_can_create_pending(iso):
+    """⚠️ F2 锁：产线必须能**产生**候选（原实现只有 list/accept/reject ⇒ pending 恒空）。"""
+    c = _client()
+    r = c.post("/api/memory/pending", json={"kind": "preference",
+                                            "content": "用户似乎偏好低波动"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    pid = r.json()["id"]
+    assert len(c.get("/api/memory/pending").json()["items"]) == 1
+    assert c.post(f"/api/memory/pending/{pid}", json={"action": "accept"}).json()["ok"] is True
+    assert c.get("/api/memory").json()["total"] == 1
+
+
+def test_api_summarize_extracts(iso, monkeypatch):
+    """⚠️ F2 锁：抽取端点可被产品调用（用桩 llm_fn 控制结果，链路是真的）。"""
+    c = _client()
+    monkeypatch.setattr(lm, "_default_llm_extract",
+                        lambda messages: [{"kind": "preference", "content": "不碰杠杆",
+                                           "key": "no_leverage"}])
+    r = c.post("/api/memory/summarize", json={"session_id": None,
+                                              "messages": None}).json()
+    assert r["ok"] is True
+    assert r["added"] == 1, r
+    assert len(r["pending"]) == 1
+
+
+def test_agent_run_extracts_candidates_at_summary_point(iso, monkeypatch):
+    """⚠️ F2 接线锁：`agent_run` 在**会话摘要触发点**（每 8 轮）顺带抽取候选。"""
+    from unittest.mock import patch
+
+    from utils import agent_core, ai_helper
+
+    calls = {"n": 0}
+
+    def _fake_summarize(session_id, messages=None, llm_fn=None):
+        calls["n"] += 1
+        lm.propose(lm.KIND_PREFERENCE, "从会话抽到的偏好")
+        return 1
+
+    def _call(messages, tools=None, model=None, temperature=None, **kw):
+        return {"type": "text", "content": "回答"}
+
+    with patch.object(ai_helper, "call_llm", _call), \
+         patch("utils.agent_memory.ensure_session", side_effect=lambda sid, title="": sid or 1), \
+         patch("utils.agent_memory.record_message", return_value=None), \
+         patch("utils.agent_memory.maybe_summarize_session", return_value=8), \
+         patch("utils.ai_helper._is_demo_mode", return_value=False), \
+         patch("services.settings_service.get_ai_read_holdings", return_value=False), \
+         patch("utils.long_memory.summarize_to_candidates", _fake_summarize):
+        agent_core.agent_run("你好", memory=True, session_id=1,
+                             structured_progress=False)
+
+    assert calls["n"] == 1, "摘要触发点未接线抽取（F2 回归）"
+    assert len(lm.list_pending()) == 1

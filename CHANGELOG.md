@@ -18,8 +18,9 @@
     `UNIQUE(kind, key)`：偏好/事实按语义键覆盖更新并返回同一 id，经验用**内容指纹**作 key
     （⚠️ 不能用 `''`：多条 `''` 会互相冲突 —— 定稿时实测确证）
   - `utils/long_memory.py`：写入 / 三类召回 / 删除 / 候选确认 / 内容指纹 / 向量编码（不可用即降级）/ 隐私开关
-  - **写入时机（§4.2）**：显式（「记住…」）直接落库；隐式由 LLM 抽取 → **`pending` 表 → 用户确认**
-    ⇒ **AI 不自行写记忆**；`llm_fn` 不可用时退到保守规则兜底（只认显式意图）
+  - **写入时机（§4.2）**：**统一走「候选 → 用户确认」**（隐式抽取 → `pending` 表 →
+    用户 accept 才落库）⇒ **AI 不自行写记忆**；`llm_fn` 不可用时退到保守规则兜底（只认显式意图）。
+    抽取有两个触发源：`agent_run` 在**会话摘要触发点**（每 8 轮）自动抽取 + `POST /api/memory/summarize` 显式触发
   - **注入（`utils/agent_core.py::agent_run`）**：在持仓上下文之后追加 `## 长期记忆` 段；
     沿用 v1.1 三件套 C 的惯例 —— **无命中不注入、不发事件**（不暗示"我记得"）；
     `memory_used` 事件的 `sources` 细分为 `preferences` / `facts` / `experiences`
@@ -30,8 +31,26 @@
     **B4** 删除 ⇒ 再问**不再体现** ✅（含 API 面与 prompt 面双重验证）
   - 新增 `services/memory_service.py`（薄服务层，业务规则仍在 `long_memory` 单一事实源）
   - ⚠️ **本版未做前端设置页入口**：记忆的查看/删除/确认目前走 API
-    （`GET/DELETE /api/memory*`、`POST /api/memory/pending/{id}`）——UI 入口待后续；
-    功能面已完整（B4 的删除已由 API 端到端验证）
+    （`GET/DELETE /api/memory*`、`POST /api/memory/pending`、`POST /api/memory/pending/{id}`、
+    `POST /api/memory/summarize`、`POST /api/memory/settings`、`GET /api/memory/recall-preview`）
+    ——UI 入口待后续；功能面已完整（B4 的删除已由 API 端到端验证）
+
+### Fixed · 二路外部审计整改（2026-10-02，Codex + 独立会话）
+审计判 **REVISIONS_NEEDED（1 阻断 + 2 重要 + 3 一般）**，**全部已修**：
+
+| # | 问题（审计实测证实） | 修法 |
+|---|---|---|
+| **F1** 🔴 阻断 | **经验"向量召回 top-3"结构性不可达（双重死）**：写侧 `INSERT` **没有 embedding 列**、读侧 `embed_text` 要求 numpy 的 `.tobytes` 而真实源返回 `list[list[float]]` ⇒ 恒 None ⇒ **永远走时间倒序**；测试全绿是因为唯一的降级用例**把坏函数自己打桩了**（与 M1/M3 同族，第 4 例） | 读侧改 `np.asarray(...).reshape(-1).tobytes()`；写侧 experience 真落 `embedding`；新增**真实形态锁**（喂 `list[list[float]]`，不桩 `embed_text`）+ **走向量锁**。真实 Ollama 复验：`embed_text` 返回 4096 字节、召回两条均 `[向量]`、语义最近的排第一 |
+| **F2** 🟠 重要 | **写入链无产品触发源**：`summarize_to_candidates` 全仓 **0 个调用方**、路由无"创建候选"端点 ⇒ pending 产线恒空、**B1 不可能发生**；CHANGELOG 声称的"显式直接落库"**与代码不符** | ① 新 `POST /api/memory/pending`（创建候选）② 新 `POST /api/memory/summarize`（按会话抽取）③ `agent_run` 在**会话摘要触发点**自动抽取（避免每轮花 token）④ 本表上方措辞已更正 |
+| **F3** 🟠 重要 | **`key=''` 静默覆盖 = 静默数据丢失**：两条不同内容的无 key fact ⇒ 只活一条且两次都返回 `ok:True` | `add()` / `propose()` 中 key 空白时**也用内容指纹**（与 experience 同规则）；新增 3 条锁（不同内容共存 / 同内容去重 / 候选逐条 accept 互不覆盖） |
+| **F4** ⚪ | `agent_run` 只认 `0/3/4/6/8` 开头代码 ⇒ **基金/ETF（161725、510300）不召回** | 正则扩到 `[0134568]`；加锁（含年份/长数字串不误匹配） |
+| **F5** ⚪ | fact 只认 `meta.code` ⇒ `key="stock:600519"` 但无 meta 的事实**退化成全局注入** | 召回时也从 key 解析代码；加锁（相关标的召回 + 无关标的不注入） |
+| **F6** ⚪ | 前端 chip 白名单只有 `holdings`/`history` ⇒ M2 的注入来源**在 UI 完全不可见** | `ChatArea.tsx` 加 `long_term`/`preferences`/`facts`/`experiences` ⇒ 显示「长期记忆」 |
+
+审计同时确认的正面项：A1–A4/A6–A9 成立、**删除真生效**、隐私开关独立且关闭即不注入不发事件、
+SQL 全参数绑定、记忆与 `kb.db` 隔离、**指定 6 个 + 另加 2 个变异 8/8 全被抓**。
+⚠️ 审计也提醒：**"0 漏网"不等于"测试足够"**——本轮真缺陷（F1 真实形态 / F2 触发链 / F4/F5）
+都不在变异集里，这正是新增上面那批"喂真实形态"锁的原因。
 
 ## [1.2.0] - 2026-10-02
 

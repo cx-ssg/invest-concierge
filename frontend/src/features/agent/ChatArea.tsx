@@ -248,10 +248,14 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
   const streaming = phase.status === 'streaming'
   const error = phase.status === 'error'
   const cancelled = phase.status === 'cancelled'
-  // 记忆显性化 chip（v1.1）：按服务端实际注入的 sources 动态显示（无注入不显示）
+  // 记忆显性化 chip（v1.1 + M2）：按服务端实际注入的 sources 动态显示（无注入不显示）
+  // ⚠️ 2026-10-02 审计 F6：原先白名单只有 holdings/history ⇒ M2 的长期记忆
+  //    （long_term / preferences / facts / experiences）在 UI 上**完全不可见**。
+  const longTermSources = ['long_term', 'preferences', 'facts', 'experiences']
   const memLabel = [
     phase.memorySources.includes('holdings') ? '你的持仓' : '',
     phase.memorySources.includes('history') ? '历史对话' : '',
+    phase.memorySources.some((s) => longTermSources.includes(s)) ? '长期记忆' : '',
   ]
     .filter(Boolean)
     .join(' · ')

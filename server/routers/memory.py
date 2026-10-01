@@ -47,10 +47,38 @@ def delete_memory(memory_id: int):
     return memory_service.remove(memory_id)
 
 
+class PendingCreateIn(BaseModel):
+    kind: str = Field(..., description="preference | fact | experience")
+    content: str = Field(..., description="候选内容")
+    key: str = Field("", description="去重键（可空，空白时会用内容指纹）")
+    meta: Optional[Dict[str, Any]] = Field(None)
+    session_id: Optional[int] = Field(None, description="溯源会话")
+
+
+class SummarizeIn(BaseModel):
+    session_id: Optional[int] = Field(None, description="按该会话的消息抽取候选")
+
+
 @router.get("/pending")
 def list_pending():
     """待确认的隐式候选（§4.2：AI 不自行写记忆）。"""
     return memory_service.list_pending()
+
+
+@router.post("/pending")
+def create_pending(body: PendingCreateIn):
+    """**创建**一条候选（F2 修复：原先产线没有任何途径产生候选，pending 恒空）。"""
+    return memory_service.create_pending(body.kind, body.content, body.key,
+                                        body.meta, body.session_id)
+
+
+@router.post("/summarize")
+def summarize(body: SummarizeIn):
+    """按会话抽取隐式候选（F2 修复：给产品一个显式抽取入口）。
+
+    ⚠️ `agent_run` 也会在**会话摘要触发点**自动抽取；本端点用于手动/补偿触发。
+    """
+    return memory_service.summarize_session(body.session_id)
 
 
 @router.post("/pending/{pending_id}")

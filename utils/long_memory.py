@@ -54,18 +54,22 @@ def embed_text(text: str) -> Optional[bytes]:
     ⚠️ 降级是**正常路径**（无 Ollama 很常见），所以这里吞掉所有异常。
     """
     try:
+        import numpy as np
+
         from utils.rag.embed import embed_texts_batched
 
         vecs = embed_texts_batched([str(text or "")])
         if not vecs:
             return None
         v = vecs[0]
-        tobytes = getattr(v, "tobytes", None)
-        if tobytes is None:
+        # ⚠️ F1 修复（2026-10-02 审计）：原实现要求 `v` 有 `.tobytes`（numpy 专属），
+        # 但 `embed_texts_batched` 实际返回 `list[list[float]]` ⇒ 恒返回 None
+        # ⇒ 经验向量召回**永远降级**（而"降级是正常路径"的优雅设计让它完全静默）。
+        # 改为 `np.asarray(...)` ⇒ 对 list / ndarray / tuple 都有效。
+        arr = np.asarray(v, dtype="float32").reshape(-1)
+        if arr.size == 0:
             return None
-        import numpy as np
-
-        return np.asarray(v, dtype="float32").tobytes()
+        return arr.tobytes()
     except Exception:  # noqa: BLE001 - 无 Ollama / 维度不符 / 任意环境问题 ⇒ 走降级
         return None
 
@@ -105,20 +109,28 @@ def add(kind: str, content: str, key: str = "", meta: Optional[Dict[str, Any]] =
     """
     _validate(kind, content)
     content = str(content).strip()
-    if kind == KIND_EXPERIENCE:
+    # ⚠️ F3 修复（2026-10-02 审计）：`key` 空白时**也**用内容指纹。
+    # 原实现只对 experience 用指纹 ⇒ 两条无 key 的 preference/fact 会因
+    # `UNIQUE(kind, '')` **静默互相覆盖**（只活一条且两次都返回 ok:True）= 静默数据丢失。
+    key = str(key or "").strip()
+    if kind == KIND_EXPERIENCE or not key:
         key = fingerprint(content)
-    key = str(key or "")
     meta_json = json.dumps(meta or {}, ensure_ascii=False)
+
+    # ⚠️ F1 修复：experience 必须**落向量**（原先 INSERT 里根本没有 embedding 列
+    # ⇒ 写侧从不产向量 ⇒ 读侧永远降级）。其它类不花这个成本。
+    emb = embed_text(content) if kind == KIND_EXPERIENCE else None
 
     conn = db.get_conn()
     try:
         conn.execute(
-            "INSERT INTO memories(kind, key, content, meta, source, session_id) "
-            "VALUES(?, ?, ?, ?, ?, ?) "
+            "INSERT INTO memories(kind, key, content, meta, source, session_id, embedding) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(kind, key) DO UPDATE SET "
             "content = excluded.content, meta = excluded.meta, source = excluded.source, "
-            "session_id = excluded.session_id, updated_at = CURRENT_TIMESTAMP",
-            (kind, key, content, meta_json, str(source or "explicit"), session_id),
+            "session_id = excluded.session_id, embedding = excluded.embedding, "
+            "updated_at = CURRENT_TIMESTAMP",
+            (kind, key, content, meta_json, str(source or "explicit"), session_id, emb),
         )
         conn.commit()
         row = conn.execute("SELECT id FROM memories WHERE kind = ? AND key = ?",
@@ -133,7 +145,9 @@ def propose(kind: str, content: str, key: str = "", meta: Optional[Dict[str, Any
     """写入**待确认候选**（§4.2 隐式：AI 不自行写记忆）。返回 pending id。"""
     _validate(kind, content)
     content = str(content).strip()
-    if kind == KIND_EXPERIENCE:
+    # ⚠️ F3：与 `add()` 同规则 —— 空白 key 也用内容指纹，避免候选逐条 accept 时互相覆盖
+    key = str(key or "").strip()
+    if kind == KIND_EXPERIENCE or not key:
         key = fingerprint(content)
     conn = db.get_conn()
     try:
@@ -216,6 +230,12 @@ def recall_facts(stock_codes: Optional[List[str]] = None) -> List[Dict[str, Any]
     out = []
     for r in rows:
         code = (r.get("meta") or {}).get("code")
+        if not code:
+            # ⚠️ F5 修复（2026-10-02 审计）：原先只认 `meta.code`，于是
+            # `key="stock:600519"` 但没 meta 的事实会**退化成"全局事实"**被注入到所有对话。
+            # 现在也从 key 里解析代码（支持 `stock:600519` / `600519` 两种写法）。
+            m = re.search(r"(\d{6})", str(r.get("key") or ""))
+            code = m.group(1) if m else None
         if not code:
             out.append(r)                       # 通用事实（计划/风格）始终相关
         elif str(code) in wanted:

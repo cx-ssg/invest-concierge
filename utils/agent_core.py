@@ -633,8 +633,10 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
 
             from utils import long_memory as _lm
 
-            # A 股代码：0/3/4/6/8 开头的 6 位数字（避开年份、长数字串的误匹配）
-            codes = _re.findall(r"(?<!\d)([03468]\d{5})(?!\d)", str(task or ""))
+            # 标的代码：A 股 0/3/4/6/8 开头 + 基金/ETF 1/5 开头（6 位数字，
+            # 避开年份与长数字串）。⚠️ 2026-10-02 审计 F4：原正则漏掉 1/5 开头
+            # ⇒ 161725（分级基金）/510300（ETF）等**不会触发事实召回**。
+            codes = _re.findall(r"(?<!\d)([0134568]\d{5})(?!\d)", str(task or ""))
             block, counts = _lm.build_recall_block(str(task or ""), stock_codes=codes)
             if block:
                 system += "\n\n" + block
@@ -690,7 +692,20 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
             content = result.get("content") or ""
             if memory:
                 record_message(session_id, "assistant", content)
-                maybe_summarize_session(session_id)
+                _n_rounds = maybe_summarize_session(session_id)
+                # M2 隐式记忆（docs/COVERAGE_DESIGN.md §4.2）：**与"会话摘要"同一触发点**
+                # （每满 SUMMARY_TRIGGER_ROUNDS 轮用户消息）抽取候选 ⇒ 落 pending 等用户确认。
+                # ⚠️ 2026-10-02 审计 F2 修复：原实现**全仓没有任何生产调用方**
+                # ⇒ pending 在产线永远为空、"说偏好就落库"（B1）不可能发生。
+                # 放在摘要触发点是为了避免**每轮对话**都花 LLM token。
+                try:
+                    from utils.agent_memory import SUMMARY_TRIGGER_ROUNDS
+                    from utils import long_memory as _lm2
+
+                    if _n_rounds and _n_rounds % SUMMARY_TRIGGER_ROUNDS == 0:
+                        _lm2.summarize_to_candidates(session_id)
+                except Exception:  # noqa: BLE001 - 抽取失败不得影响对话主流程
+                    pass
             result.setdefault("tool_trace", tool_trace)
             result["session_id"] = session_id
             result["usage"] = usage_total

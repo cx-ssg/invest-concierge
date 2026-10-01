@@ -43,6 +43,27 @@ def remove(memory_id: int) -> Dict[str, Any]:
     return {"ok": True, "id": int(memory_id)}
 
 
+def create_pending(kind: str, content: str, key: str = "",
+                   meta: Optional[Dict[str, Any]] = None,
+                   session_id: Optional[int] = None) -> Dict[str, Any]:
+    """**创建**一条隐式候选（F2：原先只有 list/accept/reject，产线无法产生候选）。"""
+    try:
+        pid = lm.propose(kind, content, key=key, meta=meta, session_id=session_id)
+    except (ValueError, TypeError) as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "id": pid}
+
+
+def summarize_session(session_id: Optional[int] = None,
+                      messages: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+    """按会话抽取隐式候选（F2：给产品一个可调用的抽取入口）。返回新增条数。"""
+    try:
+        n = lm.summarize_to_candidates(session_id, messages=messages)
+    except Exception as e:  # noqa: BLE001 - 抽取失败不该让接口 500
+        return {"ok": False, "error": "抽取失败：{}".format(e)}
+    return {"ok": True, "added": n, "pending": lm.list_pending()}
+
+
 def list_pending() -> Dict[str, Any]:
     return {"ok": True, "items": lm.list_pending()}
 
