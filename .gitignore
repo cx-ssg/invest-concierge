@@ -87,3 +87,10 @@ desktop-electron/node_modules/
 desktop-electron/release/
 desktop-electron/electron_dev.log
 desktop-electron/icon.ico
+
+# PyInstaller 构建产物：用**通用模式**而不是具体目录名 ——
+# 2026-10-02 实测踩坑：原先只有 /dist_m4//build_m4/，换名字构建 dist_m3/build_m3 后
+# 未被忽略，`git add -A` 把 90MB 的 PYZ-00.pyz 一起提交了（已 reset 撤回）。
+dist_m*/
+build_m*/
+*.pyz

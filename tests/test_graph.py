@@ -5,6 +5,7 @@
    用 monkeypatch 注入 ⇒ 不触网、不依赖 `kb.db`、不调 LLM。
 ⚠️ 设计依据：`docs/COVERAGE_DESIGN.md` §5.1（图结构）/ §5.2（四条决策）/ §10.5（实现要点）。
 """
+import os
 import sys
 
 import pytest
@@ -14,6 +15,7 @@ from utils.orchestrator import graph as g
 from utils.orchestrator.state import (
     BRANCH_ANALYZE,
     BRANCH_FALLBACK,
+    NODE_ANALYZE,
     MAX_REVIEW_ROUNDS,
     NODE_NAMES,
 )
@@ -142,19 +144,154 @@ def test_branch_analyze_when_financials_complete(monkeypatch):
 # ======================================================================
 # 5. 人审轮次硬上限（§5.2-3：防死循环烧 token）
 # ======================================================================
-def test_review_round_is_capped_at_max(monkeypatch):
-    """连续 `revise` 到上限后必须停（`review_round <= MAX_REVIEW_ROUNDS`）。"""
-    _stub_all(monkeypatch, financials={"income": {"revenue": 1.0}})
+def test_after_review_forces_end_at_cap():
+    """条件边层：`revise` 但已达上限 ⇒ 必须 END（不得再回 analyze）。
 
-    out = g.run_diagnosis_graph("600519", thread_id="t-cap")
-    rounds = 0
-    # 每次都给「要求修改」，看它是否会在上限处停下来
-    while out.get("review_status") == "revise" and rounds <= MAX_REVIEW_ROUNDS + 2:
-        rounds += 1
-        out = g.run_diagnosis_graph("600519", thread_id="t-cap",
-                                    resume="再改一版", review="revise")
-    assert rounds <= MAX_REVIEW_ROUNDS + 1, f"人审轮次未受控：跑了 {rounds} 轮"
-    assert (out.get("review_round") or 0) <= MAX_REVIEW_ROUNDS
+    ⚠️ 2026-10-02 审计 F3：原上限测试是**死测试**（首轮 `pending` ⇒ 循环 0 次迭代），
+    把两层保险同时改坏仍全绿。这里对**条件边本身**下断言 ⇒ 上限反转会被抓住。
+    """
+    assert g._after_review({"review_status": "revise", "review_round": 0}) == NODE_ANALYZE
+    assert g._after_review({"review_status": "revise",
+                            "review_round": MAX_REVIEW_ROUNDS}) == "__end__"
+    assert g._after_review({"review_status": "approved",
+                            "review_round": 1}) == "__end__"
+
+
+def test_human_review_node_cap_does_not_interrupt(monkeypatch):
+    """节点层：round 已达上限时**不得调用 `interrupt()`**，直接判 approved。
+
+    ⚠️ 用一个「一被调用就炸」的 interrupt 来证明它没被碰过 —— 这样节点层的保险
+    被停用（M4 变异）时本条必红。
+    """
+    import langgraph.types as lt
+
+    def _boom(*a, **kw):
+        raise AssertionError("已达上限却仍调用了 interrupt()")
+
+    monkeypatch.setattr(lt, "interrupt", _boom)
+    monkeypatch.setattr(g, "interrupt", _boom)
+
+    # 入口判断：round=MAX-1 时"本轮之后即达上限" ⇒ 必须直接收口
+    out = g._node_human_review({"stock_code": "600519", "trace": [],
+                                "review_round": MAX_REVIEW_ROUNDS - 1,
+                                "errors": []})
+    assert out["review_status"] == "approved", out
+    assert "上限" in " ".join(out.get("errors") or [])
+
+    # 未到上限时必须**继续** interrupt（否则人审形同虚设）
+    seen = {"n": 0}
+
+    def _capture(payload):
+        seen["n"] += 1
+        return {"review": "approve"}
+
+    monkeypatch.setattr(g, "interrupt", _capture)
+    out2 = g._node_human_review({"stock_code": "600519", "trace": [],
+                                 "review_round": 0, "errors": []})
+    assert seen["n"] == 1, "未到上限却没有 interrupt"
+    assert out2["review_status"] == "approved"
+
+
+def test_review_loop_stops_even_if_user_keeps_asking_revise(monkeypatch):
+    """端到端：用户**反复**要求修改，轮次也必须在上限处停住（不无限循环）。
+
+    ⚠️ 修 2026-10-02 审计 F3 的第二半：原循环条件只看 `=="revise"`，
+    而首轮返回 `pending` ⇒ 一次都没进循环。改为「pending 或 revise 都要继续推进」。
+    """
+    db = str(os.path.join(os.environ.get("TEMP", "."), "m3_cap_test.db"))
+    if os.path.exists(db):
+        os.remove(db)
+    _stub_all(monkeypatch, financials={"income": {"revenue": 1.0}})
+    cp, closer = g.make_checkpointer(db)
+    observed = []
+    try:
+        out = g.run_diagnosis_graph("600519", thread_id="cap-loop", checkpointer=cp)
+        observed.append(out.get("review_status"))
+        for _ in range(MAX_REVIEW_ROUNDS + 3):
+            if out.get("review_status") == "approved":
+                break
+            out = g.run_diagnosis_graph("600519", thread_id="cap-loop", checkpointer=cp,
+                                        resume="再改一版", review="revise")
+            observed.append(out.get("review_status"))
+    finally:
+        closer()
+
+    assert observed[0] == "pending", f"首轮应为 pending（原测试死在这里）：{observed}"
+    assert out.get("review_status") == "approved", f"未在上限处收敛到 approved：{observed}"
+    assert int(out.get("review_round") or 0) <= MAX_REVIEW_ROUNDS, \
+        f"轮次越界：{out.get('review_round')}"
+    assert len(observed) <= MAX_REVIEW_ROUNDS + 2, f"循环次数异常：{observed}"
+
+
+# ======================================================================
+# 9b. F2：适配层「真实形态」契约锁（不再 monkeypatch 掉被测对象）
+# ======================================================================
+def test_fetch_financials_normalizes_dataframe_frames(monkeypatch):
+    """`_fetch_financials` 必须把三表 DataFrame 归一成**可序列化摘要**并能被判据采信。
+
+    ⚠️ 2026-10-02 审计 F1（阻断）/F2：原先取的是 `stock_fundamentals.get_stock_financial_data`
+    （扁平标量 dict，**无三表键**）⇒ 判据恒 False ⇒ analyze 生产不可达。
+    本条**直接喂真 DataFrame**（不 monkeypatch `_fetch_financials` 本身），
+    所以「适配层写成 no-op」（M5 变异）会立刻红。
+    """
+    import pandas as pd
+    import data.financial_report as fr
+
+    good = pd.DataFrame({"营业收入": [90703260964.48], "净利润": [44516880421.86]})
+    monkeypatch.setattr(fr, "get_financial_reports",
+                        lambda code: {"profit_sheet": good,
+                                      "balance_sheet": good,
+                                      "cashflow_sheet": good})
+
+    fin = g._fetch_financials("600519")
+    assert set(fin.keys()) == {"income", "balance", "cashflow"}, fin
+    for k in ("income", "balance", "cashflow"):
+        assert fin[k].get("rows") == 1, f"{k} 未归一出行数：{fin[k]}"
+    # ⚠️ 必须是可序列化的（DataFrame 直接进 state 会在检查点序列化时出问题）
+    import json
+    json.dumps(fin)
+    assert g.resolve_reporting_period(fin) is True
+
+
+def test_fetch_financials_empty_frames_are_not_complete(monkeypatch):
+    """三表全 None（真实环境常见：数据源挂）⇒ 判据 False ⇒ **正确降级**（这才是真的降级）。"""
+    import data.financial_report as fr
+
+    monkeypatch.setattr(fr, "get_financial_reports",
+                        lambda code: {"profit_sheet": None, "balance_sheet": None,
+                                      "cashflow_sheet": None})
+    fin = g._fetch_financials("600519")
+    assert g.resolve_reporting_period(fin) is False
+
+
+def test_branch_analyze_reachable_with_real_shaped_source(monkeypatch):
+    """**关键回归**：数据源「可用」时，链路必须真的走到 `analyze`（而不是永久降级）。
+
+    ⚠️ 这是 F1 的直接反例锁：修复前，即便喂完美数据源也恒 fallback。
+    """
+    import pandas as pd
+    import data.financial_report as fr
+
+    good = pd.DataFrame({"营业收入": [1.0]})
+    monkeypatch.setattr(fr, "get_financial_reports",
+                        lambda code: {"profit_sheet": good, "balance_sheet": good,
+                                      "cashflow_sheet": good})
+    engines_called = {"n": 0}
+
+    def _engines(state):
+        engines_called["n"] += 1
+        return {"fundamental": "ok"}
+
+    monkeypatch.setattr(g, "_fetch_quote", lambda code: {"code": code, "price": 1.0})
+    monkeypatch.setattr(g, "_fetch_moneyflow", lambda code: {})
+    monkeypatch.setattr(g, "_run_engines", _engines)
+    monkeypatch.setattr(g, "_retrieve_evidence",
+                        lambda code: {"items": [], "level": "", "note": ""})
+    monkeypatch.setattr(g, "_synthesize_report", lambda state: "报告")
+
+    out = g.run_diagnosis_graph("600519", thread_id="real-shape-analyze")
+    assert out["branch"] == BRANCH_ANALYZE, f"完美数据源仍降级 ⇒ 永久降级未修：{out['branch']}"
+    assert engines_called["n"] >= 1
 
 
 # ======================================================================
@@ -216,7 +353,7 @@ def test_thin_adapters_reference_real_symbols():
     for mod, fn in (
         ("data.stock_api", "get_stock_info"),
         ("data.stock_api", "get_stock_moneyflow"),
-        ("data.stock_fundamentals", "get_stock_financial_data"),
+        ("data.financial_report", "get_financial_reports"),
         ("data.diagnosis", "build_diagnosis_payload"),
         ("utils.rag.retrieve", "retrieve_docs"),
     ):
@@ -227,7 +364,7 @@ def test_thin_adapters_reference_real_symbols():
     for needle in (
         "from data.stock_api import get_stock_info",
         "from data.stock_api import get_stock_moneyflow",
-        "from data.stock_fundamentals import get_stock_financial_data",
+        "from data.financial_report import get_financial_reports",
         "from data.diagnosis import build_diagnosis_payload",
         "from utils.rag.retrieve import retrieve_docs",
     ):

@@ -92,34 +92,57 @@ def _fetch_quote(stock_code: str) -> Dict[str, Any]:
     return get_stock_info(stock_code) or {}
 
 
-def _fetch_financials(stock_code: str) -> Dict[str, Any]:
-    """财报可用性探针，**归一成 `{"income": {...}, "balance": {...}, "cashflow": {...}}`**。
+def _summarize_table(df) -> Dict[str, Any]:
+    """把（可能的）DataFrame 归一成**可序列化摘要**。
 
-    ⚠️ 条件边判据依赖这个契约；真实数据源的字段名变化由这里吸收，**不要把
-    数据源细节漏进 `resolve_reporting_period`**（那样判据就没法离线测了）。
+    ⚠️ 不能把 DataFrame 直接放进 langgraph state：检查点要序列化，pandas 对象会出问题。
+    判据只需要「这张表有没有数据」，所以只留行数 + 列名。
     """
-    from data.stock_fundamentals import get_stock_financial_data
+    if df is None:
+        return {}
+    shape = getattr(df, "shape", None)
+    if shape is not None:
+        try:
+            rows = int(shape[0])
+        except Exception:  # noqa: BLE001
+            rows = 0
+        cols = []
+        try:
+            cols = [str(c) for c in list(getattr(df, "columns", []))[:32]]
+        except Exception:  # noqa: BLE001
+            cols = []
+        return {"rows": rows, "cols": cols}
+    if isinstance(df, dict):
+        return {"rows": len(df), "cols": [str(k) for k in list(df.keys())[:32]]}
+    if isinstance(df, (list, tuple)):
+        return {"rows": len(df), "cols": []}
+    return {}
 
-    raw = get_stock_financial_data(stock_code)
+
+def _fetch_financials(stock_code: str) -> Dict[str, Any]:
+    """三表可用性探针，归一成 `{"income": {...}, "balance": {...}, "cashflow": {...}}`。
+
+    ⚠️ **2026-10-02 审计 F1（阻断）修复**：原先用的是
+    `data.stock_fundamentals.get_stock_financial_data` —— 它返回**扁平标量 dict**
+    （roe / gross_margin / ...），**不含任何三表键** ⇒ 判据恒 False ⇒
+    **analyze 分支在生产结构性不可达（永久降级）**。
+    真正的三表源是 `data.financial_report.get_financial_reports`
+    （键 `profit_sheet` / `balance_sheet` / `cashflow_sheet`，值 DataFrame|None）。
+    """
+    from data.financial_report import get_financial_reports
+
+    try:
+        raw = get_financial_reports(stock_code)
+    except Exception:  # noqa: BLE001 - 单源失败不该让整条链断掉
+        return {}
     if not isinstance(raw, dict):
         return {}
 
-    def _pick(*names):
-        for n in names:
-            v = raw.get(n)
-            if isinstance(v, dict) and v:
-                return v
-        return {}
-
-    merged = {
-        "income": _pick("income", "profit", "income_statement"),
-        "balance": _pick("balance", "balance_sheet"),
-        "cashflow": _pick("cashflow", "cash_flow", "cashflow_statement"),
+    return {
+        "income": _summarize_table(raw.get("profit_sheet")),
+        "balance": _summarize_table(raw.get("balance_sheet")),
+        "cashflow": _summarize_table(raw.get("cashflow_sheet")),
     }
-    # 有些数据源把三表拍平在一层：退化为「整体当 income」交给判据自行判定
-    if not any(merged.values()) and raw:
-        merged["income"] = raw
-    return merged
 
 
 def _fetch_moneyflow(stock_code: str) -> Dict[str, Any]:
@@ -173,10 +196,14 @@ def _retrieve_evidence(stock_code: str) -> Dict[str, Any]:
     for it in raw_items:
         if not isinstance(it, dict):
             continue
+        # ⚠️ F5（2026-10-02 审计）：真实检索项带 `title` / `published_at`，
+        # 而原映射取 `source`（值其实是类型串 "notice"）与不存在的 `date`
+        # ⇒ 报告引用恒显示「notice（日期不明）」。按真实字段优先映射。
         items.append({
             "chunk_id": it.get("chunk_id"),
-            "source": it.get("source") or it.get("doc_title") or it.get("title") or it.get("doc_id"),
-            "date": it.get("date"),
+            "source": (it.get("title") or it.get("doc_title")
+                       or it.get("source") or it.get("doc_id")),
+            "date": it.get("published_at") or it.get("date"),
             "text": (it.get("text") or "")[:400],
         })
     return {
@@ -222,7 +249,27 @@ def _synthesize_report(state: DiagnosisState) -> str:
             state.get("evidence_level") or "未标注", state["evidence_note"]))
         lines.append("")
 
-    errs = list(state.get("errors") or []) + list((engines or {}).get("errors") or [])
+    # ⚠️ F6（2026-10-02 审计）：以下四项原先「只写不读」——状态里有、报告里没有。
+    #    加进报告后，它们才真正参与用户可见输出（否则等于白算）。
+    moneyflow = state.get("moneyflow") or {}
+    if moneyflow:
+        lines.append("## 资金流")
+        for k in ("main_net", "main_net_pct", "retail_net", "date"):
+            if moneyflow.get(k) is not None:
+                lines.append("- {}：{}".format(k, moneyflow[k]))
+        lines.append("")
+
+    if state.get("revision_note"):
+        lines.append("> 本轮按用户批注重跑：{}".format(state["revision_note"]))
+        lines.append("")
+
+    # ⚠️ 合并三类错误来源时去重，避免同一句在报告里出现两遍
+    errs = list(state.get("errors") or [])
+    for src in ((engines or {}).get("errors") or [], state.get("fetch_errors") or [],
+                state.get("engine_errors") or []):
+        for e in src:
+            if e not in errs:
+                errs.append(e)
     if errs:
         lines.append("## 数据缺口（如实标注）")
         for e in errs:
@@ -253,6 +300,16 @@ def resolve_reporting_period(financials: Dict[str, Any]) -> bool:
         part = financials.get(key)
         if not isinstance(part, dict) or not part:
             return False
+
+    # 形态 A（主力，来自 `_summarize_table`）：{"rows": n, "cols": [...]}
+    #   判「三表都有行」——这才是"财报数据齐"的真实语义。
+    if all("rows" in (financials.get(k) or {}) for k in _FIN_KEYS):
+        try:
+            return all(int((financials.get(k) or {}).get("rows") or 0) > 0 for k in _FIN_KEYS)
+        except (TypeError, ValueError):
+            return False
+
+    # 形态 B（兼容：测试与历史调用方给的数值 dict）
     has_value = False
     for key in _FIN_KEYS:
         for v in (financials.get(key) or {}).values():
@@ -379,12 +436,17 @@ def _node_human_review(state: DiagnosisState) -> Dict[str, Any]:
     **不再阻塞**，直接判为 approved（硬上限，§5.2-3：防死循环烧 token）。
     """
     round_no = int(state.get("review_round") or 0)
-    if round_no >= MAX_REVIEW_ROUNDS:
+    # ⚠️ 2026-10-02 审计 F3 修复：原判据是 `round_no >= MAX_REVIEW_ROUNDS`，
+    # 但**条件边会先在 round=MAX 时 END** ⇒ 本分支永远不可达（用户视角=终态停在 revise，
+    # 像"还在等修改"）。改为在**入口**判断"本轮之后即达上限" ⇒ 不再 accept 修改，
+    # 直接判 approved 并把原因写明。用户最多拿到 MAX-1 次修改机会（不超上限）。
+    if round_no + 1 >= MAX_REVIEW_ROUNDS:
         return {
             "review_status": REVIEW_APPROVED,
             "trace": _append(state, "trace", NODE_HUMAN_REVIEW),
-            "errors": _append(state, "errors",
-                              "已达人审轮次上限 {}，强制通过".format(MAX_REVIEW_ROUNDS)),
+            "errors": _append(
+                state, "errors",
+                "已达人审轮次上限 {}，强制通过（不再接受修改）".format(MAX_REVIEW_ROUNDS)),
         }
 
     decision = interrupt({

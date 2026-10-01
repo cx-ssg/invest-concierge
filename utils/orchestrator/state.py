@@ -41,8 +41,9 @@ CHECKPOINT_DB_NAME = "checkpoints.db"
 class DiagnosisState(TypedDict, total=False):
     """「股票深度诊断」图的状态（`total=False`：节点只写自己产出的键）。
 
-    ⚠️ 所有键都由**节点显式返回**参与状态合并；`trace` 用「追加语义」，
-    见 `graph.py` 里的 reducer 注册（C3 断点续跑的证据就是它）。
+    ⚠️ 所有键都由**节点显式返回**参与状态合并；`trace` / `errors` 的「追加语义」由
+    **节点显式拼接**实现（`graph.py::_append`），**不使用 reducer**
+    —— 见下方字段注释里的原因（reducer 无法被新一轮 `trace: []` 重置）。
     """
 
     # ---- 入口 ----
