@@ -83,13 +83,39 @@ K1 = 1.5
 #   撤下后：**任何非 none 的结果都带 `WEAK_EVIDENCE_NOTE`** —— **不再有"跳过警示"的通道**。
 #   这同时关掉了第五、六两轮反复攻击的那条路（weak→strong 越级 + 跳过警示 + 拿到完整引用凭据）。
 #   **曾用常量（已删，勿再引用）**：`SAR_STRONG`（holdout 拟合值）、`V1_STRONG`、`LEVEL_STRONG`。
-SAR_NONE = 0.06       # 实测 IRR 上限 0.0490 → 留 margin
-V1_NONE = 0.35        # 实测 IRR 上限 0.286  → 留 margin（保留；实测 none 侧几乎由 SAR 承担）
+# ⚠️ 2026-10-01（第八轮外部审计 Claude F7）：下面两个注释原来的"实测上限"出自**旧语料**
+#   （814 块）。当前语料（75 块）的探针实测：IRR `sar` 上限 **0.0598**、`v1` 上限 **0.111**
+#   ⇒ `SAR_NONE=0.06` 的余量只剩 **0.0002**（**换语料即翻**）。改阈值前务必重跑
+#   `scripts/rag_threshold_probe.py --holdout` 与 `scripts/rag_eval.py --scan`。
+SAR_NONE = 0.06       # 当前语料实测 IRR 上限 0.0598 → 余量仅 0.0002（脆弱）
+V1_NONE = 0.35        # 当前语料实测 IRR 上限 0.111  → 留 margin（none 侧几乎由 SAR 承担）
 
 LEVEL_NONE = "none"       # 弃权：确定性证据缺失（A3a）
 # `weak` = **非弃权**（判据未通过 ⇒ 返回结果 + 警示，由模型自行核验）。
 # ⚠️ `strong` 档已撤下（见上）—— `LEVEL_*` 现在**只有两档**。
 LEVEL_WEAK = "weak"
+
+
+def is_none(sar, v1, sar_none=None, v1_none=None):
+    """**唯一**的 none 判定（单点实现）—— 生产判据与评测扫描器共用它。
+
+    为什么必须只有一处（2026-10-01 **第八轮外部审计**双路独立实测）：
+    `scripts/rag_eval.py::scan()` 原先用**字面量重新实现**了这条闸门，与生产判据之间
+    **零交叉锁** ⇒
+      · 把表内 v1 阈值写成 `0.30`（与生产 0.35 同侧不同值）→ **344 条测试全绿**（漏网）；
+      · 把此处（生产侧）门限写成 `0.30` / `0.10` → 同样**全绿**，而同屏 `--scan` 输出会与
+        横幅自相矛盾（横幅仍宣称 `sar<0.06`，表里「当前」行却是别的扫描点的值）。
+    ⇒ 抽出本函数后「改一处不可能只改一半」；调用链由
+    `tests/test_rag_eval.py::test_scan_uses_shared_none_predicate` 锁住，
+    边界行为由 `tests/test_rag_evidence.py::test_is_none_boundaries_track_constants` 锁住。
+
+    `sar_none` / `v1_none` 省略时使用**生产常量**；敏感性表显式传入被扫描的门限。
+    """
+    if sar_none is None:
+        sar_none = SAR_NONE
+    if v1_none is None:
+        v1_none = V1_NONE
+    return sar < sar_none and v1 < v1_none
 
 
 class Evidence:
@@ -209,7 +235,7 @@ class EvidenceJudge:
         # ⚠️ 副作用（**语义变更，必须记住**）：`delegated_rate` 从「**委派成本**」
         #   变成「**未通过判据、但仍返回给模型的结果占比**」—— 判官并不存在，
         #   所以它现在描述的是**风险面**，不再是成本。
-        if sar < SAR_NONE and v1 < V1_NONE:
+        if is_none(sar, v1):
             level = LEVEL_NONE
         else:
             level = LEVEL_WEAK

@@ -216,7 +216,8 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K):
 
 
 # `SAR_NONE` 敏感性表的扫描点（2026-10-01 F1）。**含当前值 0.06**，其上界到 0.30 ——
-# 再往上（0.40）风险面已趋近 0 而 oa 接近 1，对决策无增量信息（见 --scan 的两组实测）。
+# 再往上（0.40）**风险面已进入平台期**（tuning 0.141 / holdout 0.080，不再下降）而 oa 已 0.86~0.92
+# —— 对决策无增量信息（见 --scan 的两组实测）。
 SAR_NONE_SWEEP = (0.06, 0.10, 0.15, 0.20, 0.25, 0.30)
 
 
@@ -250,16 +251,18 @@ def scan(rows_rel, rows_irr, judge):
     none_out = []
     for sar_n in (0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40):
         for v1_n in (0.35, 0.45, 0.55, 0.65, 0.75):
-            irr_none = sum(1 for e in a_irr if e.sar < sar_n and e.v1 < v1_n)
-            oa = sum(1 for e in a_rel if e.sar < sar_n and e.v1 < v1_n)
+            irr_none = sum(1 for e in a_irr if ev_mod.is_none(e.sar, e.v1, sar_n, v1_n))
+            oa = sum(1 for e in a_rel if ev_mod.is_none(e.sar, e.v1, sar_n, v1_n))
             none_out.append((sar_n, v1_n, (len(a_irr) - irr_none) / n_irr, oa / n_rel))
 
     # ⚠️ 独立计算（**不从 `none` 网格派生**）：将来改稠密网格的取值集合时，本表不得被静默改变。
     # 两处一致性由测试交叉锁（见 docstring）。
+    # ⚠️ 2026-10-01（第八轮外部审计，双路实测）：闸门改走**共享判据** `ev_mod.is_none` ——
+    # 此前这里用字面量重算，与生产判据零交叉锁（表内写死 0.30 时 344 条测试全绿）。
     sar_none_out = []
     for sar_n in SAR_NONE_SWEEP:
-        irr_none = sum(1 for e in a_irr if e.sar < sar_n and e.v1 < ev_mod.V1_NONE)
-        oa = sum(1 for e in a_rel if e.sar < sar_n and e.v1 < ev_mod.V1_NONE)
+        irr_none = sum(1 for e in a_irr if ev_mod.is_none(e.sar, e.v1, sar_n, ev_mod.V1_NONE))
+        oa = sum(1 for e in a_rel if ev_mod.is_none(e.sar, e.v1, sar_n, ev_mod.V1_NONE))
         sar_none_out.append((sar_n, (len(a_irr) - irr_none) / n_irr, oa / n_rel))
     return {"none": none_out, "sar_none": sar_none_out}
 
@@ -356,8 +359,12 @@ def main(argv=None):
     print("                                覆盖率从 5/20 掉到 0 也不会有别的指标变红)")
     print("  trusted_recall    = %.3f   (gold 在 top-k **且** 判据采信 —— 判据退化时它会变红；"
           % m["trusted_recall"])
-    print("                                ⚠️ **派生量**：当前恒等于 `Recall@k − over_abstain`"
-          "（构造性恒等，不是独立测量；判据退化时它会变红，见下方对照用例）")
+    print("                                ⚠️ **派生量**：在**当前评测集上**数值恰好等于"
+          " `Recall@k − over_abstain`")
+    print("                                  —— 这是**经验巧合，不是构造性恒等**：被判 none 的正例"
+          "若其 gold 不在 top-k 内，两者立刻背离（第八轮外部审计实跑反例证实）")
+    print("                                  —— 判据退化时它会变红（对照用例："
+          "tests/test_rag_eval.py::test_trusted_recall_turns_red_when_judge_degrades）")
     print("  MRR@10            = %.3f" % m["MRR@10"])
     print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
     for kind, d in sorted(m["by_kind"].items()):
@@ -382,6 +389,7 @@ def main(argv=None):
             print("  %.2f       %.3f          %.3f%s" % (sar_n, neg, oa, flag))
         print("  -> 决策提示：先定「可接受的引用丢失率(oa)」，再动 SAR_NONE ——"
               " 两个方向都有真实代价，没有免费选项")
+        print("  !  平台期：tuning 0.25 / holdout 0.15 之后风险面不再下降，继续调高只涨 oa")
     print("[eval] RESULT: OK")
     return 0
 

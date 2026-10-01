@@ -7,7 +7,7 @@
 
 用法（须先跑过 `rag_ingest.py`，kb.db 里有语料）：
   python scripts/rag_threshold_probe.py              # TUNING 组（定阈值时用的那批）
-  python scripts/rag_threshold_probe.py --holdout    # HOLDOUT 组（**从未参与定值，必跑**）
+  python scripts/rag_threshold_probe.py --holdout    # HOLDOUT 组（⚠️ **已污染**，见下方 ③）
 
 判读规则（**2026-09-19 随撤档更新**）：
 - **REL 不得被判 `none`** —— 误弃权 = 该给的不给（A3c 召回护栏）**（一直有效）**
@@ -18,6 +18,11 @@
   **该规则变得恒真、彻底失去约束力**（而 `:90`/`:100` 还在依赖它 ⇒ 撤档当轮本脚本直接崩），
   故改为上条。
 - 两组结论不一致时**以留出组为准**（用定值组自证 = 循环论证，critic 审计 F1）
+- ③ ⚠️⚠️ **2026-10-01（第八轮外部审计 Codex F6）：「本组从未参与定值」是错的** ——
+  `evidence.py` 里 `SAR_NONE = 0.06` 的依据原文就是「实测 IRR 上限 **0.0490**」，
+  而 **0.0490 正是本 HOLDOUT 组的 IRR 上限**（见 `COVERAGE_DESIGN.md` 的两组对照表）
+  ⇒ 该组**参与过阈值选择**，其上的"泛化验证"是自证。**现在的唯一价值 = 独立快速冒烟（K6）**，
+  **不得**再用它声称泛化性。（golden 集的 `holdout` 同理，已统一称「拟合集」。）
 
 ⚠️ **与 `rag_eval.py --split holdout` 的分工**：后者用 **golden 集**（169 条）算
 `A3a` / `delegated_rate` / `by_kind`，**是主流的验收工具**；本脚本的 4+4 条查询是**硬编码的**、
@@ -48,7 +53,8 @@ IRRELEVANT_QUERIES = [
     "如何学习滑雪",
 ]
 
-# ② 留出组（held-out）：**从未参与定值** —— 才回答"换一批查询还成立吗"
+# ② 留出组（held-out）：⚠️ **已污染** —— 本组 IRR 上限 0.0490 正是 `SAR_NONE=0.06` 的取值依据
+#     （见文件头 ③）⇒ 现仅作独立冒烟，**不得**再声称泛化性
 HOLDOUT_RELEVANT = [
     "会计政策变更对利润的影响",
     "风险评估报告的结论是什么",
@@ -67,7 +73,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", default=None)
     ap.add_argument("--holdout", action="store_true",
-                    help="用从未参与定值的留出查询组（泛化验证，回应 critic F1）")
+                    help="用 HOLDOUT 组（⚠️ 已污染：其 IRR 上限曾用于定 SAR_NONE ⇒ 仅作冒烟，非泛化验证）")
     args = ap.parse_args(argv)
 
     conn = rag_store.get_conn(args.db)
@@ -88,7 +94,8 @@ def main(argv=None):
 
     rel_q = HOLDOUT_RELEVANT if args.holdout else RELEVANT_QUERIES
     irr_q = HOLDOUT_IRRELEVANT if args.holdout else IRRELEVANT_QUERIES
-    print("[probe] 查询组 = %s" % ("HOLDOUT（未参与定值）" if args.holdout
+    print("[probe] 查询组 = %s" % ("HOLDOUT（**已用于阈值选择 = 拟合集**；本组仅作 K6 冒烟）"
+                                   if args.holdout
                                    else "TUNING（参与定值，不得用于验收）"))
 
     rows = []

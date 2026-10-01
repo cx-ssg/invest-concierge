@@ -150,6 +150,29 @@ def test_none_thresholds_are_ordered():
     assert 0 < V1_NONE <= 1, "V1_NONE 必须落在 (0,1]"
 
 
+def test_is_none_boundaries_track_constants():
+    """none 判据的**边界**必须跟着常量走 —— 抓「实现里写死字面量」。
+
+    ⚠️ 2026-10-01（**第八轮外部审计**，Claude + Codex 双路独立实测）：把
+    `EvidenceJudge` 内的门限从常量换成字面量（`v1 < 0.30` / `sar < 0.10`），
+    **全量 344 条测试全绿** —— 而同屏的 `--scan` 输出会与横幅自相矛盾
+    （横幅仍宣称 `sar<0.06`，表里"当前"行其实是别的点的值）。
+    ⇒ 判据侧此前**没有任何测试**锁住这两个门限。
+
+    本用例把「边界两侧的行为」钉住：实现里写死任何别的阈值都会红。
+    （它锁的是**行为边界**，不是常量数值本身 —— 将来调参仍可通过改常量+重跑敏感性表完成。）
+    """
+    import utils.rag.evidence as e_mod
+    eps = 1e-6
+    assert e_mod.is_none(e_mod.SAR_NONE - eps, 0.0) is True, "低于 SAR_NONE 且 v1 低 → 应判 none"
+    assert e_mod.is_none(e_mod.SAR_NONE + eps, 0.0) is False, "高于 SAR_NONE → 不应判 none"
+    assert e_mod.is_none(0.0, e_mod.V1_NONE - eps) is True, "低于 V1_NONE 且 sar 低 → 应判 none"
+    assert e_mod.is_none(0.0, e_mod.V1_NONE + eps) is False, "高于 V1_NONE → 不应判 none"
+    # 参数化形态（敏感性表用）：**必须使用传入门限**，不得回落到常量
+    assert e_mod.is_none(0.29, 0.10, 0.30, 0.35) is True, "显式门限 0.30 > 0.29 → 应 none"
+    assert e_mod.is_none(0.31, 0.10, 0.30, 0.35) is False, "显式门限 0.30 < 0.31 → 不应 none"
+
+
 def test_only_high_frequency_terms_yield_zero_v1():
     """查询若**全是高频词** → `feature == []` → `v1 = 0.0`（**机制**回归锁）。
 

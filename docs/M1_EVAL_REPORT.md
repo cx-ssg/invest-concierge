@@ -836,9 +836,9 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 
 | 处 | 改动 |
 |---|---|
-| `scripts/rag_eval.py::scan()` | 删 `strong_out`；新增 `SAR_NONE_SWEEP` + `sar_none_out`（**`v1` 固定 `V1_NONE`**；**独立计算**、不从 `none` 网格派生，避免将来网格变动静默改表） |
-| `scripts/rag_eval.py::main()` | 打印敏感性表（`<- 当前` 标记 + 决策提示）；文件头指标清单清掉撤档遗留条目 |
-| `tests/test_rag_eval.py` | 删旧 strong 断言；新增 3 条：形状+单调性+**判别力**／与 `none` 网格**交叉一致**／无 strong 曲线 |
+| `utils/rag/evidence.py` | **新增 `is_none()` 单点判据**（第八轮审计整改）—— `EvidenceJudge.assess()` 与 `scan()` **共用**它；`assess()` 内原地的 `sar < SAR_NONE and v1 < V1_NONE` 改为调用它 |
+| `scripts/rag_eval.py::scan()` | 删 `strong_out`；新增 `SAR_NONE_SWEEP` + `sar_none_out`（**`v1` 固定 `V1_NONE`**；**闸门改走 `ev_mod.is_none`** —— 此前是字面量重算、与生产判据零锁）；`main()` 打印敏感性表（`<- 当前` + 决策提示 + 平台期提示） |
+| `tests/test_rag_eval.py`<br>`tests/test_rag_evidence.py` | 删旧 strong 断言；新增 **6 条**：形状+单调性+**判别力**／与 `none` 网格**交叉一致**／无 strong 曲线／**CLI 打印调用链**／**(sar_n, V1_NONE) 调用计数锁**／**判据边界锁**（后两条见 §4k） |
 
 **实测（2026-10-01，本机）**：
 
@@ -872,7 +872,8 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
    - 🟠 **测函数不测调用链**：三条新测试只测 `scan()` 的返回值 ⇒ 新增 `test_main_scan_path_prints_sar_none_table`（走 CLI + `capsys`：锁表头 / `<- 当前` 唯一性 / 6 行 / **列序与标记行** / 输出里不得再有"假想"）。
    - 🟠 **判别力盲区两处**：原 fixture 的 v1 全相同（v1 阈值写错不会被发现）、且无 sar 恰等于扫描点的样本（`<` 写成 `<=` 不会被发现）⇒ 补 `r10c`（sar=0.10 边界）与 `r10b`（**v1=0.36**，紧贴 `V1_NONE`）。
 2. **第二轮 `REVISIONS_NEEDED(2)`，Score 4/5** —— 两条必改：
-   - 🔴 **我把一句措辞改出了新错误**：把 trusted_recall 的"对 strong 档改动无反应"改成"对阈值档位/判据取值改动完全无反应"——**事实错了**（`trusted_recall` 依赖 `level`，而 `level` 由 `SAR_NONE`/`V1_NONE` 决定；§4h 那条 `test_trusted_recall_turns_red_when_judge_degrades` 正是反证）。已改为只陈述「**构造性恒等，不是独立测量**」。
+   - 🔴 **我把一句措辞改出了新错误**：把 trusted_recall 的"对 strong 档改动无反应"改成"对阈值档位/判据取值改动完全无反应"——**事实错了**（`trusted_recall` 依赖 `level`，而 `level` 由 `SAR_NONE`/`V1_NONE` 决定；§4h 那条 `test_trusted_recall_turns_red_when_judge_degrades` 正是反证）。改成「**构造性恒等，不是独立测量**」。
+   - ⚠️ **而"构造性恒等"这个新说法**在**第八轮**外部审计里被**实跑反例证伪**（见 §4k）—— 同一处**连续两轮改错**，最终定为「在当前评测集上数值恰好相等（**经验巧合**）」。这是本周期最值得记的一个信号：**在没有实测的情况下改措辞，等于在同一个坑里换姿势**。
    - 🟠 **`V1_NONE` 在 `(0.10, 0.40]` 内漂移仍会漏网**（fixture 用 0.40 时的残留盲区）⇒ `r10b` 的 v1 由 0.40 收紧到 **0.36**。
    - 另据此补清三处"当前口径"残留：`evidence.py` 阈值注释（"本轮已补 strong 档维度"）、`rag_eval.py` 的"对 strong 档改动"空指代、`COVERAGE_DESIGN.md` §3.3 的三档描述 + 已删常量初值。
 
@@ -884,7 +885,57 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 | `e.v1 < V1_NONE` → `e.v1 < 0.45` | ✅ 抓住（期望值锁 + 交叉锁） |
 | `V1_NONE = 0.35` → `0.40` | ✅ 抓住（期望值锁 + 表头锁）—— **这条正是第二轮审计点出的盲区** |
 
-**验收**：`344 passed`（340+4）｜`--scan` 两组 `RESULT: OK` / `EXIT=0`｜K6 探针 `RESULT: OK` / `EXIT=0`
+**验收**：`346 passed`（340+6）｜`--scan` 两组 `RESULT: OK` / `EXIT=0`｜K6 探针 `RESULT: OK` / `EXIT=0`
+
+## 4k. 第八轮外部审计（2026-10-01）—— **外部** Agent 双路对抗式
+
+用户拍板「拉别的 agent」。任务书 `Handoff/2026-10-01-invest-concierge-M1-统一审计任务书-v6.md`
+（自包含、**对抗式**），两路独立执行、**都实跑**（ollama bge-m3 + `kb.db` 在线）：
+
+| 审计方 | 调用 | 结论 |
+|---|---|---|
+| **Claude Code** | `claude.cmd -p`（prompt 走 stdin、`--dangerously-skip-permissions`） | `REVISIONS_NEEDED(3)` |
+| **Codex** | `codex exec -C <repo> --dangerously-bypass-approvals-and-sandbox -o <file>` | `REVISIONS_NEEDED(3)` + **20 项变异矩阵** |
+
+报告：`drafts/audit-claude-v6.md` / `drafts/audit-codex-v6.md`（`drafts/` 已 gitignore）。
+
+**我的对账（不采信外部结论，逐条自跑复现）**：
+
+| 指控 | 我的独立复现 | 判定 |
+|---|---|---|
+| `trusted_recall` 被称「**构造性**恒等」是事实错误 | 造反例实跑：`Recall−oa = 0.000` vs `trusted_recall = 0.500` → `IDENTITY HOLDS: False` | ✅ 成立 |
+| 表侧字面量 `0.30` 漏网（有限样本盲区） | `344 passed` | ✅ 成立 |
+| 生产判据门限无锁 | 我实测 `v1<0.30` → 绿、`sar<0.10` → 绿（另测 `v1<0.10` **会**被抓 ⇒ Codex 的具体取值不精确，但**方向成立**） | ✅ 成立 |
+| §6 `343` vs §4j `344`，且文档命令**打印不出** `N passed` | `pytest.ini` 的 `addopts=-q` 与 CLI `-q` 叠加成 `-qq` → summary 被吞 | ✅ 成立 |
+| 注释 `v1=0.40` / 「趋近 0」/ 悬空指针 / `0.0490` 过期 / `未参与定值` 横幅 | 逐处静态核对 | ✅ 全部成立 |
+
+**整改（TDD：先写失败测试 → RED → 实现 → GREEN → 变异复验）**：
+
+1. **结构性修法**：抽 `evidence.is_none(sar, v1, sar_none=None, v1_none=None)` 作**唯一**判据，
+   `EvidenceJudge.assess()` 与 `scan()` **共用**（消灭"第二次实现"）。
+2. **三条新锁**：`test_is_none_boundaries_track_constants`（判据边界 → 抓"实现里写死字面量"）、
+   `test_scan_uses_shared_none_predicate`（调用链：允许集合 + **(sar_n, V1_NONE) 调用计数**）、
+   fixture 补 `r10e`（v1=0.34，与 `r10b` 的 0.36 **夹住生产值 0.35**）。
+3. **措辞纠正**：「构造性恒等」→「**在当前评测集上数值恰好相等（经验巧合）**」；输出里同时点名对照用例（消掉悬空指针）。
+4. **文档/工程**：§6 `343`→`346`；`pytest.ini` `addopts=-q` → `-ra`（让文档命令能**自证**通过数）；
+   注释 `0.40`→`0.36` 与「新增 3 条」→ 6 条；`SAR_NONE` 依据更新为**当前语料实测 0.0598（余量仅 0.0002）**；
+   K6 探针横幅 `HOLDOUT（未参与定值）` → 与 `rag_eval` 的"拟合集"口径对齐；表尾加**平台期**提示。
+5. **本轮我自己引入的一个真 bug（当场发现并修复）**：往 `pytest.ini` 写中文注释 → `iniconfig` 按
+   **系统 GBK** 读取 → **整套测试崩**（`UnicodeDecodeError: 0xac`）。⇒ 该文件**必须纯 ASCII**（已写进文件注释）。
+
+**变异复验（整改后的验收 —— 5/5 全抓）**：
+
+| 变异 | 整改前 | 整改后 |
+|---|---|---|
+| 生产 `v1` 门限 → 0.30 | ❌ 漏网 | ✅ 抓住（判据边界锁） |
+| 生产 `sar` 门限 → 0.10 | ❌ 漏网 | ✅ 抓住（同上） |
+| 表侧 `v1` 维写死 0.30 | ❌ 漏网 | ✅ 抓住（数值锁 + 交叉锁 + 允许集合锁） |
+| **表侧绕过共享判据**（恢复字面量公式） | ❌ 漏网 | ✅ 抓住（**调用计数锁**） |
+| 网格 `v1` 值越出允许集合 | ❌ 漏网 | ✅ 抓住（允许集合锁） |
+
+⚠️ **诚实边界**：`test_scan_uses_shared_none_predicate` 的**调用计数阈值是实测得出**的
+（我先后两次手算都错：先按"每迭代 1 次"、再漏乘"每条查询"；实测单点 7 次而非 2 次）——
+已在测试注释里写明；将来改 `scan()` 的循环结构需同步该数字。
 
 ## 5. 诚实边界
 
@@ -902,7 +953,7 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 ## 6. 复现
 
 ```bash
-python -m pytest -p no:warnings                      # 343 passed（2026-10-01）
+python -m pytest -p no:warnings -q                   # 346 passed（2026-10-01；addopts 已改 -ra，故能自证）
 python scripts/rag_ingest.py --code 600519 --limit 20   # 重建语料（75 块）
 python scripts/rag_eval_build.py --per-doc 1            # 生成评测集（约 5.5 分钟）
 python scripts/rag_eval.py --split holdout              # ⚠️ holdout 已用于阈值选择（**拟合集**）
@@ -910,5 +961,5 @@ python scripts/rag_eval.py --split tuning --scan        # none 稠密网格 + **
 python scripts/rag_eval.py --split holdout --scan       # 只报**一次**（**别在这里选值**）
 ```
 
-⚠️ **Python 版本**：`341 passed` 在**本机 3.11.4** 上成立。此前 **3.9/3.10** 上会因
+⚠️ **Python 版本**：上面那个通过数在**本机 3.11.4** 上成立。此前 **3.9/3.10** 上会因
 `except TimeoutError:` 抓不住 `concurrent.futures.TimeoutError` 而失败（§4d P1-B，已修并加回归锁）。

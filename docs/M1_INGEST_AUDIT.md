@@ -115,6 +115,8 @@
 
 - **删除** `max_sim < min_sim` 整查询闸门（`utils/rag/hybrid.py`）；**向量退回纯排序**
 - **新增** `utils/rag/evidence.py`：`EvidenceJudge` → `SAR + V1 + 三档 level`（none / weak / strong）
+  > ⚠️ **后续变更（2026-09-18 起）**：第三档 `strong` 已随 `7270159` **撤下**（它与 `weak` 返回的
+  > `results` 完全相同、LLM 判官从未实现），现为**两档**；本行是**当时**的审计快照，保留以存史。
 - **修产线 bug**：`retrieve.py` 的 judge 改用**全库**构建；code 过滤只决定检索池，不影响判据基准
 - `run_hybrid` 返回三元组 `(order, rrf, evidence)`；`retrieve_docs` 返回体新增 `evidence_level` 与 `evidence(sar, v1)`
 - 探针 `rag_threshold_probe.py` 改用新判据，TUNING 与 HOLDOUT 双组判定
