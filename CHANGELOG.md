@@ -5,6 +5,33 @@
 > 版本线说明（2026-10-01）：项目内部曾以 `v1.2 / v1.2.1` 称呼「多 provider 模型接入」阶段，而对外 tag 只有 `v1.0.0`。
 > 自本版起对外统一按 **semver `v1.x`** 记录；历史分段内容原样保留，仅重组标题。
 
+## [Unreleased]
+
+> 版本号待定（M3 是新功能，按 semver 应为 minor；是否随 v1.2.0 一起发由用户决定）。
+
+### Added
+- **M3 · 编排层（LangGraph 渐进接入）**（commit `f88ad52`）：把「股票深度诊断」**一条**链路口图化，
+  其余工具调用保持现有线性循环（设计 `docs/COVERAGE_DESIGN.md` §5）。
+  - **图**：`data_fetch` → 条件边（财报齐否）→ `analyze` / `fallback` → `retrieve` → `synthesize`
+    → `human_review` → 出口（+ 检查点持久化）
+  - **开关**：`ORCHESTRATOR=legacy|graph`（默认 `legacy` ⇒ **不改变现有行为**；非法值回落且可观测）
+  - **检查点**：SQLite（`langgraph-checkpoint-sqlite`）⇒ 断点续跑
+  - **人审**：`interrupt()` 原语 + 循环硬上限 3 轮（节点内与条件边**双保险**）
+  - **接线**：`services/diagnosis_service.get()` 按 flag 分流；graph 路径**返回同一 6 引擎 payload 形状**
+    （额外挂 `_orchestrator` 元信息）⇒ 前端零改动
+  - **验收（§5.3）**：**C1** `pytest tests/test_graph.py -q` → 25 passed｜**C2** `ORCHESTRATOR=graph`
+    真跑 600519 → 条件边正确降级 + 5 条证据 + 检查点落盘｜**C3** 两进程 kill→重启：phase1 取数 3 次 /
+    phase2 **0 次**、14.6s → **0.0s**，trace 仅尾部追加 `human_review` ⇒ 已完成节点未重跑｜
+    **C4** `pytest -q` → 380 passed
+  - ⚠️ **实施中修掉 3 个真缺陷（全部由「真跑」暴露，当时离线测试全绿）**：
+    ① `_fetch_financials` 引用了**不存在的模块**（测试 monkeypatch 掉薄封装 ⇒ 盲区）⇒ 已修 +
+    **双向引用锁**；② `retrieve_docs` 返回 **JSON 字符串**而适配器只判 dict/list ⇒
+    **`evidence` 恒为 0** ⇒ 已修 + 3 条锁（并把 M1 的 `evidence_level`/弃权说明**随报告外显**）；
+    ③ `trace` 用 `operator.add` reducer ⇒ 同 thread 二次 invoke **轨迹翻倍** ⇒ 改为节点显式拼接 + 加锁。
+  - ⚠️ **未验证项（如实标注）**：C2 只真跑了 `fallback` 分支 —— 本机 akshare 大面积不可用
+    （`RemoteDisconnected` 等），`analyze`（6 引擎）分支**仅有离线测试覆盖**；
+    exe 打包验证见下。
+
 ## [1.1.0] - 2026-10-02
 
 > 本版包含**两组**内容：**① 用户粘性三件套**（按 `docs/V1.1_PLAN.md` 的计划交付）与 **② 私域知识层（M1）**。

@@ -59,6 +59,17 @@ hiddenimports = [
     "services.diary_service",
     "services.nav_service",
     "services.status_service",
+    # M3 编排层（LangGraph 单链路）：这些是**函数内 import**，PyInstaller 一般能自动
+    # 分析到，但显式声明是防御 —— 漏收会让 `ORCHESTRATOR=graph` 在 exe 里直接 ImportError
+    # （见 docs/COVERAGE_DESIGN.md §6「LangGraph 依赖影响打包」）
+    "utils.orchestrator",
+    "utils.orchestrator.flags",
+    "utils.orchestrator.state",
+    "utils.orchestrator.graph",
+    "langgraph.graph",
+    "langgraph.types",
+    "langgraph.checkpoint",
+    "langgraph.checkpoint.sqlite",
 ]
 
 a = Analysis(

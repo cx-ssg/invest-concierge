@@ -188,6 +188,15 @@ meta(key, value)                             -- 索引版本、模型名、token
 
 ## 5. M3 · 编排层（LangGraph 渐进接入）
 
+> ✅ **实现状态（2026-10-02，commit `f88ad52`）**：本节的图结构、四条决策与 §10.5 五条实现要点
+> **已全部落地**；验收 **C1/C2/C3/C4 四项全过**（详见 `CHANGELOG.md [Unreleased]`）。
+> 实现文件：`utils/orchestrator/{flags,state,graph}.py`；测试：`tests/test_graph.py`（25 条）。
+> ⚠️ **如实标注两处边界**：① **C2 只真跑了 `fallback` 分支**——本机 akshare 大面积不可用
+> （`RemoteDisconnected` / 多个旧接口已下线），`analyze` 分支只有离线测试覆盖，
+> **其归一契约（`_fetch_financials` → `{income,balance,cashflow}`）尚未在真实数据源上验证**；
+> ② **exe 打包验证**：spec 已补 `hiddenimports`（`utils.orchestrator.*` + `langgraph.*`），
+> 真构建结果见本节末/后续提交。**若打包出问题，按 §6 约定 M3 不进 exe。**
+
 ### 5.1 接入策略：**只接一条链路，不重写**
 
 选「股票深度诊断」这一条链路做图化（它本来就是多步 + 可分支 + 需要重试），其余 22 个工具调用保持现有线性循环。
