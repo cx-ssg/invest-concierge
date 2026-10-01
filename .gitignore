@@ -37,6 +37,9 @@ architecture_report.md
 _akshare_diagnosis.md
 _archive/
 
+# ===== 语料原始文件（PDF 全文；体积大 + 可重下，不入库）=====
+corpus/
+
 # ===== 旧截图（v1.0 前替换为新图） =====
 /screen.png
 /screen2.png
