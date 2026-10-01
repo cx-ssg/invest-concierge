@@ -113,6 +113,40 @@ def init_db():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # ── M2 长期记忆层（设计 docs/COVERAGE_DESIGN.md §4；计划 docs/M2_MEMORY_PLAN.md）──
+    # ⚠️ 三类记忆**同表不同 kind**（§4.1 的三类，召回策略在应用层分离）：
+    #   preference（必注入）/ fact（按标的召回）/ experience（向量 top-3）
+    # ⚠️ `UNIQUE(kind, key)` 是**去重的单一事实源**：
+    #   - preference / fact：key 由调用方给语义键（如 `risk_tolerance` / `stock:600519`）⇒ 覆盖更新
+    #   - experience：key 存**内容指纹**（归一化后截断），避免多条经验的 '' 互相冲突
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,                       -- 'preference' | 'fact' | 'experience'
+            key TEXT NOT NULL DEFAULT '',             -- 去重键（见上）
+            content TEXT NOT NULL,                    -- 记忆正文（自然语言，用于注入）
+            meta TEXT NOT NULL DEFAULT '{}',          -- JSON：标的代码 / 时间 / 数值等
+            source TEXT NOT NULL DEFAULT 'explicit',  -- explicit | implicit | seed
+            session_id INTEGER,                       -- 溯源：哪次会话写入（可审计）
+            embedding BLOB,                           -- 仅 experience 用（bge-m3；**独立于 kb.db**）
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(kind, key)
+        )
+    """)
+    # 隐式写入的候选（§4.2：AI 不自行写记忆，先落 pending 让用户确认）
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS memories_pending (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            key TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            meta TEXT NOT NULL DEFAULT '{}',
+            session_id INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',   -- pending | accepted | rejected
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
