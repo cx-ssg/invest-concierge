@@ -17,7 +17,7 @@ An open-source assistant for China A-share stocks & funds — no paid data feeds
 
 Live pages (React frontend, desktop shell / browser):
 
-- 💬 **AI Chat** (home): SSE streaming with native reasoning chain + tool-call timeline (11 tools: quotes, reports, holdings, diary…).
+- 💬 **AI Chat** (home): SSE streaming with native reasoning chain + tool-call timeline (**24 tools**: quotes, reports, valuation, fund flows, search, backtest, document retrieval…).
 - 📊 **Fund dashboard**: total assets & P&L overview.
 - 💼 **Portfolio**: track holdings, P&L and daily estimates.
 - 📔 **Investment diary**: record the reasoning behind every trade.
@@ -80,13 +80,34 @@ browser ────────────────────────
                                         ├─► frontend/dist (React static)
                                         ├─► services/ (business layer)
                                         ├─► data/ (AkShare/Sina/Tencent free feeds)
+                                        ├─► utils/rag (private document layer: BM25 + vectors + evidence tiers)
                                         ├─► SQLite (local storage)
                                         └─► DeepSeek API (optional)
 ````
 
 - **Frontend**: React 19 SPA (title bar / sidebar / status bar), REST + SSE.
 - **Backend**: FastAPI REST (holdings / diary / diagnosis / settings) + SSE agent stream (`status → reasoning → tool_start/tool_end → done`).
-- **Agent engine**: `utils/agent_core.py` tool registry (late-binding importlib) + 8-round planning loop; `utils/agent_memory.py` session summarization.
+- **Agent engine**: `utils/agent_core.py` tool registry (**24 tools**, late-binding importlib) + 8-round planning loop; `utils/agent_memory.py` session summarization.
+- **Knowledge layer**: `utils/rag/` hybrid document retrieval (chunk / embed / BM25+RRF / evidence tiers); ingestion & eval scripts under `scripts/rag_*.py`.
+
+## Private Document Retrieval
+
+Beyond live quotes, the project ships a **local document retrieval layer**: filings / research notes / financial-report text are chunked, embedded and stored locally, and answers come back with **the source snippet + document + date** instead of being invented by the model.
+
+| | |
+|---|---|
+| Tool | `retrieve_docs` |
+| Store | local SQLite (`kb.db`) + `bge-m3` vectors (1024-d, via local Ollama, with an OpenAI-compatible fallback) |
+| Retrieval | hybrid: BM25 + vectors → RRF fusion, with a per-document cap |
+| **Evidence tiers** | when relevance is insufficient it **abstains** ("evidence insufficient — verify before quoting") instead of guessing |
+| Ingestion | CNINFO announcement API / **PDF full-text extraction** (`pypdf`), fully scriptable |
+
+Design stance: in investing, a confident-sounding hallucination is the worst failure mode — so **"not found" beats a fabricated answer**.
+
+> ⚠️ The corpus and vectors (`*.db` / `corpus/`) are **not shipped** with the repo. Build them yourself:
+> `ollama pull bge-m3` → `python scripts/rag_ingest.py --code 600519` (add `scripts/rag_ingest_pdf.py` for full reports).
+> The evaluation set **is** shipped (`tests/golden/rag/`) and can be re-run with `python scripts/rag_eval.py --split holdout`.
+> Current: `Recall@5 = 0.952`, `MRR@10 = 0.706 ~ 0.738`. Missing targets are documented in [docs/M1_EVAL_REPORT.md](docs/M1_EVAL_REPORT.md).
 
 ## Tech Stack
 
@@ -96,12 +117,14 @@ FastAPI + uvicorn · React 19 + Vite 8 + TypeScript + Tailwind v4 · pywebview +
 
 - Free data feeds can be flaky: automatic fallback (Tencent/Sina/Baidu) on weak networks; pages degrade to `--` instead of crashing.
 - Desktop shell requires Edge WebView2 Runtime (usually preinstalled on Win10/11) and prefers Windows; use the web mode on Linux/macOS.
-- 6 pages live today; the roadmap (backtest, DCA, fund compare…) has data-layer functions ready but UI pending — see `docs/ROADMAP.md`.
+- 6 pages live today; the remaining features (backtest, DCA, fund compare, limit-up review) are **already available as agent tools** — dedicated pages are still on the roadmap, see `docs/ROADMAP.md`.
+- **Knowledge base must be built locally**: the corpus and vectors (`*.db` / `corpus/`) are not shipped; without them document retrieval will honestly report "not found".
+- **Local embedding model**: defaults to Ollama `bge-m3`; an OpenAI-compatible endpoint can be used instead.
 - `pages/` still contains the legacy Streamlit app (`app.py`) — kept for reference, not part of the new UI.
 
 ## Testing
 
-- Backend: `pytest tests/` (110 cases)
+- Backend: `pytest tests/` (**353 cases**)
 - Frontend: `cd frontend && npm run build`
 - Desktop shell: `python desktop\smoke_test.py`
 - CI: GitHub Actions double matrix (Python 3.9 / 3.11) + gitleaks secret scan.
@@ -112,6 +135,8 @@ FastAPI + uvicorn · React 19 + Vite 8 + TypeScript + Tailwind v4 · pywebview +
 - [Roadmap](docs/ROADMAP.md)
 - [Contributing](docs/CONTRIBUTING.md)
 - [Verification notes](docs/verification.md)
+- [M1 retrieval evaluation report](docs/M1_EVAL_REPORT.md)
+- [Capability coverage & boundaries](docs/COVERAGE_DESIGN.md)
 
 ## License
 

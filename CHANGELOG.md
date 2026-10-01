@@ -2,7 +2,9 @@
 
 本项目遵循 [Semver](https://semver.org/)。发布日如有调整，以 GitHub Release 为准。
 
-## [Unreleased] - 2026-09-15
+> 版本线说明（2026-10-01）：项目内部曾以 `v1.2 / v1.2.1` 称呼「多 provider 模型接入」阶段，而对外 tag 只有 `v1.0.0`。
+> 自本版起对外统一按 **semver `v1.x`** 记录；历史分段内容原样保留，仅重组标题。
+## [1.1.0] - 2026-10-01
 
 ### Changed
 - **双轨语料对照实验（PDF 全文 vs API 正文，2026-10-01）**：新增 `scripts/rag_ingest_pdf.py`（走**巨潮**官方平台下 PDF → `pypdf` 抽全文 → 复用 `chunk_document` 切块 → 写**独立库** `kb_pdf.db`；东财 PDF 有反爬不可用）与 `scripts/rag_pdf_ab.py`（**预注册**问题集的对照评测）+ `tests/test_pdf_ingest.py`（4 条纯逻辑测试）。
@@ -74,17 +76,27 @@
 - ⚪ `error_code` 无消费方却被写成"可按类型分支" → 措辞已改（见上）。
 - **审计无法验证项**：只读环境跑不了 pytest，"RED→GREEN"是它的静态推演 → 由主代理实测补上（本文件与 §11 记载的 4 failed / 10 failed 与各轮 passed 数均为实际运行输出）。
 
-## [Unreleased] - 2026-09-08
+### Added（M1 · 私域知识层与检索层）
+
+- **混合语料切换（大文档走 PDF 全文）**：把「半年报/年报全文」类大文档从 API 正文（**被截断在 5000 字**）切换为**巨潮 PDF 全文抽取**。语料 75 块 → **268 块**（单篇半年报 3,040 字 → **118,591 字 / 198 块 / 110 页**）。
+  **实测收益**：报表细节级问题 `hit@5` **0/10 → 8/10**（`hit@10` = 10/10）；阴性对照 0/10。迁移脚本可复现：`scripts/rag_migrate_bigdocs_pdf.py`。
+  ⚠️ **代价如实记录**：`Recall@5` 0.952 → 0.857、`MRR@10` 0.702 → 0.605（块数变多、同一文档占位上升）—— 由下方「同文档限额」修复。
+- **排序层修复 · 同文档限额**：`run_hybrid(max_per_doc=2)` —— 同一文档最多占 2 个坑位（不足 k 时按原序回填；`None` 保持旧行为）。
+  扫描证据（holdout 21 条正例）：`None` 18/21 · `1` 17/21 · **`2` 20/21** · `3` 19/21 · `4` 19/21 ⇒ 取 2。`Recall@5` **0.857 → 0.952**、`MRR@10` 0.593 → 0.605。
+  ⚠️ 另扫过 RRF 双路权重：`1.5:1` 能把 Recall 拉回 21/21 但 **MRR 不动**，且该参数是在 holdout 上扫出来的 ⇒ **按定值纪律不采用**（结论：不加此参数）。
+- **LLM 重排（rerank）探针**：新增 `scripts/rag_rerank_probe.py` —— 用 DeepSeek 对粗筛 top-k 逐对判定「这段能否回答该问题」，重排后 `MRR@10` **0.605 → 0.706 / 0.738**（两次独立运行，**均超过迁移前基线 0.702**）；5 题排名改善、**0 题恶化**；`Recall@5` 不变（**重排不改变结果集合**）。
+  ⚠️ **未接入产线**：每查询 +k 次模型调用（实测每题 +5~10s），接入前需先解决延迟与成本。
+  ⚠️ **踩坑实录**：`deepseek-v4-flash` **默认开思考**，思考会**吃光 `max_tokens`** 使 `content` 为空串 ⇒ 首轮 105 个候选里 **61% 拿不到判定**（那一版算出的 0.637 不可信）。修法：显式 `extra_body={"thinking": {"type": "disabled"}}` + 给足 `max_tokens`。
+
+## [1.0.1] - 2026-09-08
 
 ### Fixed
-- **v1.2.1 DeepSeek V4 模型升级**：`deepseek-chat`/`deepseek-reasoner` 已 2026-07-24 被官方停用（调旧名 400/404）——默认模型改为 `deepseek-v4-flash`，现役三模型可选：`deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp`（图片输入）
+- **DeepSeek V4 模型升级（内部编号 v1.2.1）**：`deepseek-chat`/`deepseek-reasoner` 已 2026-07-24 被官方停用（调旧名 400/404）——默认模型改为 `deepseek-v4-flash`，现役三模型可选：`deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp`（图片输入）
 - 思考模式开关：V4 思考默认开启 → agent 对话链路显式关闭（对齐旧 chat 快+便宜行为），诊断"AI 追问"链路开启（保留思考链展示）；思考经 `extra_body={"thinking": ...}` 切换，非换模型名
 - **local_env.bat 兼容**：exe 直接启动（无 start.bat）也能读到 key——多路径探测（源码目录/exe 同目录/cwd）
 
-## [Unreleased] - 2026-09-08
-
 ### Added
-- **v1.2 模型接入**：设置页「模型接入」卡片——直接填 API Key，无需再写 .env/local_env.bat
+- **多 provider 模型接入**：设置页「模型接入」卡片——直接填 API Key，无需再写 .env/local_env.bat
 - 多 provider 支持：DeepSeek 官方 / SiliconFlow 硅基流动 / 阿里云百炼 DashScope / 自定义 OpenAI 兼容端点（中转/网关/本地部署）
 - 测试连接：保存前发最小请求验证连通，回显延迟；401/404/429/超时自动翻译为人话
 - Key 安全：仅落本机 SQLite（app_settings），掩码回显（sk-ab****wxyz），不入 git/不上传/不回传明文
@@ -94,7 +106,7 @@
 - 保存即生效无需重启（ai_helper/agent_core/report/status 全链路动态读配置）
 - 26 处测试 patch 迁移至 llm_config._TEST_KEY_OVERRIDE 钩子；pytest 171→180
 
-## [1.0.0] - 2026-09-15（计划）
+## [1.0.0] - 2026-09-15
 
 首个公开版本。
 
