@@ -47,6 +47,9 @@
 
 ### 方式一：下载安装包（推荐，零 Python 环境）
 
+> ⚠️ **本次 v1.1.0 未重新打包安装器** —— `Releases/latest` 里是 **v1.0.0** 的产物（含 exe），
+> 与新 tag 不是同一份。v1.1.0 的新功能请按下面「方式二」源码运行，或按 `docs/PACKAGING.md` 自行构建安装包。
+
 到 [Releases](https://github.com/cx-ssg/invest-concierge/releases/latest) 下载：
 
 - **`invest-concierge-setup-v*.exe`** —— 安装器，双击安装（用户级，无需管理员），开始菜单/桌面生成快捷方式
@@ -237,7 +240,13 @@ python scripts/rag_eval.py --split tuning --scan    # 阈值敏感性扫描
 python scripts/rag_rerank_probe.py --split holdout  # LLM 重排探针（会调模型）
 ```
 
-当前指标（holdout 21 条正例）：`Recall@5 = 0.952`、`MRR@10 = 0.706 ~ 0.738`（启用 LLM 重排后）。
+当前指标（holdout 21 条正例）：`Recall@5 = 0.952`、`MRR@10 = 0.605`（**产线未接入 LLM 重排**）。
+
+`MRR@10 = 0.706 ~ 0.738` 是**离线探针**（`scripts/rag_rerank_probe.py`）的结果，**没有接进产线**（`git grep -i rerank -- utils/ services/ frontend/src` 零命中）；重排不改变结果集合 ⇒ `Recall@5` 不变。要上线须先解决每题 +k 次模型调用的延迟与成本。
+
+⚠️ **上表数字请按「状态」读，勿跨行拼接**：基线（旧语料 75 块、无限额）`1.000 / 0.702` → 切换 PDF 全文（268 块）`0.857 / 0.593` → +同文档限额（当前产线）`0.952 / 0.605`。**召回与排序都未完全回到基线**（0.952 < 1.000，0.605 < 0.702）。
+
+⚠️ **评测集性质（重要披露）**：holdout 的**负例**是干净验收组（`v2`，由 `assert_clean_holdout()` 强制），但 **21 条正例仍是 `v1` —— 阈值调参时已看过**（`rag_eval.py` 运行时会打印「holdout 已用于阈值选择（拟合集）」），且 `max_per_doc=2` 本身就是 holdout 上的扫描值 ⇒ **`0.952` 含拟合成分，不应作为泛化承诺**。复现命令与状态口径见 [docs/RELEASE_NOTES_v1.1.0.md](docs/RELEASE_NOTES_v1.1.0.md)。
 **未达标项与已知边界同样记录在案**，见 [docs/M1_EVAL_REPORT.md](docs/M1_EVAL_REPORT.md) 与
 [docs/COVERAGE_DESIGN.md](docs/COVERAGE_DESIGN.md)。
 

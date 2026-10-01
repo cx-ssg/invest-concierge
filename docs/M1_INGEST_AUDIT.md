@@ -1,6 +1,6 @@
 # M1 采集层（正文）与阈值回填 · 独立审计报告
 
-> 任务：`m1-ingest-audit-20260916` ｜ brief：`D:/Vault/.reasonix/briefs/m1-ingest-audit.md`
+> 任务：`m1-ingest-audit-20260916` ｜ brief：`<vault>/.reasonix/briefs/m1-ingest-audit.md`
 > 审计方：critic 子代理（隔离上下文、只读）＋ 主 Agent 独立复核
 > 日期：2026-09-16 ｜ 被审对象：`scripts/rag_ingest.py`、`utils/rag/embed.py`、`utils/rag/hybrid.py` 及配套测试
 

@@ -39,7 +39,7 @@
 | embedding 客户端 | `<ws>/co-planning/scripts/embed_client.py` | 复制（stdlib-only urllib → ollama `/api/embed`，DIM=1024，timeout=300） |
 | 切块结构参考 | 同上 `search_wiki.py:45 chunk_markdown()`（CHUNK_TARGET=600 / CHUNK_MAX=1200） | **参考结构 + 扩展表格保护**（原实现无表格语义） |
 
-> `<ws>` = `C:/Users/cx101/AppData/Roaming/reasonix/global-workspace`
+> `<ws>` = `<reasonix-workspace>`（原审计环境的绝对路径，已脱敏；下同）
 
 ---
 

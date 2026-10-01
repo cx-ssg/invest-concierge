@@ -107,7 +107,15 @@ Design stance: in investing, a confident-sounding hallucination is the worst fai
 > ⚠️ The corpus and vectors (`*.db` / `corpus/`) are **not shipped** with the repo. Build them yourself:
 > `ollama pull bge-m3` → `python scripts/rag_ingest.py --code 600519` (add `scripts/rag_ingest_pdf.py` for full reports).
 > The evaluation set **is** shipped (`tests/golden/rag/`) and can be re-run with `python scripts/rag_eval.py --split holdout`.
-> Current: `Recall@5 = 0.952`, `MRR@10 = 0.706 ~ 0.738`. Missing targets are documented in [docs/M1_EVAL_REPORT.md](docs/M1_EVAL_REPORT.md).
+> Current production: `Recall@5 = 0.952`, `MRR@10 = 0.605` (**LLM rerank is NOT wired into production** —
+> `0.706 ~ 0.738` comes from the offline probe `scripts/rag_rerank_probe.py` only; `git grep -i rerank -- utils/ services/ frontend/src` → 0 hits).
+> ⚠️ Read those numbers **per state**, never across rows: baseline (old corpus, no cap) `1.000 / 0.702`
+> → PDF full-text corpus `0.857 / 0.593` → +per-doc cap (current) `0.952 / 0.605` — **neither recall nor ranking
+> is fully back to baseline**.
+> ⚠️ Eval-set nature: holdout **negatives** are a clean holdout (`v2`, enforced), but the **21 positives are still `v1` —
+> already seen during threshold tuning** (the script itself prints "holdout — already used for threshold selection").
+> `max_per_doc=2` is itself a holdout-scanned value ⇒ **`0.952` carries fitting, not a generalisation promise**.
+> Missing targets are documented in [docs/M1_EVAL_REPORT.md](docs/M1_EVAL_REPORT.md).
 
 ## Tech Stack
 

@@ -1,7 +1,9 @@
 {
- "n_chunks": 75,
+ "n_chunks": 268,
  "n_docs": 20,
  "dim": 1024,
  "drop_by_coverage": 3,
- "model_for_gen": "qwen2.5:7b"
+ "model_for_gen": "qwen2.5:7b",
+ "_note": "构建时快照（build-time snapshot）；以当前 kb.db 为准（2026-10-01 混合语料迁移后 = 268 块）。本文件仅由 scripts/rag_eval_build.py 写入，仓库内无读取方。",
+ "_updated": "2026-10-02"
 }

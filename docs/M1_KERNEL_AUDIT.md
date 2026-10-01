@@ -1,6 +1,6 @@
 # M1 内核切片 · 独立审计报告
 
-> 任务：`m1-kernel-audit-20260915` ｜ brief：`D:/Vault/.reasonix/briefs/m1-kernel-audit.md`
+> 任务：`m1-kernel-audit-20260915` ｜ brief：`<vault>/.reasonix/briefs/m1-kernel-audit.md`
 > 审计方：critic 子代理（隔离上下文，只读）＋ 主 Agent 独立复核
 > 日期：2026-09-15 ｜ 被审对象：`utils/rag/*`（6 模块）、`tests/test_rag_core.py`、`scripts/rag_probe.py`
 

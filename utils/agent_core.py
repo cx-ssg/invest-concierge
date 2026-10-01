@@ -2,7 +2,7 @@
 """
 Agent Core（UI 无关可测） - 声明式 Tool Registry + 带规划的 Agent 循环。
 
-- TOOL_REGISTRY：11 个工具的声明式注册表（真名核对过），**晚绑定**
+- TOOL_REGISTRY：24 个工具的声明式注册表（真名核对过），**晚绑定**
   （fn 存 "模块.函数名"，调用时 import 解析 → 存量 test_ai_tools 的 mock.patch 可见）。
 - execute_ai_tool_v2：注册表分派 + _truncate 截断（长列表 top-20 / 超长 8000）。
 - execute_ai_tool：兼容别名（旧名 + 3 旧工具错误文案不变，"未找到基金"被测试断言）。
