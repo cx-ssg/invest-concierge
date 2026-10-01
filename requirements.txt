@@ -29,3 +29,8 @@ pillow>=10.0
 # M1 PDF 全文采集（scripts/rag_ingest_pdf.py：巨潮 PDF → pypdf 抽文本；
 # 2026-10-01 加入：东财 API 正文在 ~5000 字截断，大文档需走 PDF 全文）
 pypdf>=4.0
+# M3 编排层（只图化「股票深度诊断」一条链路，见 docs/COVERAGE_DESIGN.md §5）
+# - 版本锁 1.x：§10.5 要求；注意 `langgraph.prebuilt` 自 1.x 起已废弃
+langgraph>=1.0,<2
+# - SQLite checkpointer（断点续跑，无需 Postgres）：§10.5-1
+langgraph-checkpoint-sqlite>=3.0,<4
