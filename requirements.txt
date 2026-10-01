@@ -26,3 +26,6 @@ httpx>=0.27.0
 pywebview>=6.0
 pystray>=0.19
 pillow>=10.0
+# M1 PDF 全文采集（scripts/rag_ingest_pdf.py：巨潮 PDF → pypdf 抽文本；
+# 2026-10-01 加入：东财 API 正文在 ~5000 字截断，大文档需走 PDF 全文）
+pypdf>=4.0

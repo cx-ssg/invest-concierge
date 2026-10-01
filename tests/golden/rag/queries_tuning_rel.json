@@ -15,7 +15,11 @@
   "kind": "in_domain_answerable",
   "query": "今年上半年公司的营业收入是多少？",
   "answer_chunk_ids": [
-   21
+   11,
+   23,
+   85,
+   125,
+   212
   ],
   "source_doc": "贵州茅台:贵州茅台2026年半年度报告",
   "coverage_vs_title": 0.071,
