@@ -23,6 +23,14 @@ import type {
   LlmSavePayload,
   LlmTestPayload,
   LlmViewPayload,
+  MemoryAddPayload,
+  MemoryKind,
+  MemoryListPayload,
+  MemoryMutatePayload,
+  MemoryPendingPayload,
+  MemoryRecallPreviewPayload,
+  MemorySettingsPayload,
+  MemorySummarizePayload,
   SettingsPayload,
   SSEEvent,
   StatusPayload,
@@ -158,6 +166,32 @@ export const api = {
       request<LlmSavePayload>('/api/settings/llm', jsonInit('POST', body)),
     testLlm: (body: { provider: string; api_key?: string; base_url?: string; model?: string }) =>
       request<LlmTestPayload>('/api/settings/llm/test', jsonInit('POST', body)),
+  },
+
+  // ==================== 长期记忆（M2）：可审计 / 可删除 / 可预览 ====================
+  memory: {
+    /** 列表（按 preference/fact/experience 三类分组） */
+    list: () => request<MemoryListPayload>('/api/memory'),
+    /** 手动新增一条（等价对话里说「记住…」，source=explicit） */
+    add: (body: { kind: MemoryKind; content: string; key?: string }) =>
+      request<MemoryAddPayload>('/api/memory', jsonInit('POST', body)),
+    /** 删除单条；删完 AI 立刻看不到（B4） */
+    remove: (id: number) => request<MemoryMutatePayload>(`/api/memory/${id}`, jsonInit('DELETE')),
+    /** 待确认候选（AI 不自行写记忆：隐式抽取先落候选） */
+    pending: () => request<MemoryPendingPayload>('/api/memory/pending'),
+    /** 按会话抽取隐式候选（sessionId 为空时只跑规则兜底，通常抽不到） */
+    summarize: (sessionId?: number | null) =>
+      request<MemorySummarizePayload>('/api/memory/summarize', jsonInit('POST', { session_id: sessionId ?? null })),
+    resolvePending: (id: number, action: 'accept' | 'reject') =>
+      request<MemoryMutatePayload>(`/api/memory/pending/${id}`, jsonInit('POST', { action })),
+    getSettings: () => request<MemorySettingsPayload>('/api/memory/settings'),
+    setSettings: (enabled: boolean) =>
+      request<MemorySettingsPayload>('/api/memory/settings', jsonInit('POST', { enabled })),
+    /** 召回预览（审计入口）：返回「如果现在提问，AI 会看到哪些记忆」的原文 */
+    recallPreview: (question: string, codes = '') =>
+      request<MemoryRecallPreviewPayload>(
+        `/api/memory/recall-preview?question=${encodeURIComponent(question)}&codes=${encodeURIComponent(codes)}`,
+      ),
   },
 
   // ==================== 价格预警（v1.1 粘性三件套 A） ====================

@@ -212,6 +212,90 @@ export interface SettingsPayload {
   ai_read_holdings?: boolean
 }
 
+// ==================== 长期记忆（M2 · /api/memory/*） ====================
+
+/** 记忆类别（后端 `utils.long_memory.VALID_KINDS`）：偏好 / 事实 / 经验 */
+export type MemoryKind = 'preference' | 'fact' | 'experience'
+
+/** 记忆来源：explicit=用户显式说出，implicit=AI 抽取且用户已确认，seed=内置种子 */
+export type MemorySource = 'explicit' | 'implicit' | 'seed'
+
+/** 一条长期记忆（`GET /api/memory` 的 `groups[kind][]` 元素） */
+export interface MemoryItem {
+  id: number
+  key: string
+  content: string
+  meta: Record<string, unknown>
+  source: MemorySource | string
+  session_id: number | null
+  created_at: string
+  updated_at: string
+}
+
+/** `GET /api/memory`：按 kind 分组（三个键**恒存在**，空类为 `[]`）+ 总开关当前值 */
+export interface MemoryListPayload {
+  ok: boolean
+  total: number
+  groups: Record<MemoryKind, MemoryItem[]>
+  kinds: MemoryKind[]
+  enabled: boolean
+}
+
+/** 待确认的隐式候选（`GET /api/memory/pending` 的 `items` 元素） */
+export interface MemoryPendingItem {
+  id: number
+  kind: MemoryKind | string
+  key: string
+  content: string
+  meta: Record<string, unknown>
+  session_id: number | null
+  status: string
+  created_at: string
+}
+
+export interface MemoryPendingPayload {
+  ok: boolean
+  items: MemoryPendingItem[]
+}
+
+/** `GET/POST /api/memory/settings` —— 是否允许 AI 使用长期记忆 */
+export interface MemorySettingsPayload {
+  ok: boolean
+  enabled: boolean
+}
+
+/** `POST /api/memory`：ok=false 时带 error（kind 非法 / 内容为空） */
+export interface MemoryAddPayload {
+  ok: boolean
+  id?: number
+  memory?: MemoryItem & { embedded?: boolean }
+  error?: string
+}
+
+/** 删除 / 候选创建的通用回执 */
+export interface MemoryMutatePayload {
+  ok: boolean
+  id?: number
+  rejected?: boolean
+  memory?: MemoryItem
+  error?: string
+}
+
+/** `POST /api/memory/summarize`：added = 本次新抽取的候选条数 */
+export interface MemorySummarizePayload {
+  ok: boolean
+  added?: number
+  pending?: MemoryPendingItem[]
+  error?: string
+}
+
+/** `GET /api/memory/recall-preview`：block 是**真实会注入 prompt 的文本**（开关关闭时为 `""`） */
+export interface MemoryRecallPreviewPayload {
+  ok: boolean
+  counts: { preferences: number; facts: number; experiences: number }
+  block: string
+}
+
 // ==================== v1.2 模型接入（多 provider） ====================
 
 export interface LlmProviderInfo {

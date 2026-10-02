@@ -4,6 +4,7 @@ import { KeyRound, PlugZap, Server, ShieldCheck, ToggleRight } from 'lucide-reac
 import { api } from '../lib/api'
 import { Btn, Card, Kicker, Spinner } from '../components/ui/primitives'
 import { PageHeader } from '../components/layout/PageHeader'
+import { MemorySection } from '../features/memory/MemorySection'
 
 /** 系统设置（M2）：/api/settings + /api/agent/config 只读展示 + 演示模式开关 */
 export function SettingsPage() {
@@ -277,6 +278,9 @@ export function SettingsPage() {
           关闭后 AI 不会读取持仓，也不会暗示知道你的持仓。数据仅在本机存储，关断即时生效。
         </p>
       </Card>
+
+      {/* M2 长期记忆（只读审计 + 删除 + 候选确认 + 召回预览）：见 features/memory/MemorySection.tsx */}
+      <MemorySection />
 
       <Card className="p-4">
         <div className="flex items-center gap-1.5 text-[13px] font-medium text-ink">
