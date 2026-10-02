@@ -14,9 +14,10 @@ import { Btn, Spinner } from '../../components/ui/primitives'
  * AI 对话主区：历史（/api/agent/sessions/{id}/messages）+ 流式新消息
  * （POST /api/agent/chat/stream SSE → 思考流 + 工具时间线 + Markdown）。
  *
- * 会话切换不靠 effect 重置——所有回显/运行视图都以 sessionId 为键做显示门控：
+ * 会话切换不靠 effect 重置——所有回显/运行视图都以「本次运行的起始会话」为键做显示门控：
  * - liveUser 只在本会话（live.sessionId === activeId）时显示
- * - run.phase 也只在本会话（phase.sessionId === activeId）时显示
+ * - run.phase 也只在本会话（live.sessionId === activeId）时显示
+ *   （不用 phase.sessionId：它会被 done 事件覆写成服务端新会话 id，见下方 BUG-001 注释）
  * 切走后旧流事件仍被消费但不影响当前视图；再次进入时自动隐藏。
  */
 export function ChatArea({
@@ -51,8 +52,11 @@ export function ChatArea({
   // 显示门控：只展示属于当前会话的回显和运行视图。
   // runVisible 加 idle 排除：新会话空闲时 sessionId 与 activeId 同为 null，
   // 恒真会把空状态工作台永久顶掉（luna 评审"首屏空白"的根因，2026-09-04 修复）
+  // ⚠️ 归属判断必须用**本次运行的起始会话** live.sessionId（与 liveUser 同一模式）：
+  //    phase.sessionId 会在 done 事件里被覆写成服务端新会话 id，而新会话的 activeId 仍是 null
+  //    ⇒ 用 phase.sessionId 判断会在回答落地的瞬间把回答视图卸载（BUG-001，2026-10-02）
   const liveUser = live && live.sessionId === activeId ? live.user : null
-  const runVisible = phase.status !== 'idle' && phase.sessionId === activeId
+  const runVisible = phase.status !== 'idle' && live != null && live.sessionId === activeId
 
   // 自动滚底（新内容 / 新工具行 / 新思考块 / 历史加载）
   useEffect(() => {
