@@ -7,8 +7,13 @@ queue.Queue，asyncio 生成器 asyncio.to_thread 读出逐条 yield——
 agent_run 是同步阻塞多轮循环（单轮 LLM 可 30s+），绝不能直接在
 事件循环里跑。
 
-并发纪律：全局 ThreadPoolExecutor(max_workers=4) 限流，超限 503
-「引擎忙」——本地单用户场景防多个标签页并发打爆 DeepSeek 配额。
+并发纪律（⚠️ B-R1 实测：**下面这条声明目前没有实现**）：原设计为全局
+ThreadPoolExecutor(max_workers=4) 限流、超限 503「引擎忙」，以防多个标签页
+并发打爆 DeepSeek 配额。但 `AGENT_POOL_SIZE` 与 503 在**全仓没有任何调用点**
+（`git grep` 只命中本文件与 `docs/FRONTEND_PLAN.md` 的声明）—— 这是**既有偏差**
+（`git log -S AGENT_POOL_SIZE` 指向 M0 `da334d5`，**不是 B1 引入**），
+本轮按审计要求**只标注不实现**（见 `report-B-R1.md` B-F5）：
+凡「SSE 已限流 / 超限会 503」的表述都不成立。
 """
 
 import json
@@ -205,6 +210,14 @@ def stream_events(task, session_id=None, context=None):
 
         ⚠️ `total_budget_s` **必须**显式传：判官最多让**流**多活 `JUDGE_TIMEOUT_S`
         （不是每轮各等一次）—— 「超时不得拖住流」在参数层就锁死。
+
+        ⚠️ B-R1 · 审计 B-F4（**显式取舍，带数字**）：判官在本 worker 线程内**同步**
+        做有界等待 ⇒ `done` 之后 SSE 连接最多再多保持 `JUDGE_TIMEOUT_S=20s`
+        （其间 `PING_INTERVAL=15s` 可能插一条 `: ping`）。实测 p50≈0.9s / p90≈1.2s
+        （n=47，`scripts/rag_eval.py --judge llm`）⇒ 典型额外占用 ≈1s，上界 20s。
+        **接受现状**：① `done` 已发出，回答时延不含判官；② 判官结论只能随本连接下发，
+        拆独立端点属协议变更（超 B-R1 范围）。代价：并发流连接占用上界各 +20s，
+        且并发流数**无上限**（既有偏差，见模块 docstring 的 `AGENT_POOL_SIZE` 标注）。
         """
         try:
             from services import judge_service as js

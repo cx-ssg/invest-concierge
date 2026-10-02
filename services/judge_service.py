@@ -25,8 +25,22 @@
 - **单并发**（`max_workers=1`）：判官是额外开销，不得与 Agent 工具链抢 CPU/配额；
 - **有界等待**：`judge_rounds` 用**总预算 deadline**（不是每轮各等一次）⇒
   判官最多让**流**多活 `JUDGE_TIMEOUT_S`，而 `done` 早已发出（回答不等判官）；
+- **超时即取消**（B-R1 · 审计 B-F3）：超时后 `cancel()` 该 future —— 单并发池里
+  **尚未开始**的排队轮次会被真正丢弃（不再发起真实 LLM 调用）；**已在执行**的那次
+  `cancel()` 返回 False（Python 无法强杀线程），代价如实记录在 `_cancel()` docstring。
 - 超时/异常/解析失败 ⇒ 事件体里如实写 `checked=False` + `reason`，**不假装判过**；
 - 本模块**绝不抛异常**：它是对话主链路的旁路，任何失败不得打断回答。
+
+## 并发/连接占用（B-R1 · 审计 B-F4）：**显式取舍，带数字**
+
+判官在 **SSE worker 线程内**做有界等待（`services/agent_service.py::_emit_judge`），
+因此 `done` 之后 **SSE 连接最多再多保持 `JUDGE_TIMEOUT_S = 20s`**（`PING_INTERVAL=15s`
+期间还会插一条 `: ping`）。实测 p50 ≈ **0.9s** / p90 ≈ **1.2s**（n=47，`rag_eval --judge llm`）
+⇒ 典型额外占用 ≈ 1s，上界 20s。取舍：**接受现状**（不改数据流、不拆带外通道），
+理由是：① `done` 已经发出，回答时延不含判官；② 判官结论只能随该连接下发，
+拆独立端点属协议变更（超本轮范围）。代价：单流连接占用上限 +20s；并发流数**无上限**
+（既有偏差，见 `services/agent_service.py` 的 `AGENT_POOL_SIZE` 标注）。
+观测口径 = `evidence_judged.latency_ms`（每次判官事件都带）与 `JUDGE_TIMEOUT_S` 上界。
 """
 import json
 import threading
@@ -175,6 +189,23 @@ def _degraded(query, reason, latency_ms=0):
     return _event(query, LEVEL_UNCERTAIN, [], False, latency_ms, reason)
 
 
+def _cancel(fut):
+    """尽力取消 future；返回是否真的取消成功（**绝不抛**）。
+
+    ## 能取消什么、不能取消什么（B-R1 · 审计 B-F3 实测口径）
+
+    - `cancel()` **返回 True** ⇔ 该任务**尚未开始执行**（单并发池里排队的轮次）
+      ⇒ 池会直接丢弃它，**不会**再发起真实 LLM 调用；
+    - `cancel()` **返回 False** ⇔ 该任务**已在执行**（正在等 LLM 返回）
+      ⇒ Python 无法强杀线程，这次调用会自行结束（受 LLM 客户端超时约束）。
+      代价如实记录：**"有界等待"保证的是调用方不再等，不是不花钱**。
+    """
+    try:
+        return bool(fut.cancel())
+    except Exception:  # noqa: BLE001 - 旁路：取消失败不得影响主链路
+        return False
+
+
 def judge_rounds(requests, *, llm_fn=None, timeout_s=None, total_budget_s=None,
                  max_rounds=None):
     """逐轮判定（单并发 + 有界等待 + 永不抛）。
@@ -187,6 +218,9 @@ def judge_rounds(requests, *, llm_fn=None, timeout_s=None, total_budget_s=None,
       SSE 侧显式传 `JUDGE_TIMEOUT_S` ⇒ 判官最多让**流**多活这么久；评测侧不传
       ⇒ 每行独立有界（否则整批评测会被一个总预算掐掉）。
     - `max_rounds`：最多判几轮（缺省 `JUDGE_MAX_ROUNDS`；评测按行数放开）。
+
+    超时的轮次会 `cancel()` 其 future（B-F3）：排队中 = 真正丢弃、不烧 LLM 调用；
+    已在执行 = 无法强杀，如实降级为 `uncertain/timeout`（不假装判过）。
     """
     per_round = JUDGE_TIMEOUT_S if timeout_s is None else timeout_s
     cap = JUDGE_MAX_ROUNDS if max_rounds is None else max_rounds
@@ -207,8 +241,11 @@ def judge_rounds(requests, *, llm_fn=None, timeout_s=None, total_budget_s=None,
             try:
                 res = fut.result(timeout=remaining)
             except FutureTimeoutError:
-                # ⚠️ 有界等待：只放弃等待，**不杀线程**（Python 无法强杀）；
-                #    被放弃的那次调用会自行结束，其结果按"未确认"上报。
+                # ⚠️ 有界等待：只放弃等待，**不杀线程**（Python 无法强杀）。
+                # B-R1（审计 B-F3）：超时即 `cancel()` —— 排队中的轮次会被真正丢弃
+                # （否则它们会照着顺序跑完并真实烧掉 LLM 调用）；已在执行的那次
+                # cancel 返回 False，代价见 `_cancel()` docstring（有界 ≠ 不花钱）。
+                _cancel(fut)
                 events.append(_degraded(query, "timeout",
                                         int((time.monotonic() - t_round) * 1000)))
                 continue

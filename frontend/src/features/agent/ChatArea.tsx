@@ -327,6 +327,11 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
  *   `quote_rejected` 的条目**在任何情况下都不得显示成"相关"**。
  * - `relevant` / `irrelevant` ⇒ 模型给出的结论；
  * - 其余（`uncertain`，含"模型漏答"）⇒ 未确认。**绝不把未确认说成相关。**
+ *
+ * ⚠️ B-R1 · 审计 B-F9：四态文案是**模型判断，不是保证** —— 实测放行率 0.27–0.39
+ * （`judge_fp`，weak 负例口径），「判官：相关」**不等于**"该来源可靠/足以回答"。
+ * 因此每个标注都带 `title` 提示（`JUDGE_CAVEAT`），来源区另有一行小字；
+ * **不改数据流**：判官仍然**不隐藏、不降权、不排序**来源（硬约束）。
  */
 function judgeState(j: JudgeItem): 'relevant' | 'irrelevant' | 'uncertain' | 'rejected' {
   if (j.quote_rejected) return 'rejected'
@@ -334,6 +339,9 @@ function judgeState(j: JudgeItem): 'relevant' | 'irrelevant' | 'uncertain' | 're
   if (j.verdict === 'irrelevant') return 'irrelevant'
   return 'uncertain'
 }
+
+/** B-F9：hover 提示（tooltip）—— 只加限定语，不动档位、不动数据流。 */
+const JUDGE_CAVEAT = '模型判断，非保证：实测存在误放行（judge_fp 0.27–0.39），不代表该来源可靠或足以回答'
 
 const JUDGE_TEXT: Record<ReturnType<typeof judgeState>, string> = {
   relevant: '判官：相关',
@@ -356,9 +364,18 @@ const JUDGE_TEXT: Record<ReturnType<typeof judgeState>, string> = {
  */
 function SourceList({ sources, judge }: { sources: RetrievalSource[]; judge: Record<number, JudgeItem> }) {
   if (!sources.length) return null
+  // B-F9：只要有一条判官结论，就在来源区顶部给一行"非保证"小字（不改数据流）。
+  const hasJudge = sources.some((s) => s.chunk_id != null && judge[s.chunk_id])
   return (
     <div className="flex max-w-[92%] flex-col gap-1">
-      <div className="px-1 text-[11px] tracking-wide text-ink-3">来源</div>
+      <div className="flex flex-wrap items-baseline gap-x-1.5 px-1 text-[11px] tracking-wide text-ink-3">
+        <span>来源</span>
+        {hasJudge ? (
+          <span className="text-[10.5px] font-normal" title={JUDGE_CAVEAT}>
+            · 判官结论为模型判断，非保证（实测存在误放行）
+          </span>
+        ) : null}
+      </div>
       {sources.map((s, i) => {
         const n = i + 1
         const hasCredential = Boolean(s.url || s.title)
@@ -412,10 +429,14 @@ function SourceList({ sources, judge }: { sources: RetrievalSource[]; judge: Rec
             )}
             {/* B1 判官标注：只有该 chunk 有结论时才出现（无结论 = 沉默，不编造"未确认"）。
                 `data-judge` 是机器可读档位（离线 DOM 回归 harness 靠它断言，
-                见 scripts/verify_a2_dom.mjs 的 B1 场景与 --mutate judge-uncertain-as-relevant）。 */}
+                见 scripts/verify_a2_dom.mjs 的 B1 场景与 --mutate judge-uncertain-as-relevant）。
+                ⚠️ B-F9：`title` 只加"非保证"限定语；`data-judge` 的 textContent 必须保持
+                四态原文（a2_dom / verify_b1_judge_ui 都按它逐字断言）⇒ 提示只能走属性。 */}
             {j ? (
               <div className="mt-0.5 flex items-center gap-1 pl-6 text-[10.5px] text-ink-3">
-                <span data-judge={judgeState(j)}>{JUDGE_TEXT[judgeState(j)]}</span>
+                <span data-judge={judgeState(j)} title={JUDGE_CAVEAT}>
+                  {JUDGE_TEXT[judgeState(j)]}
+                </span>
               </div>
             ) : null}
           </div>

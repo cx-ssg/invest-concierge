@@ -15,10 +15,13 @@
 ⚠️ 「指标必须能随目标退化而变红」：`test_quote_check_reverse_control_turns_red_when_neutered`
 把校验函数打桩成**恒真**——该用例在那种情况下**必须红**（它自己会失败）。这是刻意设计的反证。
 """
+import ast
 import json
+import os
 import re
 import threading
 import time
+from concurrent.futures import Future
 
 import pytest
 
@@ -121,14 +124,62 @@ def test_verbatim_quote_is_accepted_and_marked_relevant():
 
 
 def test_whitespace_normalized_quote_is_accepted():
-    """空白归一化后命中即可（模型抄回来时常改换行/空格）。"""
+    """空白折叠后命中即可 —— **原文里本来就有空白**时允许换形态（换行 ↔ 空格）。
+
+    ⚠️ B-R1（审计 B-F10）**语义已收窄**：旧实现删掉**全部**空白；现在只把连续空白
+    折叠成单个空格 ⇒ 原文里**没有**空白的位置，引文里补上空白不再放行
+    （见 `test_cross_whitespace_concat_quote_is_rejected`）。
+    """
+    text = "贵州茅台上半年营业收入\n同比增长百分之十五，净利润略降。"
+
     def fake(prompt):
-        quote = "贵州茅台上半年营业收入\n同比增长   百分之十五"
+        quote = "贵州茅台上半年营业收入 同比增长百分之十五"   # 换行 → 空格（原文有空白的那个位置）
         return _llm_text({"items": [{"chunk_id": 1, "verdict": "relevant", "quote": quote}]})
 
-    out = llm_judge.judge_candidates("营收", _cands(), llm_fn=fake)
+    out = llm_judge.judge_candidates(
+        "营收", [{"chunk_id": 1, "title": "T", "text": text}], llm_fn=fake)
     assert out["items"][0]["quote_rejected"] is False
     assert out["items"][0]["verdict"] == "relevant"
+
+
+def test_normalize_ws_collapses_runs_instead_of_deleting_them():
+    """B-F10：归一化 = 连续空白 → 单空格（+ 去首尾），**不再删光空白**。"""
+    assert llm_judge.normalize_ws("a b") == "a b"
+    assert llm_judge.normalize_ws(" a\t\tb\nc ") == "a b c"
+    assert llm_judge.normalize_ws("ab") == "ab"
+    # 关键：折叠后 "a b" 与 "ab" **不相等**（旧实现里两者相等 ⇒ 跨空白拼接可过校验）
+    assert llm_judge.normalize_ws("a b") != llm_judge.normalize_ws("ab")
+
+
+def test_cross_whitespace_concat_quote_is_rejected():
+    """B-F10：原文**不连续**的两段，不能靠"删空白"拼成一条通过校验的引文。
+
+    这条用例的反向对照：旧口径（删光空白）下同一条引文**会命中** —— 所以本断言
+    在旧实现上必红（红/绿留证见 report-B-R1.md §B-F10）。
+    """
+    text = "aabbccddeeff"
+    quote = "aa bb cc dd ee ff"
+    assert llm_judge.quote_verified(quote, text) is False
+    # 旧口径（`re.sub(r"\s+", "", s)`）确实会放行同一条引文 ⇒ 证明本用例测的是真行为
+    legacy = re.sub(r"\s+", "", quote)
+    assert legacy in text, "前置：这条引文只在'删光空白'的旧口径下命中"
+
+
+def test_cross_whitespace_concat_quote_downgraded_by_judge():
+    """B-F10：判官层面同样生效 —— 跨空白拼接的 relevant 被降级为 uncertain 并留痕。"""
+    text = "贵州茅台上半年营业收入 同比增长百分之十五，净利润略降。"
+
+    def fake(prompt):
+        # 模型把原文里那个空格抹掉（跨空白拼接的镜像形态）
+        return _llm_text({"items": [{"chunk_id": 1, "verdict": "relevant",
+                                     "quote": "贵州茅台上半年营业收入同比增长百分之十五"}]})
+
+    out = llm_judge.judge_candidates(
+        "营收", [{"chunk_id": 1, "title": "T", "text": text}], llm_fn=fake)
+    item = out["items"][0]
+    assert item["quote_rejected"] is True
+    assert item["verdict"] == llm_judge.LEVEL_UNCERTAIN
+    assert out["level"] == llm_judge.LEVEL_UNCERTAIN
 
 
 def test_forged_quote_is_rejected_and_downgraded():
@@ -602,33 +653,126 @@ def test_judge_does_not_participate_in_retrieval(monkeypatch, kb):
 
     两层证据：① AST 层（检索链路的 import 图里零判官，注释里提到名字不算）；
     ② 行为层（判官跑过之后，同一查询的 `retrieve_docs` 返回体**逐字节不变**）。
-    """
-    import ast
-    import os
 
+    ⚠️ B-R1 · 审计 B-F11：AST 锁已**加固**（覆盖 `importlib.import_module` /
+    `__import__` / `getattr` 的**字面量**字符串参数，即"动态导入/别名"绕过面）；
+    行为锁也扩到"带 `code` 过滤 + 多次调用"。**锁不住的残余面**（计算出来的名字，
+    如 `import_module("services." + "judge_service")`）在
+    `test_ast_judge_lock_has_teeth_for_literal_dynamic_imports` 里**显式断言**，
+    避免把"常规调用面已锁"读成"绝对锁得住"。
+    """
     import utils.rag.hybrid as hybrid
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for rel in ("utils/rag/retrieve.py", "utils/rag/hybrid.py", "utils/rag/evidence.py"):
         path = os.path.join(root, *rel.split("/"))
         with open(path, encoding="utf-8") as f:
-            tree = ast.parse(f.read())
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported.update(a.name for a in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imported.add(node.module or "")
-                imported.update("%s.%s" % (node.module or "", a.name) for a in node.names)
-        assert not any("llm_judge" in n or "judge_service" in n for n in imported), (
-            "%s 的 import 图里出现判官 —— 判官不得进入检索链路" % rel)
+            src = f.read()
+        static = _static_judge_imports(src)
+        dynamic = _dynamic_judge_imports(src)
+        assert not static, "%s 的 import 图里出现判官 —— 判官不得进入检索链路：%s" % (rel, static)
+        assert not dynamic, "%s 用动态导入把判官接进了检索链路：%s" % (rel, dynamic)
     assert not hasattr(hybrid, "llm_judge")
+    assert not hasattr(hybrid, "judge_service")
 
-    raw_before = retrieve_docs(WEAK_QUERY, db_path=kb, query_vec=WEAK_VEC)
-    judge_service.judge_tool_trace(
-        _trace("weak", raw_before), llm_fn=lambda p: _judge_reply(p), timeout_s=5)
-    raw_after = retrieve_docs(WEAK_QUERY, db_path=kb, query_vec=WEAK_VEC)
-    assert raw_before == raw_after, "判官影响了检索返回 ⇒ 违反硬约束"
+    # ② 行为层：裸检索 + 带 code 过滤的检索，判官跑**多次**之后逐字节不变
+    def _call(code=None):
+        return retrieve_docs(WEAK_QUERY, code=code, db_path=kb, query_vec=WEAK_VEC)
+
+    before_plain, before_code = _call(), _call("600519")
+    for _ in range(2):                       # 多次调用（B-F11：旧行为锁只跑一次）
+        judge_service.judge_tool_trace(
+            _trace("weak", before_plain), llm_fn=lambda p: _judge_reply(p), timeout_s=5)
+        judge_service.judge_tool_trace(
+            _trace("weak", before_code), llm_fn=lambda p: _judge_reply(p), timeout_s=5)
+    assert _call() == before_plain, "判官影响了裸检索返回 ⇒ 违反硬约束"
+    assert _call("600519") == before_code, "判官影响了带 code 过滤的检索返回 ⇒ 违反硬约束"
+
+
+# ==================== 第 6 层：检索隔离锁的"牙口"（B-R1 · 审计 B-F11） ====================
+
+#: 判官模块/入口的名字片段（静态 import / 动态导入字符串命中任一即算违约）
+_JUDGE_NAME_HINTS = ("llm_judge", "judge_service")
+
+
+def _static_judge_imports(src):
+    """静态 import 面：`import X` / `from X import Y`（**含别名**）里的判官命中。"""
+    tree = ast.parse(src)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imported.add(node.module or "")
+            imported.update("%s.%s" % (node.module or "", a.name) for a in node.names)
+    return sorted(n for n in imported if any(h in n for h in _JUDGE_NAME_HINTS))
+
+
+def _dynamic_judge_imports(src):
+    """动态导入面：`importlib.import_module("…")` / `__import__("…")` /
+    `getattr(mod, "…")` 的**字面量**字符串参数里的判官命中。
+
+    ⚠️ 只能锁**字面量**：`import_module("services." + "judge_service")` /
+    `getattr(mod, "judge" + "_service")` 这类**计算出来的名字**锁不住（诚实边界，
+    由 `test_ast_judge_lock_has_teeth_for_literal_dynamic_imports` 显式断言）。
+    """
+    tree = ast.parse(src)
+    hits = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        if isinstance(fn, ast.Name):
+            name = fn.id
+        elif isinstance(fn, ast.Attribute):
+            name = fn.attr
+        else:
+            continue
+        if name not in ("import_module", "__import__", "getattr", "getattr_static"):
+            continue
+        for arg in list(node.args) + [k.value for k in node.keywords]:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                if any(h in arg.value for h in _JUDGE_NAME_HINTS):
+                    hits.append("%s(%r)" % (name, arg.value))
+    return hits
+
+
+def test_ast_judge_lock_has_teeth_for_aliased_and_dynamic_imports():
+    """B-F11：攻击样本喂给锁 ⇒ 必须命中（证明加固后的锁有牙）。
+
+    红/绿留证（report-B-R1.md §B-F11）：加固前旧锁只扫 `ast.Import`/`ImportFrom`
+    ⇒ 静态面（含 `as` 别名）**能**命中，但**动态面 0 命中**
+    （`importlib.import_module("services.judge_service")` 完全无感）；加固后三种
+    动态形态（`import_module` / `__import__` / `getattr` 字面量）全部命中。
+    """
+    sample = (
+        "from services import judge_service as js\n"
+        "import utils.rag.llm_judge as lj\n"
+        "import importlib\n"
+        "m = importlib.import_module('services.judge_service')\n"
+        "j = __import__('utils.rag.llm_judge')\n"
+        "k = getattr(hybrid, 'judge_service', None)\n"
+    )
+    static = _static_judge_imports(sample)
+    assert "services.judge_service" in static, "别名静态导入必须被锁住"
+    assert "utils.rag.llm_judge" in static, "别名静态导入必须被锁住"
+    dynamic = _dynamic_judge_imports(sample)
+    assert any("import_module" in h for h in dynamic), "importlib.import_module 必须被锁住"
+    assert any("__import__" in h for h in dynamic), "__import__ 必须被锁住"
+    assert any("getattr" in h for h in dynamic), "getattr 字面量必须被锁住"
+
+
+def test_ast_judge_lock_documents_its_blind_spot():
+    """B-F11（诚实边界）：**计算出来的**模块名锁不住 —— 断言这一点，防止过度信任。
+
+    这不是"待修缺陷"：静态 AST 锁的语义就是"常规调用面"，动态拼名字等价于刻意规避，
+    需要运行时钩子/import 审计（超 B-R1 范围）。锁 + 行为锁 + 人工评审三者才是完整防线。
+    """
+    evasive = ("import importlib\n"
+               "m = importlib.import_module('services.' + 'judge_service')\n"
+               "n = getattr(mod, 'judge' + '_service', None)\n")
+    assert _dynamic_judge_imports(evasive) == []
+    assert _static_judge_imports(evasive) == []
 
 
 # ==================== 第 5 层：评测口径（`judge_fp` 落在 weak 子集，且只认**通过校验**的放行） ====================
@@ -694,3 +838,174 @@ def test_judge_metrics_trigger_rate_excludes_none_level(kb):
     assert m["n_weak_irr"] == 0
     assert m["judge_fp"] == 0.0
     assert m["judge_fp_all_irr"] == 0.0
+
+
+# ==================== 第 7 层：总预算 / 兜底降级 / 超时取消（B-R1 审计 B-F1/B-F2/B-F3） ====================
+
+
+def _reqs(n, text=PAYLOAD_TEXT):
+    """n 个 weak 轮次的判官请求（与 `collect_from_tool_trace` 的产物同构）。"""
+    return [{"query": "q%d" % i,
+             "candidates": [{"chunk_id": 100 + i, "title": "T", "text": text}]}
+            for i in range(n)]
+
+
+def _all_irrelevant(prompt):
+    """一份合法的"全无关"模型回复（用于不关心档位的用例）。"""
+    ids = re.findall(r"\[chunk_id=([^\]]+)\]", prompt)
+    return _llm_text({"items": [{"chunk_id": cid, "verdict": "irrelevant", "quote": ""}
+                                for cid in ids]})
+
+
+def _drain_judge_pool(timeout=10):
+    """等单并发池排空 —— 防止上一条用例遗留的在跑任务影响下一条。"""
+    fut = judge_service.submit_judge("drain", [{"chunk_id": 0, "text": PAYLOAD_TEXT}],
+                                     llm_fn=_all_irrelevant, timeout_s=5)
+    fut.result(timeout=timeout)
+
+
+def test_total_budget_bounds_the_whole_batch():
+    """**B-F1**：`total_budget_s` 是**整批**上限，不是"每轮各等一次"。
+
+    3 轮 × 每轮 0.4s 的假 LLM + 总预算 0.5s ⇒ 墙钟必须 < 1.0s（没有 deadline 逻辑
+    则是 1.2s+），且第 2/3 条**如实降级**（`checked=False` / `uncertain` / `timeout`）。
+    红/绿留证：把 `judge_rounds` 的 deadline 改成 `None` ⇒ 本用例红（report-B-R1 §B-F1）。
+    """
+    started = []
+
+    def slow(prompt):
+        started.append(time.monotonic())
+        time.sleep(0.4)
+        return _all_irrelevant(prompt)
+
+    t0 = time.monotonic()
+    events = judge_service.judge_rounds(_reqs(3), llm_fn=slow, timeout_s=5.0,
+                                        total_budget_s=0.5, max_rounds=3)
+    wall = time.monotonic() - t0
+    _drain_judge_pool()
+
+    assert len(events) == 3, "每一轮都要有落点（不许静默丢掉）"
+    assert wall < 1.0, "总预算必须把整批锁在 1.0s 内（实测 %.2fs；无总预算 = 1.2s+）" % wall
+    assert events[0]["checked"] is True, "第 1 轮在预算内完成，应如实上报结果"
+    for i, ev in enumerate(events[1:], start=2):
+        assert ev["checked"] is False, "第 %d 轮超预算后不得假装判过" % i
+        assert ev["level"] == "uncertain"
+        assert ev["reason"] == "timeout"
+        assert ev["items"] == []
+    assert len(started) <= 2, (
+        "总预算耗尽后不得再向池里投递 LLM 调用（实测投递 %d 次）" % len(started))
+
+
+def test_total_budget_holds_through_sse_and_done_stays_first(monkeypatch, kb):
+    """**B-F1（SSE 端）**：3 个 weak 轮 + 判官每轮 0.4s + `JUDGE_TIMEOUT_S=0.5`
+    ⇒ `done` **先到**、流墙钟有界、第 2/3 条标注如实 `checked=False`。
+    """
+    def real_tool(query, code=None, top_n=5):
+        return retrieve_docs(query, code=code, top_n=top_n, db_path=kb, query_vec=WEAK_VEC)
+
+    rounds = {"n": 0}
+
+    def fake(prompt, tools=None, model=None, temperature=0.7, thinking=False):
+        if isinstance(prompt, list):
+            rounds["n"] += 1
+            if rounds["n"] <= 3:
+                return _tool_call("retrieve_docs", {"query": WEAK_QUERY},
+                                  call_id="c%d" % rounds["n"])
+            return {"type": "text", "content": "（打桩终稿）", "usage": None}
+        time.sleep(0.4)
+        return _all_irrelevant(prompt)
+
+    monkeypatch.setattr(ai_helper, "call_llm", fake)
+    monkeypatch.setattr("utils.rag.retrieve.retrieve_docs", real_tool)
+    monkeypatch.setattr(judge_service, "JUDGE_TIMEOUT_S", 0.5)
+    _patch_memory(monkeypatch)
+
+    t0 = time.time()
+    events = list(agent_service.stream_events(WEAK_QUERY))
+    wall = time.time() - t0
+    _drain_judge_pool()
+
+    types = [e.get("type") for e in events]
+    judged = [e for e in events if e.get("type") == "evidence_judged"]
+    assert rounds["n"] >= 3, "前置：agent 必须真的调了至少 3 轮 retrieve_docs"
+    assert len(judged) == 3, "3 个 weak 轮都应产出判官事件（实测 %d）" % len(judged)
+    assert wall < 1.0, "判官最多让流多活 JUDGE_TIMEOUT_S（实测 %.2fs）" % wall
+    assert types.index("done") < types.index("evidence_judged"), "回答不得等判官"
+    assert judged[0]["checked"] is True
+    for ev in judged[1:]:
+        assert ev["checked"] is False, "第 2/3 轮超预算后不得假装判过"
+        assert ev["level"] == "uncertain"
+        assert ev["reason"] == "timeout"
+
+
+def test_degraded_when_total_budget_exhausted_without_calling_llm():
+    """**B-F2a**：`total_budget_s=0` ⇒ 一轮都不提交，如实 `uncertain`/`checked=False`/`timeout`。
+
+    核心安全性质：「失败一律降级 uncertain、绝不编造 relevant」。
+    """
+    calls = []
+
+    def fake(prompt):
+        calls.append(prompt)
+        return _all_irrelevant(prompt)
+
+    events = judge_service.judge_rounds(_reqs(2), llm_fn=fake, total_budget_s=0.0)
+    assert len(events) == 2
+    assert calls == [], "预算为 0 时**一次 LLM 都不许调**"
+    for ev in events:
+        assert set(ev.keys()) == JUDGE_EVENT_KEYS
+        assert ev["checked"] is False
+        assert ev["level"] == "uncertain"
+        assert ev["reason"] == "timeout"
+        assert ev["items"] == []
+
+
+def test_degraded_when_submit_future_times_out(monkeypatch):
+    """**B-F2b**：future 级超时 ⇒ `uncertain`/`checked=False`/`timeout`。"""
+    monkeypatch.setattr(judge_service, "submit_judge", lambda *a, **k: Future())
+    events = judge_service.judge_rounds(_reqs(1), llm_fn=_all_irrelevant, timeout_s=0.2)
+    assert events[0]["checked"] is False
+    assert events[0]["level"] == "uncertain"
+    assert events[0]["reason"] == "timeout"
+
+
+def test_degraded_when_submit_future_raises(monkeypatch):
+    """**B-F2b**：future 级异常 ⇒ `uncertain`/`checked=False`/`llm_error`。"""
+    fut = Future()
+    fut.set_exception(RuntimeError("上游 500"))
+    monkeypatch.setattr(judge_service, "submit_judge", lambda *a, **k: fut)
+    events = judge_service.judge_rounds(_reqs(1), llm_fn=_all_irrelevant, timeout_s=0.2)
+    assert events[0]["checked"] is False
+    assert events[0]["level"] == "uncertain"
+    assert events[0]["reason"] == "llm_error"
+
+
+def test_timeout_cancels_queued_round_and_burns_no_llm_call():
+    """**B-F3**：判官超时后，**排队中**的轮次必须被 `cancel()` —— 不得再烧一次 LLM 调用。
+
+    手法：用 blocker 占住唯一 worker，再把下一轮排到队尾；超时后取消 ⇒ 队列里那次
+    一次都没跑（旧实现没有 `cancel()` ⇒ 它会照顺序跑完并真实调用 LLM）。
+    """
+    released = threading.Event()
+    started = threading.Event()
+
+    def blocker(prompt):
+        started.set()
+        released.wait(timeout=10)
+        return _all_irrelevant(prompt)
+
+    busy = judge_service.submit_judge("busy", _reqs(1)[0]["candidates"],
+                                      llm_fn=blocker, timeout_s=10)
+    assert started.wait(5), "前置：单并发 worker 已被占住"
+    ran = []
+    try:
+        events = judge_service.judge_rounds(
+            _reqs(1), llm_fn=lambda p: ran.append(1) or _all_irrelevant(p),
+            timeout_s=0.2, total_budget_s=0.2)
+    finally:
+        released.set()
+    busy.result(timeout=10)
+    time.sleep(0.25)      # 给"未取消"的旧实现足够时间把队列里的任务跑起来
+
+    assert events[0]["checked"] is False and events[0]["reason"] == "timeout"
+    assert ran == [], "超时后排队中的判官轮次必须被 cancel（旧实现会跑完并真实调用 LLM）"

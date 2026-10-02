@@ -198,6 +198,29 @@ JS_SEND = """(() => {
 KNOWN_LABELS = ('判官：相关', '判官：无关', '判官：未确认', '判官：未确认（引文未通过校验）')
 
 
+def cleanup_sessions(base, sids):
+    """DELETE 掉本次运行新建的会话（**必须在后端还活着时调用**）。
+
+    ⚠️ B-R1 · 审计 B-F8：旧实现把这段放在 `p.terminate()` **之后** ⇒ 后端已死，
+    DELETE 只会拿到 `WinError 10054`，**会话残留却仍报 PASS**（监督者侧实测留下 1 条，
+    手工清理过 131）。现在由 `main()` 在 terminate **之前**调用；成功清理才把
+    `created` 置空，异常/提前返回路径由 `finally` 兜底（同样在 terminate 之前）。
+    每条结果都进结果 JSON 的 `cleanup` 字段 —— 残留不再无痕。
+    """
+    results = []
+    for sid in list(sids or []):
+        try:
+            req = urllib.request.Request(
+                base + "/api/agent/sessions/%d" % int(sid), method="DELETE")
+            _opener().open(req, timeout=5).read()
+            results.append({"session_id": sid, "ok": True})
+            print("[V5] 清理会话 %s" % sid)
+        except Exception as ex:
+            results.append({"session_id": sid, "ok": False, "error": str(ex)[:80]})
+            print("[V5] 清理会话 %s 失败：%s" % (sid, str(ex)[:80]))
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser(description="B1 V5 浏览器真跑：判官标注渲染")
     ap.add_argument("--port", type=int, default=8010)
@@ -212,6 +235,8 @@ def main():
     edge = None
     cdp = None
     created = []
+    cleanup = []
+    out = os.path.join(OUT_DIR, "b1-judge-ui.json")
     try:
         if not http_ok(base + "/api/agent/config"):
             log = open(os.path.join(OUT_DIR, "b1-ui-backend.log"), "w",
@@ -265,6 +290,13 @@ def main():
         after = http_json(base + "/api/agent/sessions") or []
         created = [s.get("id") for s in after if s.get("id") not in before]
 
+        # ★ B-R1 · B-F8：**先清理、后 terminate**（后端此刻还活着，DELETE 才有意义）；
+        #    清理结果进结果 JSON，失败会让 RESULT 变 FAIL（残留不得无痕）。
+        cleanup = cleanup_sessions(base, created)
+        cleanup_ok = all(r["ok"] for r in cleanup)
+        if cleanup_ok:
+            created = []
+
         cards = [c for c in last.get("cards", []) if c.get("judge")]
         bad_labels = [c for c in cards if c.get("judgeText") not in KNOWN_LABELS]
         unsafe = [c for c in cards
@@ -278,6 +310,9 @@ def main():
             "PASS" if not bad_labels else "FAIL", len(bad_labels)))
         print("[V5] ③ 未确认/引文被拒的卡片不得显示为「相关」：%s（违规 %d 条）" % (
             "PASS" if not unsafe else "FAIL", len(unsafe)))
+        print("[V5] ④ 本次新建会话已清理（后端存活时 DELETE）：%s（%d/%d 条）" % (
+            "PASS" if cleanup_ok else "FAIL",
+            sum(1 for r in cleanup if r["ok"]), len(cleanup)))
 
         payload = {
             "task": "B1 V5 · 浏览器真跑：判官标注渲染（headless Edge + CDP）",
@@ -287,19 +322,20 @@ def main():
             "judge_badges": len(cards),
             "cards": last.get("cards", []),
             "has_judge_word": last.get("hasJudgeWord"),
-            "created_sessions": created,
+            "created_sessions": [r.get("session_id") for r in cleanup],
+            "cleanup": {"ok": cleanup_ok, "results": cleanup},
             "screenshot": png if os.path.exists(png) else None,
             "dom_text_tail": (last.get("text") or "")[-1200:],
             "verdict": {"badges_ok": badges_ok,
                         "labels_ok": not bad_labels,
-                        "no_unsafe_relevant": not unsafe},
+                        "no_unsafe_relevant": not unsafe,
+                        "cleanup_ok": cleanup_ok},
         }
-        out = os.path.join(OUT_DIR, "b1-judge-ui.json")
         with open(out, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
         print("[V5] dump -> %s" % out)
 
-        ok = badges_ok and not bad_labels and not unsafe
+        ok = badges_ok and not bad_labels and not unsafe and cleanup_ok
         print("[V5] RESULT: %s" % ("PASS" if ok else "FAIL"))
         return 0 if ok else 2
     finally:
@@ -308,20 +344,16 @@ def main():
                 cdp.ws.close()
             except Exception:
                 pass
+        # ★ B-R1 · B-F8：兜底清理 —— 提前返回/异常路径下可能还有未清理的会话；
+        #    必须在 terminate **之前**（后端一停，DELETE 就只会拿到连接错误）。
+        if created:
+            cleanup_sessions(base, created)
         for p in (edge, proc):
             if p is not None:
                 try:
                     p.terminate()
                 except Exception:
                     pass
-        for sid in created:
-            try:
-                req = urllib.request.Request(
-                    base + "/api/agent/sessions/%d" % int(sid), method="DELETE")
-                _opener().open(req, timeout=5).read()
-                print("[V5] 清理会话 %s" % sid)
-            except Exception as ex:
-                print("[V5] 清理会话 %s 失败：%s" % (sid, str(ex)[:80]))
 
 
 if __name__ == "__main__":
