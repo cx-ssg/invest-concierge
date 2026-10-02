@@ -43,6 +43,22 @@ const MUTATIONS = {
     file: 'src/features/agent/ChatArea.tsx',
     from: 'live != null && live.sessionId === activeId',
     to: 'phase.sessionId === activeId',
+    // BUG-002 采纳新 id 后，新会话用例的 activeId 已等于落库 id ⇒ 不再区分该变异；
+    // 「运行起始会话 ≠ 落库会话」的同族用例仍能区分（A-R2 实测见 report）
+    expect: 'F1/existing-session-refork',
+  },
+  bug002: {
+    file: 'src/features/agent/ChatArea.tsx',
+    // 整块关掉「采纳服务端新会话 id」（= 修复前的行为：既不回写 activeId、也不同步 live.sessionId）
+    from: 'if (activeId == null) {',
+    to: 'if (false) {',
+    expect: 'B002/session-id-written-back',
+  },
+  'bug002-partial': {
+    file: 'src/features/agent/ChatArea.tsx',
+    // 只回写归属 / 不同步 live.sessionId —— 论证「为什么两行都要」（设计对照，非缺陷版）
+    from: 'setLive((l) => (l ? { ...l, sessionId: sid } : l))',
+    to: 'void 0 /* MUTANT: 只回写 activeId，不同步 live.sessionId */',
     expect: 'F1/new-session-answer-visible',
   },
 }
@@ -116,7 +132,24 @@ function installDom() {
 // ==================== ③ 桩 SSE + 桩 HTTP ====================
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * 桩 SSE：数组 = 原样回放；函数 = 由**服务端语义**生成（`(sid, task, inbound) => events`）。
+ * A-R2/BUG-002 起桩后端是**有状态的**：按请求体的 `session_id` 决定「续写已有会话」还是
+ * 「新建会话」（与 `utils/agent_memory.ensure_session` 同口径：None/非法 → 新建），
+ * 并把 `task` / `done.content` 落进该会话的消息表（`/messages` 读它）。
+ * 没有这一步，就测不出「后端被拆成两个会话」与「上一条回答其实在库里」。
+ */
 let currentSse = []
+let sessionsDb = {}
+let nextSessionId = 900
+let streamRequests = []
+
+function resetBackend() {
+  sessionsDb = {}
+  nextSessionId = 900
+  streamRequests = []
+}
+
 function sseBody(events) {
   return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
 }
@@ -132,13 +165,37 @@ function installFetch() {
     const url = typeof input === 'string' ? input : String(input?.url ?? input)
     calls.push(`${init?.method || 'GET'} ${url}`)
     if (url.includes('/api/agent/chat/stream')) {
-      return new Response(sseBody(currentSse), {
+      const body = init?.body ? JSON.parse(String(init.body)) : {}
+      const inbound = body.session_id ?? null
+      // 服务端语义：合法正整数 → 续写；否则新建（ensure_session）
+      const landed = typeof inbound === 'number' && inbound > 0 ? inbound : ++nextSessionId
+      const events = typeof currentSse === 'function'
+        ? currentSse(landed, String(body.task ?? ''), inbound)
+        : currentSse
+      const doneEv = [...events].reverse().find((e) => e.type === 'done')
+      sessionsDb[landed] = sessionsDb[landed] || []
+      sessionsDb[landed].push({ role: 'user', content: String(body.task ?? '') })
+      sessionsDb[landed].push({ role: 'assistant', content: String(doneEv?.content ?? '') })
+      streamRequests.push({
+        inbound_session_id: inbound,
+        landed_session_id: landed,
+        task: String(body.task ?? ''),
+      })
+      return new Response(sseBody(events), {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
       })
     }
-    if (url.includes('/messages')) return jsonResponse([])
-    if (/\/api\/agent\/sessions(\?|$)/.test(url)) return jsonResponse([])
+    const msg = url.match(/\/api\/agent\/sessions\/(\d+)\/messages/)
+    if (msg) return jsonResponse(sessionsDb[Number(msg[1])] || [])
+    if (/\/api\/agent\/sessions(\?|$)/.test(url)) {
+      return jsonResponse(
+        Object.keys(sessionsDb).map((id) => ({
+          id: Number(id), title: '', summary: '', pinned: 0, archived: 0,
+          created_at: '', updated_at: '',
+        })),
+      )
+    }
     return jsonResponse({ ok: true })
   }
   return calls
@@ -238,6 +295,7 @@ async function waitFor(pred, timeoutMs = 5000, stepMs = 20) {
 async function runChatScenario({ key, activeId, events, answer = ANSWER }) {
   const host = document.createElement('div')
   document.body.appendChild(host)
+  resetBackend()
   currentSse = events
   let mounted = null
   // ⚠️ jsdom 没有 innerText，一律用 textContent（参与断言的只是可见文本语义）
@@ -282,6 +340,114 @@ async function scenarioF1() {
       console.log(`      DOM 片段：${JSON.stringify(r.text.slice(0, 160))}`)
     }
   }
+}
+
+// ==================== 场景：BUG-002 新会话第二条消息（会话归属回写） ====================
+const B002_Q1 = 'BUG002 提问一：贵州茅台最近公告说了什么？'
+const B002_A1 = 'BUG002_ANSWER_1：第一条回答——发第 2 条之后必须仍在消息区。'
+const B002_Q2 = 'BUG002 提问二：那它的估值分位呢？'
+const B002_A2 = 'BUG002_ANSWER_2：第二条回答——必须出现。'
+
+/** 桩后端事件：`sid` 是**服务端落库**的会话 id（新建或续写，由桩后端按请求体判定）。 */
+function eventsBug002(sid, task) {
+  const answer = task.includes('提问二') ? B002_A2 : B002_A1
+  return [
+    { type: 'status', state: 'thinking' },
+    { type: 'reasoning', text: '先看公告，再看估值分位。' },
+    { type: 'tool_start', name: 'search_stock', arguments: { code: '600519' } },
+    { type: 'tool_end', name: 'search_stock', ok: true, elapsed_ms: 9 },
+    { type: 'done', session_id: sid, content: answer, tool_trace: [] },
+  ]
+}
+
+/** 同一页面连发两条（第 1 条落地后才发第 2 条），返回两条的可见性与服务端实况。 */
+async function twoTurns(activeId) {
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  let mounted = null
+  await entry.act(async () => {
+    mounted = entry.mountChatArea(host, {
+      activeId,
+      apiKeyConfigured: true,
+      demoMode: false,
+      models: { chat: 'stub-chat', reasoner: 'stub-reasoner' },
+    })
+  })
+  const { root, getActiveId } = mounted
+
+  await ask(host, B002_Q1)
+  const firstVisible = await waitFor(() => host.textContent.includes(B002_A1))
+  const activeAfterFirst = getActiveId()
+  const headerAfterFirst = host.textContent.match(/会话(（新）| #\d+)/)?.[0] || ''
+
+  await ask(host, B002_Q2)
+  const secondVisible = await waitFor(() => host.textContent.includes(B002_A2))
+  const firstStillVisible = host.textContent.includes(B002_A1)
+  const text = host.textContent
+
+  await entry.act(async () => { root.unmount() })
+  host.remove()
+  return {
+    firstVisible, secondVisible, firstStillVisible, text,
+    activeAfterFirst, activeBefore: activeId, headerAfterFirst,
+    sessions: Object.keys(sessionsDb).map(Number),
+    requests: streamRequests.map((r) => ({ ...r })),
+  }
+}
+
+async function scenarioBug002() {
+  section('BUG-002 · 新会话连发两条（会话归属回写 / 不分裂 / 上一条回答仍在）')
+  resetBackend()
+  currentSse = eventsBug002
+  const r = await twoTurns(null)
+
+  check('B002/first-answer-visible', r.firstVisible,
+    `第 1 条回答可见=${r.firstVisible}`)
+  console.log(`  ${r.firstVisible ? '✓' : '✗'} 第 1 条回答可见 = ${r.firstVisible}`)
+
+  check('B002/session-id-written-back', r.activeAfterFirst === 901,
+    `第 1 条 done 后 activeId=${r.activeAfterFirst}（期望 901：服务端新建的会话 id 必须回写归属）`)
+  console.log(`  ${r.activeAfterFirst === 901 ? '✓' : '✗'} 会话归属回写：activeId=${r.activeAfterFirst}（期望 901）`)
+
+  check('B002/header-shows-session', r.headerAfterFirst === '会话 #901',
+    `头部=${r.headerAfterFirst}（期望 会话 #901）`)
+  console.log(`  ${r.headerAfterFirst === '会话 #901' ? '✓' : '✗'} 头部归属文案：${r.headerAfterFirst}（期望 会话 #901）`)
+
+  check('B002/second-answer-visible', r.secondVisible,
+    `第 2 条回答可见=${r.secondVisible}`)
+  console.log(`  ${r.secondVisible ? '✓' : '✗'} 第 2 条回答可见 = ${r.secondVisible}`)
+
+  check('B002/first-answer-still-visible', r.firstStillVisible,
+    `第 2 条落地后第 1 条回答仍在=${r.firstStillVisible}`)
+  console.log(`  ${r.firstStillVisible ? '✓' : '✗'} 第 1 条回答仍在 = ${r.firstStillVisible}`)
+
+  const req1 = r.requests[0] || {}
+  const req2 = r.requests[1] || {}
+  const continued = req2.inbound_session_id != null && req2.inbound_session_id === r.activeAfterFirst
+  check('B002/second-run-continues-session', continued,
+    `第 2 次请求 session_id=${req2.inbound_session_id}（期望 ${r.activeAfterFirst}，非 null；` +
+    '值为 null = 归属没回写，后端会另建会话）')
+  console.log(`  ${continued ? '✓' : '✗'} 第 2 次请求续写同一会话：session_id=${req2.inbound_session_id}` +
+    `（期望 ${r.activeAfterFirst}，非 null）`)
+
+  const noSplit = r.sessions.length === 1
+  check('B002/no-session-split', noSplit,
+    `服务端会话=${JSON.stringify(r.sessions)}（期望 1 个：req1(in=${req1.inbound_session_id}→landed=${req1.landed_session_id}) req2(in=${req2.inbound_session_id}→landed=${req2.landed_session_id})）`)
+  console.log(`  ${noSplit ? '✓' : '✗'} 服务端会话数=${r.sessions.length} ${JSON.stringify(r.sessions)}（期望 1）`)
+
+  // —— 对照组：activeId 非空（已有会话）时行为不得变化 ——
+  resetBackend()
+  currentSse = eventsBug002
+  const c = await twoTurns(118)
+  const ctrlOk = c.firstVisible && c.secondVisible && c.firstStillVisible &&
+    c.activeAfterFirst === 118 &&
+    c.requests.every((x) => x.inbound_session_id === 118) && c.sessions.length === 1
+  check('B002/control-existing-session-unchanged', ctrlOk,
+    `对照 activeId=118：两条可见=${c.firstVisible}/${c.secondVisible} 上一条仍在=${c.firstStillVisible} ` +
+    `activeId=${c.activeAfterFirst} 请求=${JSON.stringify(c.requests.map((x) => x.inbound_session_id))} 会话=${JSON.stringify(c.sessions)}`)
+  console.log(`  ${ctrlOk ? '✓' : '✗'} 对照组 activeId=118 行为不变：两条可见=${c.firstVisible}/${c.secondVisible} 上一条仍在=${c.firstStillVisible} activeId=${c.activeAfterFirst} 请求=${JSON.stringify(c.requests.map((x) => x.inbound_session_id))}`)
+  if (!ctrlOk) console.log(`      DOM=${JSON.stringify(c.text.slice(0, 200))}`)
+  if (!r.firstStillVisible) console.log(`      B002 DOM=${JSON.stringify(r.text.slice(0, 220))}`)
 }
 
 async function scenarioF2() {
@@ -401,6 +567,7 @@ async function main() {
   entry = await import(pathToFileURL(bundle).href)
 
   await scenarioF1()
+  await scenarioBug002()
   await scenarioF2()
   await scenarioF3()
   await scenarioF5()
@@ -413,6 +580,7 @@ async function main() {
     failed: failed.map((c) => c.name),
     checks,
     fetch_calls: fetchCalls,
+    stream_requests: streamRequests,
   }
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const outPath = path.join(OUT_DIR, `a2-dom-result${MUTATE ? '-' + MUTATE : ''}.json`)

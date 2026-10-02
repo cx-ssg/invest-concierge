@@ -264,7 +264,12 @@ def test_agent_run_tool_end_none_level_no_credential_leak(monkeypatch, kb):
 
 
 def test_agent_run_malformed_tool_output_still_emits_tool_end(monkeypatch):
-    """工具返回畸形串（"" / "{not json"）时：事件照发、ok 仍判成功、**不出现 sources 键**。"""
+    """工具返回畸形串（"" / "{not json"）时：事件照发、ok 仍判成功、**不出现 sources / evidence_level 键**。
+
+    ⚠️ 2026-10-03 二路审计 F5（A-R2）：`evidence_level` 原先**无条件**写入，
+    与「与 `sources` 同条件附加」的协议表述不一致 —— `extract_sources` 在所有「无来源」路径
+    都返回 `([], None)`，故该键只可能取 `None`，是纯噪声。本断言锁「键不存在」而非「值为 null」。
+    """
     for bad in ("", "{not json"):
         def broken(query, code=None, top_n=5, _bad=bad):
             return _bad
@@ -275,7 +280,8 @@ def test_agent_run_malformed_tool_output_still_emits_tool_end(monkeypatch):
         assert payload["name"] == "retrieve_docs"
         assert payload["ok"] is True, "坏 JSON 不属于「工具执行失败」（execute 层已判过）"
         assert "sources" not in payload, "无来源 ⇒ 不得出现 sources 键"
-        assert payload.get("evidence_level") is None
+        assert "evidence_level" not in payload, \
+            "无来源 ⇒ 不得出现 evidence_level 键（与 sources 同条件；F5）"
 
 
 # ==================== 契约锁 5：协议纯净（非 retrieve_docs 不得带 sources） ====================
@@ -297,6 +303,22 @@ def test_non_retrieve_tool_has_no_sources_key(monkeypatch):
     assert "sources" not in payload, "非检索工具污染协议：不得出现 sources 键"
     assert "evidence_level" not in payload
     assert _tool_json(output)["code"] == "600519"
+
+
+def test_retrieve_docs_error_tool_end_has_no_evidence_keys(monkeypatch):
+    """`retrieve_docs` 调用**失败**（error 分支：缺必填 `query`）时，事件体不得出现证据键。
+
+    这是 F5「与 `sources` 同条件」在**另一条分支**上的锁：错误分支只允许带
+    `error_code` / `retryable`，不得顺带把 `sources` / `evidence_level` 漏出去。
+    """
+    events, _res, _out = _drive_agent_run(
+        monkeypatch, "retrieve_docs", {}, lambda *a, **k: "{}")
+    payload = _tool_ends(events)[0]
+    assert payload["name"] == "retrieve_docs"
+    assert payload["ok"] is False, "缺必填参数 ⇒ 必须判失败"
+    assert payload["error_code"], "失败事件必须带机器码"
+    assert "sources" not in payload
+    assert "evidence_level" not in payload, "失败分支不得出现证据键（F5）"
 
 
 # ==================== 契约锁 6：SSE 桥必须把 sources 透传到前端 ====================

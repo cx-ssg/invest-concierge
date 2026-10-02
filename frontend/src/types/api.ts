@@ -169,7 +169,7 @@ export type SSEEvent =
       elapsed_ms: number
       /** 仅 `retrieve_docs` 成功且有来源时出现（协议纯净：其余工具不带该键） */
       sources?: RetrievalSource[]
-      /** 检索证据档位（weak / none）；无来源时为 null */
+      /** 检索证据档位（weak / none）；**与 `sources` 同条件**：无来源时该键不出现（A-R2/F5） */
       evidence_level?: string | null
     }
   | { type: 'memory_used'; sources: string[] }

@@ -10,6 +10,7 @@ import { useSessionStore } from '../stores/session'
  */
 export function AiChatPage() {
   const activeId = useSessionStore((s) => s.activeId)
+  const setActiveId = useSessionStore((s) => s.setActiveId)
   const { data: config } = useQuery({ queryKey: ['agent-config'], queryFn: api.agent.config })
 
   return (
@@ -21,6 +22,8 @@ export function AiChatPage() {
         chat: config?.chat_model ?? 'deepseek-chat',
         reasoner: config?.reasoner_model ?? 'deepseek-reasoner',
       }}
+      // BUG-002：服务端新建的会话 id 回写到全局会话归属（否则新会话第 2 条会另起会话）
+      onSessionAdopted={setActiveId}
     />
   )
 }

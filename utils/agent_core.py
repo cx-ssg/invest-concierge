@@ -783,14 +783,18 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 # ⚠️ 只做**搬运**：`url`/`title` 与工具返回逐字一致 —— `none` 档由
                 # `utils/rag/retrieve.py` 剥掉引用凭据，这里**不得补回来**（否则
                 # 「无引用 = 不算回答」的机器强制会在事件层被悄悄撤销）。
-                # ⚠️ 只在 `retrieve_docs` **成功**且**有来源**时附加 `sources`：
-                # 其余工具的事件体不得出现该键（不污染协议）。
+                # ⚠️ 只在 `retrieve_docs` **成功**且**有来源**时附加 `sources` + `evidence_level`
+                # （两键**同条件**）：其余工具的事件体不得出现这两个键（不污染协议）。
+                #
+                # 2026-10-03 二路审计 F5：`evidence_level` 原先在分支里**无条件**写（`_srcs` 为空
+                # 时也写 `None`）⇒ 与上面这句契约不符。且 `extract_sources` 在**所有**「无来源」
+                # 路径都返回 `([], None)` ⇒ 该键只可能写出 `None`，是纯噪声（键存在与否零信息量）。
                 from utils.rag.sources import extract_sources
 
                 _srcs, _lvl = extract_sources(output)
                 if _srcs:
                     _payload["sources"] = _srcs
-                _payload["evidence_level"] = _lvl
+                    _payload["evidence_level"] = _lvl
             _progress_structured("tool_end", _payload)
             tool_trace.append({"name": name, "arguments": args, "output": output})
             messages.append({

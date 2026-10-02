@@ -26,12 +26,18 @@ export function ChatArea({
   apiKeyConfigured,
   demoMode,
   models,
+  onSessionAdopted,
 }: {
   activeId: number | null
   apiKeyConfigured: boolean
   /** v1.1：演示模式当前值（agent-config.demo_mode，跨页 invalidate 即时可见） */
   demoMode: boolean
   models: { chat: string; reasoner: string }
+  /**
+   * 服务端落库的会话 id **回写**入口（生产 = `AiChatPage` 的 `useSessionStore.setActiveId`）。
+   * 必填而非可选：漏接即 BUG-002 原样复发（新会话第 2 条另起会话 + 上一条回答消失）。
+   */
+  onSessionAdopted: (sessionId: number) => void
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -86,6 +92,19 @@ export function ChatArea({
       onDone: (sid) => {
         void qc.invalidateQueries({ queryKey: ['agent-sessions'] })
         if (sid != null) {
+          // BUG-002（2026-10-03 二路审计 F2）：服务端落库的会话 id 必须回写到**会话归属**。
+          // 新会话（activeId == null）里若把 done 带回的 sid 丢掉：
+          //   ① 追问仍以 sessionId=null 请求 ⇒ 后端 `ensure_session` 再建一个会话（会话分裂）；
+          //   ② 第 1 条的问答只活在 phase.content 里，第 2 次 `run.start` 重置即丢
+          //      （历史因 `activeId == null` 不加载）⇒ 上一条回答消失。
+          // ⚠️ 采纳时 live.sessionId 必须**同步**切到 sid：runVisible / liveUser 的键是
+          //    「本次会话归属」（= activeId）。只切 activeId 不切 live.sessionId，会在 done
+          //    的同一帧把运行视图门控卸载（runVisible=false），而历史里那条回答又会被
+          //    `dedupeHistory` 当作「已由运行视图展示」跳过 ⇒ 两条都看不见。
+          if (activeId == null) {
+            setLive((l) => (l ? { ...l, sessionId: sid } : l))
+            onSessionAdopted(sid)
+          }
           void qc.invalidateQueries({ queryKey: ['session-messages', sid] })
           // 未命名会话 → 用问题前 20 字自动命名（对齐 agent_run 隐式命名口径）
           void api.agent.sessions().then((list) => {

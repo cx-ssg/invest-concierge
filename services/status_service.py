@@ -12,7 +12,11 @@ from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
 from services.llm_config import get_llm_config
 from utils.common import fetch_with_timeout
 
-VERSION = "1.0.0"
+# 应用内版本（/api/health、/api/status、/api/settings、前端状态栏与设置页都读它）。
+# 2026-10-03 A-R2/F6：此前是 `1.0.0`，而仓库实际版本是 `1.2.0`（frontend/package.json
+# + `git tag v1.2.0` + `server.main` 的 FastAPI(version=)）⇒ 同一产品两个版本号。
+# 现与上述三处对齐；`tests/test_version_sync.py` 把一致性钉死（改一处必须改全部）。
+VERSION = "1.2.0"
 
 # 状态栏行情/情绪的最大等待秒数（超时降级为"不可用"，不阻塞）
 STATUS_FETCH_TIMEOUT = 8
