@@ -49,15 +49,18 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: A2 offline DOM regression (F1 BUG-001 / BUG-002 会话归属 / F2 编号 / F3 代码块 / F5 scheme)
+      - name: A2/B1 offline DOM regression (F1 BUG-001 / BUG-002 会话归属 / F2 编号 / F3 代码块 / F5 scheme / B1 判官标注)
         run: node scripts/verify_a2_dom.mjs
 
       # BUG-002（A-R2）：加两个变异体 ——
       #   ① bug002         = 关掉「采纳服务端新会话 id」（修复前的行为）
       #   ② bug002-partial = 只回写 activeId、不同步 live.sessionId（"照 claude 建议只加一行"的版本，
       #      done 当帧回答视图被门控卸载 ⇒ BUG-001 复发；证明两行缺一不可）
-      - name: A2 DOM harness self-check (mutants must be caught)
+      # B1（2026-10-03）：③ judge-uncertain-as-relevant = 把「未确认」也渲染成「相关」
+      #   （= 把不可信结果伪装成 relevant 的缺陷版；判官的核心安全性质）
+      - name: A2/B1 DOM harness self-check (mutants must be caught)
         run: |
           node scripts/verify_a2_dom.mjs --mutate bug001
           node scripts/verify_a2_dom.mjs --mutate bug002
           node scripts/verify_a2_dom.mjs --mutate bug002-partial
+          node scripts/verify_a2_dom.mjs --mutate judge-uncertain-as-relevant

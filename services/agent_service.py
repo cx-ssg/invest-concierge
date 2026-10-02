@@ -141,9 +141,22 @@ def stream_events(task, session_id=None, context=None):
         {"type": "reasoning", "text": "..."}          # 模型原生思考流（可多次）
         {"type": "tool_start", "name": ..., "arguments": {...}}
         {"type": "tool_end", "name": ..., "ok": bool, "elapsed_ms": int}
-        {"type": "writing", "text": "组织最终回答"}
+        {"type": "writing", "text": "组织回答"}
         {"type": "done", "session_id": ..., "content": ..., "tool_trace": [...]}
+        {"type": "evidence_judged", "query": ..., "level": ..., "items": [...],
+         "checked": bool, "latency_ms": int, "reason": ""}   # **B1 新增，done 之后**
         {"type": "error", "message": "..."}
+
+    ## B1 LLM 判官：**回答不等判官**（task-B1.md §1.2）
+
+    - 触发条件：**仅当本轮检索的 `evidence_level == "weak"`**（判定单点在
+      `services/judge_service.collect_from_tool_trace`；`none` 档逻辑不变、零调用）。
+    - 顺序保证：`done` **先**入队（生成器为此先 yield 出去），判官结果**后到** ⇒
+      回答时延不含判官（回归锁：tests/test_rag_llm_judge.py::test_done_arrives_before_judge_completes）。
+    - 有界：判官在**独立单并发线程池**里跑，本 worker 只做有界等待（总预算
+      `judge_service.JUDGE_TIMEOUT_S`）；超时/失败 ⇒ 事件如实带 `checked=False` +
+      `reason`，**绝不抛、绝不假装判过**。
+    - 判官**不参与检索排序/过滤**：这里只把结论作为事件发出去。
     """
     q = queue.Queue(maxsize=500)
 
@@ -180,10 +193,27 @@ def stream_events(task, session_id=None, context=None):
                 on_progress=_on_progress,
             )
             _emit({"type": "done", **_pick_result(res)})
+            # ★ 判官在 done **之后**：回答已经发出，判官只补充可信度标注。
+            _emit_judge(res.get("tool_trace"))
         except Exception as e:  # noqa: BLE001 - worker 在线程里，异常必须走队列
             _emit({"type": "error", "message": str(e)})
         finally:
             _emit(_SENTINEL)
+
+    def _emit_judge(tool_trace):
+        """把判官结论送进 SSE 队列（旁路：任何失败都不得影响已发出的 done）。
+
+        ⚠️ `total_budget_s` **必须**显式传：判官最多让**流**多活 `JUDGE_TIMEOUT_S`
+        （不是每轮各等一次）—— 「超时不得拖住流」在参数层就锁死。
+        """
+        try:
+            from services import judge_service as js
+            for ev in js.judge_tool_trace(tool_trace,
+                                          timeout_s=js.JUDGE_TIMEOUT_S,
+                                          total_budget_s=js.JUDGE_TIMEOUT_S):
+                _emit(ev)
+        except Exception:  # noqa: BLE001 - 判官是增强项，不是依赖项
+            pass
 
     t = threading.Thread(target=_worker, daemon=True, name="agent-sse-worker")
     t.start()

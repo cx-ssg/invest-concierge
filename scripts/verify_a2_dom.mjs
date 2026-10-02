@@ -35,6 +35,9 @@ function argValue(flag, dflt = null) {
 }
 const MUTATE = argValue('--mutate')
 const KEEP = argv.includes('--keep')
+// B1：可选——把**真实后端 dump 的事件流**（scripts/e2e_judge_dump.py 的产物）灌进同一个
+// jsdom harness。合成桩测的是"契约"；真流测的是"真产物能不能渲染"（两者互补）。
+const SSE_FILE = argValue('--sse-file')
 const OUT_DIR = argValue('--out') || process.env.AUDIT_OUT_DIR || os.tmpdir()
 
 // 变异体：把**已修复**的代码在打包期改回缺陷版（不改仓库文件，可反复重跑）
@@ -60,6 +63,13 @@ const MUTATIONS = {
     from: 'setLive((l) => (l ? { ...l, sessionId: sid } : l))',
     to: 'void 0 /* MUTANT: 只回写 activeId，不同步 live.sessionId */',
     expect: 'F1/new-session-answer-visible',
+  },
+  'judge-uncertain-as-relevant': {
+    file: 'src/features/agent/ChatArea.tsx',
+    // B1 判官：把「未确认」也渲染成「相关」（= 把不可信结果伪装成 relevant 的缺陷版）
+    from: "  if (j.verdict === 'relevant') return 'relevant'",
+    to: "  if (j.verdict !== 'irrelevant') return 'relevant' /* MUTANT: uncertain→relevant */",
+    expect: 'B1/judge-uncertain-not-relevant',
   },
 }
 const mutation = MUTATE ? MUTATIONS[MUTATE] : null
@@ -153,6 +163,31 @@ function resetBackend() {
 function sseBody(events) {
   return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
 }
+
+/**
+ * B1：把 SSE 响应体拆成**两段**——`done` 及之前立即下发，之后（`evidence_judged`）延迟下发。
+ *
+ * 为什么必须这样测：桩后端若把整条事件流一次性回放，就测不出「前端在 `done` 之后
+ * **仍在消费**流」——那正是 B1 判官标注能否渲染的前提（真实服务端就是这么发的：
+ * `tasks-B1` §1.2 要求 `done` 先到、判官结果后到）。把响应体做成流并延迟第二段，
+ * 前端若在 `done` 处收流，标注就永远不出现 ⇒ 本场景会红。
+ */
+function sseStreamBody(events, { delayMs = 40 } = {}) {
+  const enc = new TextEncoder()
+  const cut = events.findIndex((e) => e.type === 'done')
+  const head = cut >= 0 ? events.slice(0, cut + 1) : events
+  const tail = cut >= 0 ? events.slice(cut + 1) : []
+  return new ReadableStream({
+    async start(controller) {
+      controller.enqueue(enc.encode(sseBody(head)))
+      if (tail.length) {
+        await sleep(delayMs)
+        controller.enqueue(enc.encode(sseBody(tail)))
+      }
+      controller.close()
+    },
+  })
+}
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -181,7 +216,9 @@ function installFetch() {
         landed_session_id: landed,
         task: String(body.task ?? ''),
       })
-      return new Response(sseBody(events), {
+      // B1：含 `evidence_judged` 的流按「done 先到、判官后到」的真实时序下发（见 sseStreamBody）
+      const hasJudge = events.some((e) => e.type === 'evidence_judged')
+      return new Response(hasJudge ? sseStreamBody(events) : sseBody(events), {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
       })
@@ -292,7 +329,7 @@ async function waitFor(pred, timeoutMs = 5000, stepMs = 20) {
   }
 }
 
-async function runChatScenario({ key, activeId, events, answer = ANSWER }) {
+async function runChatScenario({ key, activeId, events, answer = ANSWER, readyJudgeCount = 0 }) {
   const host = document.createElement('div')
   document.body.appendChild(host)
   resetBackend()
@@ -309,11 +346,19 @@ async function runChatScenario({ key, activeId, events, answer = ANSWER }) {
   })
   const { root } = mounted
   await ask(host, QUESTION)
-  const visible = await waitFor(() => host.textContent.includes(answer))
+  // `answer` 为空 = 调用方不关心正文可见性（真流场景的正文很长，只等判官标注）
+  const visible = answer ? await waitFor(() => host.textContent.includes(answer)) : null
+  // B1：判官事件**迟于** done 才到（sseStreamBody 延迟第二段）⇒ 必须等它落地再读 DOM
+  if (readyJudgeCount > 0) {
+    await waitFor(() => host.querySelectorAll('[data-judge]').length >= readyJudgeCount)
+  }
   const text = host.textContent
   const cards = [...host.querySelectorAll('[id^="src-"]')].map((el) => ({
     id: el.id,
     title: (el.querySelector('span.flex-1')?.textContent || el.textContent).trim(),
+    // B1：判官标注（机器可读档位 + 文案）；无标注 = null（≠ 无关）
+    judge: el.querySelector('[data-judge]')?.getAttribute('data-judge') ?? null,
+    judgeText: el.querySelector('[data-judge]')?.textContent?.trim() ?? null,
   }))
   const sups = [...host.querySelectorAll('sup button')].map((b) => b.textContent.trim())
   const hrefs = [...host.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') || '')
@@ -450,6 +495,125 @@ async function scenarioBug002() {
   if (!r.firstStillVisible) console.log(`      B002 DOM=${JSON.stringify(r.text.slice(0, 220))}`)
 }
 
+// ==================== 场景：B1 LLM 判官标注（task-B1.md §1.2） ====================
+const B1_ANSWER = 'B1JUDGE_ANSWER：判官结论在 done 之后到达，来源卡必须标注。'
+
+/**
+ * 桩事件：`done` 之后才发 `evidence_judged`（真实服务端时序，见 sseStreamBody）。
+ *
+ * 覆盖五种落点（`data-judge` 档位 → 文案）：
+ *  101 relevant              → relevant / 判官：相关
+ *  102 irrelevant            → irrelevant / 判官：无关
+ *  103 uncertain（未给引文） → uncertain / 判官：未确认   ← 「不得说成相关」
+ *  104 无结论（模型漏答）    → null / 不标注             ← 沉默 ≠ 无关
+ *  105 relevant+quote_rejected → rejected / 判官：未确认（引文未通过校验）
+ */
+function eventsB1() {
+  return [
+    { type: 'status', state: 'thinking' },
+    { type: 'tool_start', name: 'retrieve_docs', arguments: { query: '茅台 公告' } },
+    { type: 'tool_end', name: 'retrieve_docs', ok: true, elapsed_ms: 21, evidence_level: 'weak',
+      sources: [
+        src(101, 1, 'B1-RELEVANT'),
+        src(102, 2, 'B1-IRRELEVANT'),
+        src(103, 3, 'B1-UNCERTAIN'),
+        src(104, 4, 'B1-NO-VERDICT'),
+        src(105, 5, 'B1-QUOTE-REJECTED'),
+      ] },
+    { type: 'done', session_id: 905, content: B1_ANSWER, tool_trace: [] },
+    { type: 'evidence_judged', query: '茅台 公告', level: 'relevant', checked: true, latency_ms: 830,
+      reason: '',
+      items: [
+        { chunk_id: 101, verdict: 'relevant', quote: '贵州茅台上半年营业收入同比增长', quote_rejected: false },
+        { chunk_id: 102, verdict: 'irrelevant', quote: '', quote_rejected: false },
+        { chunk_id: 103, verdict: 'uncertain', quote: '', quote_rejected: false },
+        { chunk_id: 105, verdict: 'relevant', quote: '这段引文其实不存在', quote_rejected: true },
+      ] },
+  ]
+}
+
+async function scenarioB1() {
+  section('B1 · LLM 判官标注（done 之后到达；未确认不得显示为相关）')
+  const r = await runChatScenario({
+    key: 'B1', activeId: null, events: eventsB1(), answer: B1_ANSWER, readyJudgeCount: 4,
+  })
+  const byId = Object.fromEntries(r.cards.map((c) => [c.id, c]))
+  const expect = [
+    ['src-1', 'relevant', '判官：相关'],
+    ['src-2', 'irrelevant', '判官：无关'],
+    ['src-3', 'uncertain', '判官：未确认'],
+    ['src-4', null, null],
+    ['src-5', 'rejected', '判官：未确认（引文未通过校验）'],
+  ]
+  for (const [id, state, label] of expect) {
+    const c = byId[id] || {}
+    const ok = (c.judge ?? null) === state && (c.judgeText ?? null) === label
+    check(`B1/judge-${id}`, ok, `${id} 判官档位=${c.judge} 文案=${c.judgeText}（期望 ${state} / ${label}）`)
+    console.log(`  ${ok ? '✓' : '✗'} ${id} judge=${c.judge} text=${JSON.stringify(c.judgeText)}（期望 ${state} / ${label}）`)
+  }
+  // 关键安全断言：未确认 / 引文被拒 的卡片**都不许**出现"相关"字样
+  const unsafe = ['src-3', 'src-5'].filter((id) => (byId[id]?.judgeText || '').includes('相关'))
+  check('B1/judge-uncertain-not-relevant', unsafe.length === 0,
+    `未确认/引文被拒却被标成"相关"：${JSON.stringify(unsafe)}`)
+  console.log(`  ${unsafe.length === 0 ? '✓' : '✗'} 未确认/引文被拒的卡片标成"相关"的数量=${unsafe.length}（期望 0）`)
+  if (!r.visible) console.log(`      DOM=${JSON.stringify(r.text.slice(0, 200))}`)
+}
+
+/**
+ * B1-real：把**真实后端 dump 的事件流**灌进**真 ChatArea**。
+ *
+ * 合成桩（`eventsB1`）测的是"契约"；本场景测的是"**真产物**能不能渲染" ——
+ * 事件来自 `scripts/e2e_judge_dump.py` 的真跑（真 LLM + 真 `retrieve_docs` + 真 SSE）。
+ * 判据全部由**流自身**推导（不写死期望值）：标注条数、文案是否落在四态契约内、
+ * 未确认/引文被拒**不得**显示成"相关"、来源卡数量与 `tool_end.sources` 一致。
+ */
+async function scenarioB1RealStream(file) {
+  section(`B1-real · 真实 SSE 事件流 → 真组件（${path.basename(file)}）`)
+  const raw = JSON.parse(fs.readFileSync(file, 'utf-8'))
+  let events = []
+  if (Array.isArray(raw)) events = raw
+  else if (Array.isArray(raw.runs) && raw.runs[0]?.judge_on?.events) events = raw.runs[0].judge_on.events
+  else if (raw.judge_on?.events) events = raw.judge_on.events
+  // dump 里每个事件带 `t`（相对时刻）；前端协议不认它，去掉以免污染断言
+  events = events.map(({ t, ...rest }) => rest)
+
+  const judged = events.find((e) => e.type === 'evidence_judged')
+  const toolEnd = events.find((e) => e.type === 'tool_end' && (e.sources || []).length)
+  if (!events.length || !judged || !toolEnd) {
+    check('B1real/judge-event-present', false,
+      `真实流缺要素（events=${events.length} judged=${!!judged} toolEnd=${!!toolEnd}）`)
+    console.log(`  ✗ 真实流缺要素：events=${events.length} judged=${!!judged} toolEnd=${!!toolEnd}`)
+    return
+  }
+  const nItems = (judged.items || []).length
+  const r = await runChatScenario({
+    key: 'B1real', activeId: null, events, answer: null, readyJudgeCount: 1,
+  })
+  const cards = r.cards.filter((c) => c.judge)
+  const labels = [...new Set(cards.map((c) => c.judgeText))]
+  const known = ['判官：相关', '判官：无关', '判官：未确认', '判官：未确认（引文未通过校验）']
+  const badLabel = labels.filter((l) => !known.includes(l))
+  const unsafe = cards.filter((c) => ['uncertain', 'rejected'].includes(c.judge)
+    && (c.judgeText || '').includes('相关'))
+  const srcOk = r.cards.length === (toolEnd.sources || []).length
+
+  check('B1real/annotation-rendered', cards.length >= 1,
+    `真实事件流（checked=${judged.checked} level=${judged.level} items=${nItems}）渲染出 ${cards.length} 条判官标注`)
+  console.log(`  ${cards.length >= 1 ? '✓' : '✗'} 真流渲染出判官标注 ${cards.length} 条（items=${nItems}）`)
+  check('B1real/labels-in-contract', badLabel.length === 0,
+    `越界文案=${JSON.stringify(badLabel)}（实际 ${JSON.stringify(labels)}）`)
+  console.log(`  ${badLabel.length === 0 ? '✓' : '✗'} 文案四态契约：${JSON.stringify(labels)}`)
+  check('B1real/no-uncertain-as-relevant', unsafe.length === 0,
+    `未确认/引文被拒却显示"相关"：${JSON.stringify(unsafe.map((c) => c.id))}`)
+  console.log(`  ${unsafe.length === 0 ? '✓' : '✗'} 未确认/引文被拒显示为"相关"的卡片数=${unsafe.length}`)
+  check('B1real/source-cards-match-tool-end', srcOk,
+    `来源卡=${r.cards.length} vs tool_end.sources=${(toolEnd.sources || []).length}`)
+  console.log(`  ${srcOk ? '✓' : '✗'} 来源卡数=${r.cards.length}（tool_end.sources=${(toolEnd.sources || []).length}）`)
+  for (const c of cards) {
+    console.log(`      ${c.id} judge=${c.judge} text=${JSON.stringify(c.judgeText)}`)
+  }
+}
+
 async function scenarioF2() {
   section('F2 · 多次检索的 [n] ↔ 来源卡编号（注入侧全局编号 × 前端合并去重）')
   const answer = '结论见 [1] 与 [3]，第三轮新增见 [4]。'
@@ -571,6 +735,8 @@ async function main() {
   await scenarioF2()
   await scenarioF3()
   await scenarioF5()
+  await scenarioB1()
+  if (SSE_FILE) await scenarioB1RealStream(SSE_FILE)
 
   const failed = checks.filter((c) => !c.ok)
   const result = {

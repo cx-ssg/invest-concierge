@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { chatStream } from '../../lib/api'
-import type { RetrievalSource, SSEEvent, ToolTraceEntry } from '../../types/api'
+import type { JudgeItem, RetrievalSource, SSEEvent, ToolTraceEntry } from '../../types/api'
 import type { ToolStep } from '../../components/engine/ToolTimeline'
 
 export type RunStatus = 'idle' | 'streaming' | 'done' | 'error' | 'cancelled'
@@ -20,6 +20,11 @@ export interface AgentRunPhase {
    * 多次检索**按 chunk_id 去重并保留首次出现顺序** —— 编号 `[n]` 与数组下标 1-based 对应。
    */
   sources: RetrievalSource[]
+  /**
+   * B1 判官：`chunk_id → 结论`（`evidence_judged` 事件，仅 weak 档触发、`done` 之后才到）。
+   * 没有结论的卡片**不标注**（`checked=false` 时 items 为空 ⇒ 保持沉默，不编造"未确认"）。
+   */
+  judge: Record<number, JudgeItem>
   /** 最终回答（done.content，经打字机流式渲染） */
   content: string
   /** 本运行落库的会话 id（done 事件带回） */
@@ -35,6 +40,7 @@ const IDLE: AgentRunPhase = {
   toolSteps: [],
   memorySources: [],
   sources: [],
+  judge: {},
   content: '',
   sessionId: null,
   toolTrace: null,
@@ -98,6 +104,17 @@ function applyEvent(p: AgentRunPhase, ev: SSEEvent): AgentRunPhase {
     case 'memory_used':
       // v1.1 记忆显性化：服务端只在真实注入时发；无注入不发（不撒谎）
       return { ...p, memorySources: ev.sources?.length ? ev.sources : p.memorySources }
+    case 'evidence_judged': {
+      // B1 判官：`done` 之后到达；按 chunk_id 合并（同一次运行可能有多轮检索）。
+      // `items` 为空（checked=false：超时/无 LLM/解析失败）⇒ 不做任何标注。
+      const items = ev.items ?? []
+      if (!items.length) return p
+      const judge = { ...p.judge }
+      for (const it of items) {
+        if (it.chunk_id != null) judge[it.chunk_id] = it
+      }
+      return { ...p, judge }
+    }
     case 'done':
       return {
         ...p,

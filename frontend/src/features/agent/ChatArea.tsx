@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ExternalLink, Send, Sparkles, Square } from 'lucide-react'
 import { api } from '../../lib/api'
-import type { RetrievalSource, SessionMessage } from '../../types/api'
+import type { JudgeItem, RetrievalSource, SessionMessage } from '../../types/api'
 import { MarkdownContent } from '../../components/engine/MarkdownContent'
 import { ThinkingFlow } from '../../components/engine/ThinkingFlow'
 import { ToolTimeline } from '../../components/engine/ToolTimeline'
@@ -314,9 +314,32 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
           <span className="text-ink-3">已取消本次回答（会话已落库可回放）</span>
         ) : null}
       </div>
-      <SourceList sources={phase.sources} />
+      <SourceList sources={phase.sources} judge={phase.judge} />
     </div>
   )
+}
+
+/**
+ * B1 判官的展示态（三态 + 引文被拒）。**判据在服务端**，这里只是渲染：
+ *
+ * - `quote_rejected=true` ⇒ `rejected`（「未确认（引文未通过校验）」）。
+ *   后端已把该条 `verdict` 降级为 `uncertain`，这里**再判一次**是第二道防线：
+ *   `quote_rejected` 的条目**在任何情况下都不得显示成"相关"**。
+ * - `relevant` / `irrelevant` ⇒ 模型给出的结论；
+ * - 其余（`uncertain`，含"模型漏答"）⇒ 未确认。**绝不把未确认说成相关。**
+ */
+function judgeState(j: JudgeItem): 'relevant' | 'irrelevant' | 'uncertain' | 'rejected' {
+  if (j.quote_rejected) return 'rejected'
+  if (j.verdict === 'relevant') return 'relevant'
+  if (j.verdict === 'irrelevant') return 'irrelevant'
+  return 'uncertain'
+}
+
+const JUDGE_TEXT: Record<ReturnType<typeof judgeState>, string> = {
+  relevant: '判官：相关',
+  irrelevant: '判官：无关',
+  uncertain: '判官：未确认',
+  rejected: '判官：未确认（引文未通过校验）',
 }
 
 /**
@@ -327,9 +350,11 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
  *   「（该条证据充分性未确认，不提供来源凭据）」且**不可点外链** —— 不给假凭据
  * - A-R1 F5：`url` 仅 `http`/`https` 才渲染可点外链，其余 scheme（`javascript:`/`data:`…）
  *   只显示纯文本、不给 `href`（`lib/url.ts::isSafeExternalUrl`）
+ * - B1：`judge` 里有该 `chunk_id` 的结论才标注判官档位（**没有结论 ≠ 无关**，保持沉默）；
+ *   `checked=false` 时事件无 items ⇒ 一张卡都不会被标注（不编造"未确认"）
  * - 空态不渲染（无 sources 时行为与改造前完全一致）
  */
-function SourceList({ sources }: { sources: RetrievalSource[] }) {
+function SourceList({ sources, judge }: { sources: RetrievalSource[]; judge: Record<number, JudgeItem> }) {
   if (!sources.length) return null
   return (
     <div className="flex max-w-[92%] flex-col gap-1">
@@ -340,6 +365,8 @@ function SourceList({ sources }: { sources: RetrievalSource[] }) {
         // A-R1 F5：外链 scheme 白名单 —— 只有 http/https 才渲染可点 `<a>`（其余降级为纯文本）。
         // 后端 `extract_sources` 已做数据层收窄，这里是不依赖 React 版本行为的第二道。
         const safeUrl = isSafeExternalUrl(s.url) ? s.url : null
+        // B1：判官只对 weak 档触发；`chunk_id` 是结论回挂卡片的唯一键（与引用编号无关）
+        const j = s.chunk_id != null ? judge[s.chunk_id] : undefined
         return (
           <div
             key={`${s.chunk_id ?? 'x'}-${n}`}
@@ -383,6 +410,14 @@ function SourceList({ sources }: { sources: RetrievalSource[] }) {
                 </span>
               </div>
             )}
+            {/* B1 判官标注：只有该 chunk 有结论时才出现（无结论 = 沉默，不编造"未确认"）。
+                `data-judge` 是机器可读档位（离线 DOM 回归 harness 靠它断言，
+                见 scripts/verify_a2_dom.mjs 的 B1 场景与 --mutate judge-uncertain-as-relevant）。 */}
+            {j ? (
+              <div className="mt-0.5 flex items-center gap-1 pl-6 text-[10.5px] text-ink-3">
+                <span data-judge={judgeState(j)}>{JUDGE_TEXT[judgeState(j)]}</span>
+              </div>
+            ) : null}
           </div>
         )
       })}

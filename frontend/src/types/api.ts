@@ -155,6 +155,20 @@ export interface RetrievalSource {
   is_table?: boolean
 }
 
+/** B1 LLM 判官：单条候选的结论（`services/judge_service.py` 的事件体契约）。
+ *
+ * ⚠️ `quote_rejected=true` 时后端**已经把 `verdict` 降级为 `uncertain`**（引文未通过
+ * 逐字校验）；前端再判一次 `quote_rejected` 是第二道 —— 不得把「未确认」说成「相关」。
+ */
+export interface JudgeItem {
+  chunk_id?: number | null
+  verdict?: 'relevant' | 'irrelevant' | 'uncertain' | string
+  /** 模型给出的逐字引文（判 relevant 时必填；空串表示未给） */
+  quote?: string
+  /** 引文未通过逐字校验（后端核心防线：引用不存在 ⇒ 降级 + 留痕） */
+  quote_rejected?: boolean
+}
+
 /** SSE 事件（services/agent_service.stream_events 协议，FRONTEND_PLAN §5.1） */
 export type SSEEvent =
   | { type: 'status'; state: string }
@@ -173,6 +187,20 @@ export type SSEEvent =
       evidence_level?: string | null
     }
   | { type: 'memory_used'; sources: string[] }
+  /**
+   * B1 LLM 判官结果（`done` **之后**才到；仅 weak 档触发）。
+   * `checked=false`（超时/解析失败/无 LLM）⇒ `items` 为空且 `reason` 说明原因 ——
+   * 此时**不做任何标注**（沉默好过编造）。
+   */
+  | {
+      type: 'evidence_judged'
+      query: string
+      level: 'relevant' | 'irrelevant' | 'uncertain' | string
+      items: JudgeItem[]
+      checked: boolean
+      latency_ms: number
+      reason?: string
+    }
   | { type: 'done'; session_id: number | null; content: string; tool_trace: ToolTraceEntry[] }
   | { type: 'error'; message: string }
 

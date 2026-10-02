@@ -356,7 +356,13 @@ def test_sse_stream_events_forwards_sources_to_frontend(monkeypatch, kb):
     events = list(agent_service.stream_events("贵州茅台最近公告说了什么"))
 
     types = [e.get("type") for e in events]
-    assert types[0] == "status" and types[-1] == "done", "SSE 契约首尾不变（零回归）"
+    assert types[0] == "status", "SSE 契约首事件不变（零回归）"
+    assert "done" in types, "SSE 契约：回答必须发出"
+    # ⚠️ B1（task-B1.md §1.2）新增 `evidence_judged`：判官结果**后到** ⇒ `done` 之后
+    # 允许且**仅**允许这一个尾随事件（A2 的「done 收官」语义由此收窄为
+    # 「done 是最后一个**回答链路**事件」）。任何别的尾部事件仍算协议违约。
+    assert set(types[types.index("done") + 1:]) <= {"evidence_judged"}, \
+        "done 之后只允许 B1 的 evidence_judged 尾随（实际尾部：%s）" % types[types.index("done") + 1:]
     ends = [e for e in events if e.get("type") == "tool_end"]
     assert len(ends) == 1
     assert "sources" in ends[0], "SSE 桥丢了 sources ⇒ 前端引用回跳整条链不可达"

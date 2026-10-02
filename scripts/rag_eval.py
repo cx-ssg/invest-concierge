@@ -17,6 +17,8 @@
   python scripts/rag_eval.py                    # holdout（⚠️ 已用于阈值选择 = **拟合集**，非干净验收组）
   python scripts/rag_eval.py --split tuning     # 调参（会打印警告）
   python scripts/rag_eval.py --scan             # 扫阈值：none 稠密网格 + SAR_NONE 敏感性表
+  python scripts/rag_eval.py --judge llm        # B1 LLM 判官（仅 weak 档触发）→ judge_fp / 触发率 / 延迟
+                                                # ⚠️ 真调 LLM，耗时随样本线性增长（--judge-max 可截断）
 """
 import argparse
 import json
@@ -227,6 +229,103 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K,
 # `SAR_NONE` 敏感性表的扫描点（2026-10-01 F1）。**含当前值 0.06**，其上界到 0.30 ——
 # 再往上（0.40）**风险面已进入平台期**（tuning 0.141 / holdout 0.080，不再下降）而 oa 已 0.86~0.92
 # —— 对决策无增量信息（见 --scan 的两组实测）。
+def _pct(values, p):
+    """百分位（最近秩法；空集返回 0）。n 很小时 p50/p90 只是量级参考 —— 报告须带 n。"""
+    vals = sorted(v for v in values if isinstance(v, (int, float)))
+    if not vals:
+        return 0
+    idx = int(round((p / 100.0) * (len(vals) - 1)))
+    return int(vals[min(len(vals) - 1, max(0, idx))])
+
+
+def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
+                  llm_fn=None, timeout_s=None, max_judge=0):
+    """B1 · LLM 判官的评测口径（判据落 **`judge_fp`**，不在 `weak_fp`）。
+
+    ## 口径（每个数字都必须带状态口径报出）
+
+    - **触发条件** = 工具返回 `evidence_level == "weak"` **且有结果**；
+      判定单点复用 `services.judge_service.collect_from_tool_trace`（**与 SSE 同源**，
+      不在这里另写一份"什么算 weak"）。
+    - `judge_fp` = **weak 档负例**里被判官放行（`level == "relevant"`）的比例。
+      分母是 **weak 负例**，不是全部负例 —— `none` 档负例**根本不触发判官**（已弃权）。
+      另有 `judge_fp_all_irr`：以全部负例为分母（`none` 档按"未放行"计）。
+    - `judge_kill_rate` = **weak 档正例**里被判官判 `irrelevant` 的比例（误杀率）。
+    - 引文未通过校验的 `relevant` **不计放行**：判官自己已把该条降级为 `uncertain`
+      （`utils/rag/llm_judge.py` 的核心防线）⇒ `judge_fp` 只统计**通过校验**的放行。
+    - 延迟取 `checked=True` 的轮次（未判出的轮次延迟没有意义）。
+
+    ⚠️ **验收线不能定 0**：难例（`in_domain_unanswerable` + `near_miss`）首跑
+    ≈ **0.29（n=14）**，且被放行那几条的引文**全部通过逐字校验**（`probe-judge-batch.json`）
+    —— 引文校验挡不住"断章取义"。样本量小，勿过度推断。
+    """
+    from services import judge_service
+    from utils.rag.retrieve import retrieve_docs
+
+    n_total = len(rows_rel) + len(rows_irr)
+    observed = []
+    for tag, rows, qs in (("rel", rows_rel, qvecs[:len(rows_rel)]),
+                          ("irr", rows_irr, qvecs[len(rows_rel):])):
+        for r, qv in zip(rows, qs):
+            raw = retrieve_docs(r["query"], top_n=k, db_path=db_path, query_vec=qv)
+            # ⚠️ 生产实况：`execute_ai_tool_v2` 对**返回字符串的工具**会再 `json.dumps` 一次
+            #    （双层编码）⇒ 这里同样造双层，走的是与 SSE 完全相同的抽取函数。
+            trace = [{"name": "retrieve_docs", "arguments": {"query": r["query"]},
+                      "output": json.dumps(raw)}]
+            reqs = judge_service.collect_from_tool_trace(trace)
+            observed.append({"tag": tag, "row": r, "req": reqs[0] if reqs else None})
+
+    triggered = [o for o in observed if o["req"]]
+    if max_judge > 0:
+        triggered = triggered[:max_judge]
+    # 评测**不设总预算**（逐行各自有界）：总预算是为"SSE 流有界"设计的，
+    # 用在这里会把一整批评测掐成 timeout（口径污染）。
+    events = judge_service.judge_rounds([o["req"] for o in triggered],
+                                        llm_fn=llm_fn, timeout_s=timeout_s,
+                                        max_rounds=len(triggered))
+    for o, ev in zip(triggered, events):
+        o["event"] = ev
+
+    weak_irr = [o for o in triggered if o["tag"] == "irr"]
+    weak_rel = [o for o in triggered if o["tag"] == "rel"]
+    passed = [o for o in weak_irr if (o["event"] or {}).get("level") == "relevant"]
+    killed = [o for o in weak_rel if (o["event"] or {}).get("level") == "irrelevant"]
+    grades = [o for o in triggered if (o["event"] or {}).get("checked")]
+    latencies = [(o["event"] or {}).get("latency_ms") or 0 for o in grades]
+
+    by_kind = {}
+    for o in weak_irr:
+        d = by_kind.setdefault(o["row"].get("kind", "unknown"), {"n": 0, "passed": 0})
+        d["n"] += 1
+        if (o["event"] or {}).get("level") == "relevant":
+            d["passed"] += 1
+
+    n_weak_irr, n_weak_rel = max(len(weak_irr), 1), max(len(weak_rel), 1)
+    return {
+        "n_total": n_total,
+        "n_triggered": len(triggered),
+        "judge_trigger_rate": len(triggered) / max(n_total, 1),
+        "n_weak_irr": len(weak_irr),
+        "n_weak_rel": len(weak_rel),
+        "judge_fp": len(passed) / n_weak_irr,
+        "judge_fp_all_irr": len(passed) / max(len(rows_irr), 1),
+        "judge_kill_rate": len(killed) / n_weak_rel,
+        "judge_uncertain": sum(1 for o in triggered
+                               if (o["event"] or {}).get("checked") is False),
+        "judge_fp_by_kind": by_kind,
+        "latency_p50": _pct(latencies, 50),
+        "latency_p90": _pct(latencies, 90),
+        "n_latency": len(latencies),
+        "judged_rows": [{"tag": o["tag"], "id": o["row"].get("id"),
+                         "kind": o["row"].get("kind"),
+                         "level": (o["event"] or {}).get("level"),
+                         "checked": (o["event"] or {}).get("checked"),
+                         "reason": (o["event"] or {}).get("reason"),
+                         "latency_ms": (o["event"] or {}).get("latency_ms")}
+                        for o in triggered],
+    }
+
+
 SAR_NONE_SWEEP = (0.06, 0.10, 0.15, 0.20, 0.25, 0.30)
 
 
@@ -291,6 +390,12 @@ def main(argv=None):
     ap.add_argument("--split", choices=["tuning", "holdout"], default="holdout")
     ap.add_argument("--db", default=None)
     ap.add_argument("--scan", action="store_true")
+    ap.add_argument("--judge", choices=["none", "llm"], default="none",
+                    help="B1：LLM 判官（**仅 weak 档触发**）→ judge_fp / 触发率 / 延迟分位")
+    ap.add_argument("--judge-max", type=int, default=0,
+                    help="判官最多判多少行（0=全部；成本控制用，会缩小分母并如实标注）")
+    ap.add_argument("--judge-timeout", type=float, default=None,
+                    help="单行判官的 LLM 调用上限（秒；缺省 = judge_service.JUDGE_TIMEOUT_S）")
     ap.add_argument("--max-per-doc", type=int, default=MAX_PER_DOC_DEFAULT,
                     help="同文档限额（每文档最多几块进 top-k）；0 = 关闭（复现旧行为）")
     args = ap.parse_args(argv)
@@ -382,6 +487,32 @@ def main(argv=None):
     for kind, d in sorted(m["by_kind"].items()):
         print("   %-26s n=%-3d none=%-3d weak=%-3d"
               % (kind, d["n"], d["none"], d["weak"]))
+
+    if args.judge == "llm":
+        # B1 判官：判据落 `judge_fp`（不在 `weak_fp`）。真调 LLM（成本随时间线性增长）。
+        print("[judge] LLM 判官（B1）—— 口径：**仅 weak 档触发**；"
+              "none 档已弃权、判官零调用（分母不含它们）")
+        jm = judge_metrics(rel, irr, qvecs, k=TOP_K, db_path=args.db,
+                           timeout_s=args.judge_timeout, max_judge=args.judge_max)
+        if args.judge_max > 0:
+            print("[judge] ⚠️ --judge-max=%d：**样本被截断**，以下比例的分母是截断后的子集"
+                  % args.judge_max)
+        print("  judge_trigger_rate = %.3f   (%d/%d 条查询落 weak 档且有结果 —— 判官的入口面)"
+              % (jm["judge_trigger_rate"], jm["n_triggered"], jm["n_total"]))
+        print("  judge_fp           = %.3f   (%d/%d **weak 档负例**被判官放行 —— "
+              "分母是 weak 负例，不是全部负例)"
+              % (jm["judge_fp"], round(jm["judge_fp"] * jm["n_weak_irr"]), jm["n_weak_irr"]))
+        print("  judge_fp_all_irr   = %.3f   (以**全部负例**为分母；none 档不触发 ⇒ 按未放行计)"
+              % jm["judge_fp_all_irr"])
+        print("  judge_kill_rate    = %.3f   (%d 条 weak 档正例被判 irrelevant —— 相关查询误杀)"
+              % (jm["judge_kill_rate"], round(jm["judge_kill_rate"] * jm["n_weak_rel"])))
+        print("  未判出（超时/解析失败）= %d 条；延迟 p50 = %dms  p90 = %dms（n=%d，仅计已判出）"
+              % (jm["judge_uncertain"], jm["latency_p50"], jm["latency_p90"], jm["n_latency"]))
+        for kind, d in sorted(jm["judge_fp_by_kind"].items()):
+            print("   %-26s 判官放行 %d/%d" % (kind, d["passed"], d["n"]))
+        print("  !! 验收线**不能定 0**：难例（in_domain_unanswerable + near_miss）首跑实测"
+              " ≈0.29（n=14，probe-judge-batch.json），且有 4 条的引文**全部通过逐字校验**")
+        print("     —— 引文校验挡不住「断章取义」；判官是增益，不是保证（样本量小，勿过度推断）")
 
     if args.scan:
         curves = scan(rel, irr, judge)
