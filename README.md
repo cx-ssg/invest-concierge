@@ -30,7 +30,7 @@
 
 一个开源的 **A股与基金分析助手**：不依赖任何收费数据源，克隆下来就能跑。内置 AI 能力（可选接入 DeepSeek），把财报、估值、资金面翻译成普通人能看懂的话。
 
-当前已上线 6 个 live 页面（React 前端，桌面壳 / 浏览器双入口）：
+当前已上线 7 个 live 页面（React 前端，桌面壳 / 浏览器双入口）：
 
 | 页面 | 说明 |
 |---|---|
@@ -39,16 +39,27 @@
 | 💼 基金 · 持仓管理 | 录入持仓，自动追踪收益与当日实时估值 |
 | 📔 基金 · 投资日记 | 记录每笔操作的理由，与未来的自己对话 |
 | 🩺 股票 · 综合诊断 | 基本面 / 排雷 / 护城河 / 估值 / 财报三表 / AI 辩论 六引擎体检 |
-| ⚙️ 设置 | API Key 状态 / 应用信息 |
+| 🔔 价格预警 | 到价提醒：规则增删 + 触发事件时间线（判定在后端低频调度器，桌面壳走托盘气泡） |
+| ⚙️ 设置 | API Key 状态 / 应用信息 / 长期记忆管理（M2） |
 
 > 🚧 **开发中**：回测 / 定投 / 基金对比 / 涨停复盘等能力**工具层已就绪**（AI 对话可直接调用），对应独立页面仍在路线图中迭代（见 [docs/ROADMAP.md](docs/ROADMAP.md)，欢迎提 issue）。
 
-## 🚀 快速开始（三种方式，任选其一）
+**能力分层（M1 / M2 / M3 都已随源码提供）**：
+
+| 层 | 一句话 | 入口 |
+|---|---|---|
+| **M1 · 私域知识层** | 本地公告 / 研报语料 → BM25 + `bge-m3` 向量混合检索（RRF 融合），返回原文片段 + 来源 + 日期 | 工具 `retrieve_docs`（24 个 Agent 工具之一） |
+| **M2 · 长期记忆层** | 三类记忆分离存储、分离召回（偏好**每次对话必注入** / 事实**按标的** / 经验**向量 top-3**）；写入走「候选 → 用户确认」，**AI 不自行写记忆** | 设置页「长期记忆」区（列表 / 删除 / 候选确认 / **召回预览**） |
+| **M3 · 图编排（可选）** | `ORCHESTRATOR=graph` 才开启，**默认 `legacy`、行为不变**；只图化「股票深度诊断」一条链路，换来检查点续跑与人工确认 | `POST /api/stocks/{code}/diagnosis/review` + SQLite 检查点 |
+
+## 🚀 快速开始（四种方式，任选其一）
 
 ### 方式一：下载安装包（推荐，零 Python 环境）
 
-> ⚠️ **本次 v1.1.0 未重新打包安装器** —— `Releases/latest` 里是 **v1.0.0** 的产物（含 exe），
-> 与新 tag 不是同一份。v1.1.0 的新功能请按下面「方式二」源码运行，或按 `docs/PACKAGING.md` 自行构建安装包。
+> ⚠️ **版本与下载口径（务必先读）**：仓库最新 tag 是 **v1.2.0**，但**最新 GitHub Release 仍是 v1.0.0**
+> （`Releases/latest` 指向它）—— **v1.1.0 / v1.2.0 都没有附安装包资产**，安装包里的 exe 只对应 v1.0.0 的代码；
+> **M1 / M2 / M3 是源码功能，安装包以最新 Release 为准，不要把它当成最新代码**。
+> 想用新功能请按下面「方式二」源码运行，或按 `docs/PACKAGING.md` 自行构建安装包。
 
 到 [Releases](https://github.com/cx-ssg/invest-concierge/releases/latest) 下载：
 
@@ -107,7 +118,7 @@ cd frontend && npm run dev
 python desktop\launcher.py --mode dev
 ```
 
-### 方式三：纯网页模式
+### 方式四：纯网页模式
 
 ```bash
 # 前提：已执行过 npm run build（frontend/dist 存在）
@@ -149,16 +160,20 @@ flowchart LR
     C --> H[frontend/dist<br/>React 静态页面]
     C --> D[services/ 业务服务层]
     D --> E[data/ 数据层<br/>AkShare/新浪/腾讯/东财 免费源]
-    D --> R[utils/rag 私域知识层<br/>BM25 + 向量 + 证据分档]
+    D --> R[utils/rag 私域知识层 M1<br/>BM25 + 向量 + 证据分档]
+    D --> M[utils/long_memory 长期记忆层 M2<br/>三类记忆 + 候选确认 + 隐私开关]
+    D --> O[utils/orchestrator 图编排 M3<br/>可选，ORCHESTRATOR=graph]
     D --> F[(SQLite 本地库)]
     D --> G[DeepSeek API · 可选]
 ```
 
 - **前端**：React 19 单页应用（三区壳：标题栏 / 侧边栏 / 状态栏），通过 HTTP + SSE 与后端通信。
-- **后端**：FastAPI 提供 REST（持仓/日记/诊断/设置）+ SSE（AI 对话流式事件：`status → reasoning → tool_start/tool_end → done`）。
+- **后端**：FastAPI 提供 REST（持仓/日记/诊断/设置/记忆/预警）+ SSE（AI 对话流式事件：`status → reasoning → tool_start/tool_end → done`）。
 - **数据层**：`data/` 模块统一走缓存 + fallback 降级（弱网自动切备用源，失败显示「--」不崩溃）。
 - **Agent 引擎**：`utils/agent_core.py` 工具注册表（**24 个工具**，晚绑定 importlib）+ 8 轮规划循环，`utils/agent_memory.py` 会话摘要注入。
-- **知识层（M1）**：`utils/rag/` 私域文档检索（切块 / 向量 / BM25+RRF 混合 / 证据分档弃权），采集与评测脚本在 `scripts/rag_*.py`。
+- **知识层（M1）**：`utils/rag/` 私域文档检索（切块 / `bge-m3` 向量 + BM25 → **RRF 融合** / 两档证据判定），采集与评测脚本在 `scripts/rag_*.py`。
+- **长期记忆层（M2）**：`utils/long_memory.py` —— 三类记忆**分离存储、分离召回**；**AI 不自行写记忆**（隐式抽取 → 候选 → 用户确认）；注入走 `agent_run` 的 `## 长期记忆` 段 + `memory_used` 事件；设置页有**召回预览**审计入口与隐私开关。详见 [长期记忆层（M2）](#-长期记忆层m2)。
+- **编排层（M3，可选）**：`utils/orchestrator/` —— `ORCHESTRATOR=graph` 才生效，**默认 `legacy` 行为不变**；只图化「股票深度诊断」一条链路。详见 [可选：图编排模式](#-可选图编排模式experimental)。
 
 ## 📁 目录结构
 
@@ -170,10 +185,12 @@ invest-concierge/
 ├─ desktop/           桌面壳（launcher.py 主入口 / backend.py 内嵌 uvicorn / tray.py 托盘 / start.bat）
 ├─ data/              数据层（AkShare 等免费数据源 + SQLite 持久化 + 缓存/降级）
 ├─ utils/             AI 引擎与 Agent（ai_helper / agent_core 工具注册表 / agent_memory）
-├─ utils/rag/         私域知识层（chunker / embed / bm25 / hybrid / evidence / retrieve / store）
+├─ utils/rag/         私域知识层 M1（chunker / embed / bm25 / hybrid / evidence / retrieve / store）
+├─ utils/long_memory.py  长期记忆层 M2（三类记忆 / 候选确认 / 召回预览 / 隐私开关）
+├─ utils/orchestrator/   图编排 M3（flags / state / graph / nodes / adapters）
 ├─ scripts/           采集与评测脚本（rag_ingest*.py / rag_eval.py / rag_rerank_probe.py）
 ├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
-├─ tests/             **353 个 pytest 用例**（工具契约 / 排雷与估值 / 记忆 / RAG 检索与评测 / 采集与切块）
+├─ tests/             **476 个 pytest 用例**（2026-10-02 实测全绿；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块）
 ├─ assets/            设计素材（mockups）
 ├─ .env.example       环境变量模板（复制为 .env 使用）
 ├─ requirements.txt   Python 依赖
@@ -189,6 +206,7 @@ invest-concierge/
 | 桌面 | pywebview（WebView2）+ pystray 托盘 + Pillow |
 | 数据 | AkShare（免费行情/财报/估值）+ SQLite + pandas / numpy |
 | AI | DeepSeek API（OpenAI 兼容 SDK；工具调用 + 推理思考流） |
+| 编排（可选） | LangGraph + `langgraph-checkpoint-sqlite`（`ORCHESTRATOR=graph`） |
 
 ## ⚠️ 已知限制
 
@@ -197,7 +215,9 @@ invest-concierge/
 - **AI 依赖网络与 Key**：未配置 DeepSeek Key 时 AI 功能展示引导卡；弱网下 AI 流式对话可能超时。
 - **知识库需自行构建**：语料库与向量（`*.db` / `corpus/`）不随仓库分发，需跑 `scripts/rag_ingest*.py`；未构建时文档检索会如实告知「未找到」。
 - **本地向量模型**：默认走本地 Ollama `bge-m3`；未安装 Ollama 时可改用 OpenAI 兼容端点。
-- **当前 live 页面 6 个**：其余规划页（回测/定投/基金对比等）数据层函数已就绪，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+- **长期记忆不入仓**：M2 的记忆存在本机 SQLite（`memories` / `memories_pending` 两表），仓库不带任何历史记忆；经验记忆的向量召回依赖本地 Ollama `bge-m3`，未安装时降级为按时间倒序，并在注入文本里如实标注「未向量化，按时间序」（不报错、也不假装记得）。
+- **图编排是 experimental**：仅 `ORCHESTRATOR=graph` 时生效，**只图化「股票深度诊断」一条链路**，其余 23 个工具仍走原线性循环；M2 未接进图（两者独立）。
+- **当前 live 页面 7 个**：其余规划页（回测/定投/基金对比等）数据层函数已就绪，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 🔍 私域知识层（带引用的文档检索）
 
@@ -206,10 +226,10 @@ invest-concierge/
 
 | | 说明 |
 |---|---|
-| 工具 | `retrieve_docs`（AI 对话里直接问「某公司某期经营现金流多少」） |
+| 工具 | `retrieve_docs`（**24 个 Agent 工具之一**，AI 对话里直接问「某公司某期经营现金流多少」） |
 | 存储 | 本地 SQLite（`kb.db`）+ `bge-m3` 向量（1024 维，走本地 Ollama，可降级到 OpenAI 兼容端点） |
-| 检索 | 混合检索：BM25 + 向量 → RRF 融合，支持同文档限额 |
-| **证据分档** | 相关度不足时**主动弃权**，返回「证据不足档 —— 引用前请自行核验」，而不是硬答 |
+| 检索 | 混合检索：BM25 + 向量 → **RRF 融合**，支持同文档限额 |
+| **证据分档（两档）** | 判据不通过 ⇒ `none` 档**主动弃权**；其余一律 `weak` 档 —— **返回结果但必带**「证据不足档（证据不足）—— 引用前请自行核验」警示。原有的 `strong` 档已于 2026-09-18 撤下 ⇒ **不存在"跳过警示"的通道** |
 | 采集 | 巨潮资讯公告 API / **PDF 全文抽取**（`pypdf`）→ 切块 → 向量化，全程脚本可复现 |
 
 **为什么强调引用与弃权**：投资领域最怕「听起来很确定的胡说」。
@@ -253,6 +273,61 @@ python scripts/rag_rerank_probe.py --split holdout  # LLM 重排探针（会调�
 > ⚠️ **诚实边界**：内置能力用于打通链路与评测，语料需按自己的标的自行构建；
 > 文档检索只负责「**找得到、可核对**」，**不构成投资建议**。
 
+## 🧠 长期记忆层（M2）
+
+M1 管的是「**文档里写了什么**」，M2 管的是「**你是谁、你做过什么**」—— 用户决策史与文档语料**分开存储**
+（`memories` 表 vs `kb.db`，不混库），避免互相污染召回。
+
+| | 说明 |
+|---|---|
+| 三类记忆（分离存储、分离召回） | `preference` 偏好 —— **每次对话必注入**（小、固定）／`fact` 事实 —— **按当前问题涉及的标的召回**／`experience` 经验 —— **向量召回 top-3**（无向量时按时间倒序并如实标注） |
+| **AI 不自行写记忆** | 隐式抽取先落 `memories_pending` 候选，**用户逐条确认**才进正式表；对话里的显式「记住…」与设置页手动新增同样可追溯 |
+| 可审计 / 可删除 | 设置页「长期记忆」区：三类分组列表 + 单条删除 + 候选确认 + 手动新增；**删除后 AI 立刻看不到** |
+| **召回预览（审计入口）** | 设置页可模拟一次提问，直接看到「如果现在提问，AI 会看到哪些记忆」的**原文** —— 所见即真实注入内容 |
+| 隐私开关 | 「允许 AI 使用长期记忆」默认**开**；关闭后**不注入、不发事件、不暗示记得** |
+| 注入契约 | 命中才注入 `## 长期记忆` 段，并发 SSE `memory_used` 事件（`sources` 细分为 `preferences` / `facts` / `experiences`）；**无命中不发事件**（不假装记得） |
+| 存储 | 本机 SQLite 两表（去重键 `UNIQUE(kind, key)`；经验按内容指纹去重）；**不入仓、不上传** |
+
+API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /api/memory/{id}`、`GET/POST /api/memory/pending`、
+`POST /api/memory/pending/{id}`、`POST /api/memory/summarize`、`GET/POST /api/memory/settings`、`GET /api/memory/recall-preview`。
+
+> ⚠️ **诚实边界**：记忆由**你自己积累**（仓库不带历史记忆）；经验向量召回依赖本地 Ollama `bge-m3`，
+> 未安装时降级为时间倒序 + 「未向量化」标注。
+> 本机实测（2026-10-02，隔离库 + 真实 Ollama）：`embed_text` 返回 **4096 字节**（1024 维 float32）；
+> 两条语义查询各自把语义最近的那条经验排在第 1；注入块来源计数 = 偏好 1 / 事实 1 / 经验 3；
+> 隐私开关关闭后 `build_recall_block` 返回空。
+
+## 🕸️ 可选：图编排模式（experimental）
+
+把「股票深度诊断」**一条**链路做成图（LangGraph），换来的是**检查点（断点续跑）**与**结构化人工确认**，
+而不是重写整个 Agent；**其余 23 个工具仍走原来的线性规划循环**。
+
+```text
+[入口] 股票代码
+  ↓ [data_fetch]   拉行情/财报/资金流
+  ↓ [条件边]       财报数据齐否？──否──→ [fallback] 降级为「仅行情诊断」
+  ↓                是
+  ↓ [analyze]      6 引擎分析
+  ↓ [retrieve]     M1 私域知识层检索公告与研报原文
+  ↓ [synthesize]   汇总为带引用的诊断报告
+  ↓ [human_review] 用户确认 ──要求修改──→ 回到 analyze（上限 3 轮，到限强制通过）
+[出口] 报告 + 检查点持久化（可断点续跑）
+```
+
+| | 说明 |
+|---|---|
+| 怎么开 | 环境变量 `ORCHESTRATOR=graph`（PowerShell：`$env:ORCHESTRATOR="graph"`；bash：`export ORCHESTRATOR=graph`） |
+| 默认行为 | **`legacy`** —— 不设该变量时行为与 M3 之前**完全一致**（回滚面为零）；设了非法值自动回落 `legacy` 且可观测（`fell_back=True`） |
+| 两条条件边 | ① `data_fetch` 后按财报数据是否齐整分流 `analyze` / `fallback`；② `human_review` 后按决定回到 `analyze` 或走向出口 |
+| 人审通道 | `interrupt()` 原语（非手搓），循环**上限 3 轮**（节点内 + 条件边双保险）；产品入口 `POST /api/stocks/{code}/diagnosis/review`（`decision=approve\|revise` + 可选 `note`） |
+| 检查点 | SQLite（`langgraph-checkpoint-sqlite`）⇒ 中途中断可续跑，已完成节点不重跑 |
+| 契约 | graph 路径返回**与 legacy 逐字相同的 6 引擎 payload 形状**（额外挂 `_orchestrator` 元信息）⇒ 前端无需改动 |
+| 开关状态（本机实测 2026-10-02） | 未设变量 → `legacy`；`graph` → `graph`；`bogus` → 回落 `legacy`（`fell_back=True`）；`MAX_REVIEW_ROUNDS = 3`；图节点 = `data_fetch / fallback / analyze / retrieve / synthesize / human_review` |
+
+> ⚠️ **边界（如实标注）**：**本次只图化一条链路**；且 `analyze`（6 引擎）分支在本机受数据源不可用限制，
+> 真跑命中过的是 `fallback` 降级分支，`analyze` 分支由**离线测试 + 桩化可用数据源**覆盖。
+> 本版**未重新打包安装器**（见上文「版本与下载口径」）。
+
 ## 🧭 差异化
 
 | | invest-concierge | 常见行情工具 |
@@ -261,10 +336,12 @@ python scripts/rag_rerank_probe.py --split holdout  # LLM 重排探针（会调�
 | 上手 | 克隆即跑，零配置可用 | 需自己搭环境 |
 | AI | 多角色辩论 + 工具调用 + 思考流（非单问答） | 多为单轮问答 |
 | 体检 | 排雷 + 护城河 6 维 + 估值分位 + 三表 | 多为单指标展示 |
+| 记忆 | 三类长期记忆 + 候选确认 + 召回预览（可审计、可关） | 多数没有跨会话记忆，或记忆不可见/不可删 |
+| 编排 | 可选图编排：检查点续跑 + 人工确认通道 | 多为单轮工具调用 |
 
 ## 🧪 测试与质量
 
-- 后端：`pytest tests/`（**353 例**，全部通过）
+- 后端：`pytest tests/`（**476 例**，2026-10-02 实测全绿）
 - 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）
 - 桌面壳：`python desktop\smoke_test.py`（依赖 / dist 产物 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）
 - CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）+ gitleaks 密钥扫描
@@ -281,6 +358,9 @@ python scripts/rag_rerank_probe.py --split holdout  # LLM 重排探针（会调�
 - [诊断页验收记录](docs/verification.md)
 - [M1 检索评测报告](docs/M1_EVAL_REPORT.md)（指标、未达标项与证据）
 - [能力覆盖与边界](docs/COVERAGE_DESIGN.md)
+- [Release Notes v1.3.0 · M2 长期记忆层](docs/RELEASE_NOTES_v1.3.0.md)
+- [Release Notes v1.2.0 · M3 编排层](docs/RELEASE_NOTES_v1.2.0.md)
+- [M2 施工计划](docs/M2_MEMORY_PLAN.md)
 
 ## 📄 许可证
 
