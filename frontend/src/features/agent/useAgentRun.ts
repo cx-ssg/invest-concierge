@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { chatStream } from '../../lib/api'
-import type { SSEEvent, ToolTraceEntry } from '../../types/api'
+import type { RetrievalSource, SSEEvent, ToolTraceEntry } from '../../types/api'
 import type { ToolStep } from '../../components/engine/ToolTimeline'
 
 export type RunStatus = 'idle' | 'streaming' | 'done' | 'error' | 'cancelled'
@@ -15,6 +15,11 @@ export interface AgentRunPhase {
   toolSteps: ToolStep[]
   /** 记忆显性化（v1.1）：memory_used 事件带来的注入来源（holdings/history），无注入为空 */
   memorySources: string[]
+  /**
+   * A2 引用回跳：`retrieve_docs` 的 tool_end 带来的检索来源。
+   * 多次检索**按 chunk_id 去重并保留首次出现顺序** —— 编号 `[n]` 与数组下标 1-based 对应。
+   */
+  sources: RetrievalSource[]
   /** 最终回答（done.content，经打字机流式渲染） */
   content: string
   /** 本运行落库的会话 id（done 事件带回） */
@@ -29,10 +34,27 @@ const IDLE: AgentRunPhase = {
   writing: '',
   toolSteps: [],
   memorySources: [],
+  sources: [],
   content: '',
   sessionId: null,
   toolTrace: null,
   error: null,
+}
+
+/** A2：把一次检索事件的 sources 并入已有列表（按 chunk_id 去重，保留首次出现顺序）。
+ *  无 chunk_id 的条目无法判重（真实返回恒有该字段），按出现顺序追加，不静默丢弃。 */
+function mergeSources(prev: RetrievalSource[], incoming?: RetrievalSource[]): RetrievalSource[] {
+  if (!incoming?.length) return prev
+  const seen = new Set(prev.map((s) => s.chunk_id))
+  const out = prev.slice()
+  for (const s of incoming) {
+    if (s.chunk_id != null) {
+      if (seen.has(s.chunk_id)) continue
+      seen.add(s.chunk_id)
+    }
+    out.push(s)
+  }
+  return out
 }
 
 function applyEvent(p: AgentRunPhase, ev: SSEEvent): AgentRunPhase {
@@ -54,22 +76,24 @@ function applyEvent(p: AgentRunPhase, ev: SSEEvent): AgentRunPhase {
       }
     }
     case 'tool_end': {
+      // A2：来源与工具行定态互不依赖 —— 事件缺 tool_start 时也要留下来源（不丢引用凭据）
+      const merged: AgentRunPhase = { ...p, sources: mergeSources(p.sources, ev.sources) }
       // 按「最后一个同名 running 行」定态（同工具多次调用按顺序落位）
       let idx = -1
-      for (let i = p.toolSteps.length - 1; i >= 0; i--) {
-        if (p.toolSteps[i].name === ev.name && p.toolSteps[i].state === 'running') {
+      for (let i = merged.toolSteps.length - 1; i >= 0; i--) {
+        if (merged.toolSteps[i].name === ev.name && merged.toolSteps[i].state === 'running') {
           idx = i
           break
         }
       }
-      if (idx < 0) return p
-      const steps = p.toolSteps.slice()
+      if (idx < 0) return merged
+      const steps = merged.toolSteps.slice()
       steps[idx] = {
         ...steps[idx],
         state: ev.ok ? 'done' : 'error',
         elapsedMs: ev.elapsed_ms,
       }
-      return { ...p, toolSteps: steps }
+      return { ...merged, toolSteps: steps }
     }
     case 'memory_used':
       // v1.1 记忆显性化：服务端只在真实注入时发；无注入不发（不撒谎）

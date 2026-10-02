@@ -135,6 +135,26 @@ export interface WeeklyCachedPayload {
   content?: string
 }
 
+/** M1 检索来源（A2 引用回跳渲染；后端 `utils/rag/sources.py` 抽取，事件体刻意不含正文 text） */
+export interface RetrievalSource {
+  /** 工具返回里的名次（1-based，同一次检索内） */
+  rank?: number | null
+  /** 块唯一标识；同一次运行的引用编号 [n] 即数组下标 +1，靠它去重 */
+  chunk_id?: number | null
+  /** 文档标题；`none` 档被后端剥为 null（不可引用） */
+  title?: string | null
+  /** 原文外链；`none` 档被后端剥为 null（不可引用） */
+  url?: string | null
+  /** 来源类型（notice / research / pdf / note…） */
+  source?: string | null
+  /** 发布日期 */
+  published_at?: string | null
+  /** 标的代码 */
+  code?: string | null
+  /** 是否表格块 */
+  is_table?: boolean
+}
+
 /** SSE 事件（services/agent_service.stream_events 协议，FRONTEND_PLAN §5.1） */
 export type SSEEvent =
   | { type: 'status'; state: string }
@@ -142,7 +162,16 @@ export type SSEEvent =
   | { type: 'writing'; text: string }
   | { type: 'tool'; text: string }
   | { type: 'tool_start'; name: string; arguments: Record<string, unknown> }
-  | { type: 'tool_end'; name: string; ok: boolean; elapsed_ms: number }
+  | {
+      type: 'tool_end'
+      name: string
+      ok: boolean
+      elapsed_ms: number
+      /** 仅 `retrieve_docs` 成功且有来源时出现（协议纯净：其余工具不带该键） */
+      sources?: RetrievalSource[]
+      /** 检索证据档位（weak / none）；无来源时为 null */
+      evidence_level?: string | null
+    }
   | { type: 'memory_used'; sources: string[] }
   | { type: 'done'; session_id: number | null; content: string; tool_trace: ToolTraceEntry[] }
   | { type: 'error'; message: string }

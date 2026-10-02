@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Send, Sparkles, Square } from 'lucide-react'
+import { ArrowRight, ExternalLink, Send, Sparkles, Square } from 'lucide-react'
 import { api } from '../../lib/api'
-import type { SessionMessage } from '../../types/api'
+import type { RetrievalSource, SessionMessage } from '../../types/api'
 import { MarkdownContent } from '../../components/engine/MarkdownContent'
 import { ThinkingFlow } from '../../components/engine/ThinkingFlow'
 import { ToolTimeline } from '../../components/engine/ToolTimeline'
@@ -279,7 +279,7 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
       ) : null}
       <div className="max-w-[92%] rounded-card border border-hairline bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink">
         {phase.content ? (
-          <MarkdownContent content={phase.content} />
+          <MarkdownContent content={phase.content} sources={phase.sources} />
         ) : streaming ? (
           <span className="flex items-center gap-1.5 text-ink-3">
             <Spinner size={11} /> {phase.writing || 'Agent 思考中…'}
@@ -290,6 +290,73 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
           <span className="text-ink-3">已取消本次回答（会话已落库可回放）</span>
         ) : null}
       </div>
+      <SourceList sources={phase.sources} />
+    </div>
+  )
+}
+
+/**
+ * A2 引用回跳的「来源」卡列表（回答下方）。
+ *
+ * - 编号 `[n]` 与 `sources` 下标 1-based 对应（正文上标点击后滚到这里并高亮 1.5s）
+ * - `url` 与 `title` **都为空**的条目（`none` 档：后端刻意剥掉引用凭据）显示
+ *   「（该条证据充分性未确认，不提供来源凭据）」且**不可点外链** —— 不给假凭据
+ * - 空态不渲染（无 sources 时行为与改造前完全一致）
+ */
+function SourceList({ sources }: { sources: RetrievalSource[] }) {
+  if (!sources.length) return null
+  return (
+    <div className="flex max-w-[92%] flex-col gap-1">
+      <div className="px-1 text-[11px] tracking-wide text-ink-3">来源</div>
+      {sources.map((s, i) => {
+        const n = i + 1
+        const hasCredential = Boolean(s.url || s.title)
+        return (
+          <div
+            key={`${s.chunk_id ?? 'x'}-${n}`}
+            id={`src-${n}`}
+            className="scroll-mt-4 rounded-tile border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px]"
+          >
+            {hasCredential ? (
+              <>
+                <div className="flex items-start gap-2">
+                  <span className="mono shrink-0 text-ink-3">[{n}]</span>
+                  <span className="flex-1 leading-relaxed text-ink">
+                    {s.title || '（未提供标题）'}
+                    {s.is_table ? <span className="ml-1 text-ink-3">· 表格块</span> : null}
+                  </span>
+                  <span className="shrink-0 text-[10.5px] text-ink-3">
+                    {s.source || ''}
+                    {s.source && s.published_at ? ' · ' : ''}
+                    {s.published_at || ''}
+                  </span>
+                  {s.url ? (
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="打开原文"
+                      className="shrink-0 text-ink-3 hover:text-ink"
+                    >
+                      <ExternalLink size={11} />
+                    </a>
+                  ) : null}
+                </div>
+                {s.url ? (
+                  <div className="mono mt-0.5 truncate pl-6 text-[10.5px] text-ink-3">{s.url}</div>
+                ) : null}
+              </>
+            ) : (
+              <div className="flex items-start gap-2">
+                <span className="mono shrink-0 text-ink-3">[{n}]</span>
+                <span className="flex-1 leading-relaxed text-ink-3">
+                  （该条证据充分性未确认，不提供来源凭据）
+                </span>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

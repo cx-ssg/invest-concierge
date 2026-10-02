@@ -757,6 +757,22 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 # 宣称"消费方可按类型分支"——见 2026-09-15 独立审计 ⚪ 条）
                 _payload["error_code"] = _err_info["error_code"]
                 _payload["retryable"] = _err_info["retryable"]
+            elif name == "retrieve_docs":
+                # A2 引用回跳（docs/COVERAGE_DESIGN.md §3.2 生成层「回答必须带引用编号 [1][2]
+                # + 来源 URL/文件名 + 日期」）：把检索来源从工具返回送到前端。
+                # 此前 tool_end 只有 name/ok/elapsed_ms ⇒ 检索来的来源在 UI 上完全不可见。
+                #
+                # ⚠️ 只做**搬运**：`url`/`title` 与工具返回逐字一致 —— `none` 档由
+                # `utils/rag/retrieve.py` 剥掉引用凭据，这里**不得补回来**（否则
+                # 「无引用 = 不算回答」的机器强制会在事件层被悄悄撤销）。
+                # ⚠️ 只在 `retrieve_docs` **成功**且**有来源**时附加 `sources`：
+                # 其余工具的事件体不得出现该键（不污染协议）。
+                from utils.rag.sources import extract_sources
+
+                _srcs, _lvl = extract_sources(output)
+                if _srcs:
+                    _payload["sources"] = _srcs
+                _payload["evidence_level"] = _lvl
             _progress_structured("tool_end", _payload)
             tool_trace.append({"name": name, "arguments": args, "output": output})
             messages.append({

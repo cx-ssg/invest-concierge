@@ -173,3 +173,27 @@ body {
 .markdown-body a {
   color: var(--accent);
 }
+
+/* A2 引用回跳：来源卡被正文上标点击后高亮 1.5s（class 由 MarkdownContent.jumpToSource 增删）。
+   克制动效：只动 border-color / background，不用阴影与渐变。 */
+@keyframes src-flash {
+  0%,
+  35% {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+  100% {
+    border-color: var(--line);
+    background: transparent;
+  }
+}
+.src-flash {
+  animation: src-flash 1.5s var(--ease);
+}
+
+/* 正文引用上标按钮（MarkdownContent 渲染成 <sup><button>） */
+.markdown-body sup button {
+  font-family: var(--font-mono);
+  vertical-align: super;
+  line-height: 0;
+}
