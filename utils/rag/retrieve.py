@@ -27,6 +27,12 @@
 仍被弃权（`rel-0014` 在 rank 4）→ 报告的 `Recall@5 0.905` 与满分的差距**全部**由这个硬停造成。
 现改为「返回候选 + 最强警示语（`NONE_EVIDENCE_NOTE`）」；`evidence_level` 仍照算，评测分档不变。
 
+**2026-10-02 A2-R1 引用编号规范**：`message` 的「非 `none` 且有结果」分支追加
+`CITATION_NOTE`（`[1][2]` + 顺序一致 + 来源日期）。A2 已把「来源 → `tool_end.sources` →
+前端 `[n]` 上标」打通，但真跑证明**回答里零个 `[n]`**（模型改用日期引用）⇒ 该通路永不触发。
+规范**不进全局 `AGENT_SYSTEM_PROMPT`**（无检索的纯行情问答也会读到，无物可引只能编造），
+理由见 `utils/rag/messages.py` 的 `CITATION_NOTE` 段。
+
 返回 **JSON 字符串**（与项目既有 23 个工具的统一契约一致）。
 """
 import json
@@ -38,7 +44,12 @@ from utils.rag.hybrid import run_hybrid
 # 原委：`NONE_EVIDENCE_NOTE` 改了措辞（「没有」→「未能确认」），但
 # `agent_core.AGENT_SYSTEM_PROMPT` 里**权威更高**的同一句仍命令模型
 # 「必须明确告诉用户"该数据不可得"」⇒ 假陈述从高权威处重现。两边现已同源。
-from utils.rag.messages import NO_HIT_MESSAGE, NONE_EVIDENCE_NOTE, WEAK_EVIDENCE_NOTE
+from utils.rag.messages import (
+    CITATION_NOTE,
+    NO_HIT_MESSAGE,
+    NONE_EVIDENCE_NOTE,
+    WEAK_EVIDENCE_NOTE,
+)
 from utils.rag.tokenize import tokenize
 
 
@@ -116,7 +127,13 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         message = NONE_EVIDENCE_NOTE
     else:
         # 非 none（含历史 `strong` 取值）= 判据未通过 ⇒ 一律带警示
-        message = WEAK_EVIDENCE_NOTE
+        #
+        # 2026-10-02 A2-R1：**这一支是唯一「可引用」的档位**（结果在、`url`/`title` 未被剥）
+        # ⇒ 挂上引用编号规范。A2 真跑实测：不加这条时回答里**一个 `[n]` 都没有**
+        # （模型改用「（2026-07-18）」日期引用）⇒ 前端 `[n]` 上标通路永不触发。
+        # ⚠️ 另两档**不得**挂：`none` 档已剥引用凭据（要求编号 = 逼模型编造），
+        #    无结果档无物可引。文案在 `utils/rag/messages.py`（单一事实源）。
+        message = WEAK_EVIDENCE_NOTE + "\n" + CITATION_NOTE
     return _payload(query, code, results, message, ev_level, evidence)
 
 
