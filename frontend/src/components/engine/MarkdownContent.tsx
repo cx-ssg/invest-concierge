@@ -19,16 +19,22 @@ export function jumpToSource(n: number) {
 /**
  * 把正文里可引用的 `[n]` 换成 markdown 链接 `[[n]](#src-n)`，交给 `components.a` 渲染成上标按钮。
  *
- * ⚠️ **跳过 fenced code block（``` / ~~~ 之间，含未闭合的）与行内 code** —— 否则代码里的
- *    `[0]` / `arr[1]` 会被误改成链接（真实事故形态：贴一段 Python 示例就把正文改坏）。
+ * ⚠️ **跳过 fenced code block（``` / ~~~ 之间，含未闭合的）、4 空格 / Tab 缩进代码块与行内 code**
+ *    —— 否则代码里的 `[0]` / `arr[1]` 会被误改成链接（真实事故形态：贴一段 Python 示例就把正文改坏）。
+ *    ⚠️ 2026-10-03 A-R1 F3：原正则只有「闭合的 ``` / ~~~ + 行内 code」，
+ *    未闭合 `~~~` 与 4 空格缩进块**仍被替换**（审计用真组件 SSR 复现：
+ *    输入 `'~~~\narr[1] = 2\n'` → `<pre><code>arr[[1]](#src-1) = 2`），与注释声明不符。
+ *    现补 `~~~[\s\S]*$`（未闭合到文末）与 `^(?: {4}|\t)[^\n]*$`（缩进码行，需 `m` 标志）两条分支。
  * ⚠️ **越界编号保持普通文本**（如只有 3 条来源却写了 `[9]`）—— 不造点不动的死链。
  * ⚠️ 不碰 `[1](url)` 这种本就是 markdown 链接的方括号（负向先行断言 `(?!\()`）。
+ * ⚠️ 缩进分支会把「4 空格缩进的段落续行」也一并保护（CommonMark 里那种续行不是代码块）——
+ *    这是**保守方向**的取舍：宁可少链接一处引用，也不把用户贴的代码改坏。
  */
 function linkifyCitations(content: string, max: number): string {
   if (!content || max <= 0) return content
-  const RE = /```[\s\S]*?```|~~~[\s\S]*?~~~|```[\s\S]*$|`[^`\n]*`|\[(\d+)\](?!\()/g
+  const RE = /```[\s\S]*?```|~~~[\s\S]*?~~~|```[\s\S]*$|~~~[\s\S]*$|^(?: {4}|\t)[^\n]*$|`[^`\n]*`|\[(\d+)\](?!\()/gm
   return content.replace(RE, (match: string, num?: string) => {
-    if (num === undefined) return match // 代码块 / 行内 code：原样保留
+    if (num === undefined) return match // 代码块 / 缩进码行 / 行内 code：原样保留
     const n = Number(num)
     if (!Number.isInteger(n) || n < 1 || n > max) return match
     return `[[${n}]](#src-${n})`

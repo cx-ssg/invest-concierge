@@ -2,7 +2,7 @@
 """A2 验收 V5：**真实 SSE 事件流 dump**（真调 `services.agent_service.stream_events`）。
 
 任务书 `task-A2.md` §5 要求：真实提问（如「贵州茅台最近公告说了什么」），把事件序列 JSON
-落盘到 `D:/Vault/Handoff/itt-20261002/events-A2.json`，并打印每条 `tool_end` 的 `sources` 条数。
+落盘，并打印每条 `tool_end` 的 `sources` 条数。
 
 ⚠️ 这是一条**真联网**路径：真 LLM（读设置页配置的 Key）+ 真工具（`retrieve_docs` 打本地 kb.db
 + Ollama bge-m3 向量）。它不是单测，属于端到端验收 —— 「单测全绿 ≠ 生产路径可达」是本仓
@@ -10,10 +10,10 @@
 
 用法：
     python scripts/e2e_citation_dump.py                       # 默认问题 + 默认落盘路径
-    python scripts/e2e_citation_dump.py --question "..." --out D:/path/events.json --no-cleanup
+    python scripts/e2e_citation_dump.py --question "..." --out /path/events.json --no-cleanup
 
-⚠️ 落盘路径默认是任务书指定的 `D:/Vault/...`；若该路径不可写（沙箱/权限），
-   自动回退到仓库根目录同名文件，并**明确打印实际落盘路径**（不静默）。
+⚠️ 落盘路径（A-R1 F4 起）：`--out` 显式指定 > 环境变量 `AUDIT_OUT_DIR` > **系统临时目录**。
+   本脚本**不再**默认写仓库根/开发者本机目录 —— 审计脚本误跑不得污染工作区或暴露目录结构。
 
 ## A2-R1 增补（task-A2R1.md §3 V3/V4）
 
@@ -29,13 +29,16 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+# 仓库根由**本文件位置**推导（A-R1 F4：脚本里不得出现本机绝对路径）
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_OUT = "D:/Vault/Handoff/itt-20261002/events-A2.json"
-FALLBACK_OUT = os.path.join(REPO_ROOT, "events-A2.json")
+sys.path.insert(0, REPO_ROOT)
+
+#: 落盘根目录：`AUDIT_OUT_DIR` > 系统临时目录（**不再**默认写仓库根）
+OUT_DIR = os.environ.get("AUDIT_OUT_DIR") or tempfile.gettempdir()
+DEFAULT_OUT = os.path.join(OUT_DIR, "events-A2.json")
 
 
 def _db_counts():
@@ -51,14 +54,15 @@ def _db_counts():
 
 
 def _dump(events, out_path, meta):
-    """落盘事件序列；目标路径不可写时回退到仓库内同名文件（打印实际路径，不静默）。"""
+    """落盘事件序列；目标路径不可写时回退到**系统临时目录**同名文件（打印实际路径，不静默）。"""
     payload = dict(meta)
     payload["events"] = events
     blob = json.dumps(payload, ensure_ascii=False, indent=2)
 
+    fallback = os.path.join(tempfile.gettempdir(), os.path.basename(out_path or "events.json"))
     tried = [out_path]
-    if out_path != FALLBACK_OUT:
-        tried.append(FALLBACK_OUT)
+    if os.path.abspath(out_path or "") != os.path.abspath(fallback):
+        tried.append(fallback)
     last_err = None
     for path in tried:
         try:
@@ -69,7 +73,7 @@ def _dump(events, out_path, meta):
                 f.write(blob)
             print("[dump] 实际落盘：{}（{} 字节）".format(path, len(blob.encode("utf-8"))))
             if path != out_path:
-                print("[dump] ⚠️ 目标路径不可写，已回退（原目标：{}）".format(out_path))
+                print("[dump] ⚠️ 目标路径不可写，已回退到临时目录（原目标：{}）".format(out_path))
             return path
         except OSError as e:  # noqa: PERF203 - 逐路径尝试是本函数的目的
             last_err = e

@@ -19,7 +19,8 @@
 
 用法：
     python scripts/verify_a2r2_chat_visible.py --scenario both --tag red
-产物：verify-a2r2-<tag>.json + shot-a2r2-<tag>-<scenario>.png（仓库根目录）
+产物：verify-a2r2-<tag>.json + shot-a2r2-<tag>-<scenario>.png
+      （落 `AUDIT_OUT_DIR` 或系统临时目录 —— A-R1 F4 起**不再**写仓库根）
 """
 import argparse
 import base64
@@ -37,12 +38,21 @@ from websocket import create_connection
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-REPO = r"D:/work/python1/fund_agent"
+# A-R1 F4：仓库根由**本文件位置**推导；产物落 `AUDIT_OUT_DIR` 或系统临时目录
+# （脚本里不得出现本机绝对路径，误跑也不得把审计产物写进冻结工作区）。
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT_DIR = os.environ.get("AUDIT_OUT_DIR") or tempfile.gettempdir()
 FRONT = os.path.join(REPO, "frontend")
-EDGE = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+# 浏览器可执行文件路径**可覆盖**（`A2R2_EDGE` 环境变量）—— 默认值只是 Windows 常见位置
+EDGE = os.environ.get("A2R2_EDGE") or r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 BACKEND = "http://127.0.0.1:8000"
 FRONTEND = "http://127.0.0.1:5173"
 CDP_PORT = 9333
+
+
+def _out_path(name):
+    os.makedirs(OUT_DIR, exist_ok=True)
+    return os.path.join(OUT_DIR, name)
 
 
 def no_proxy_opener():
@@ -77,7 +87,7 @@ def start_backend():
     if http_ok(BACKEND + "/api/agent/config"):
         print("[ok] backend already running")
         return None
-    log = open(os.path.join(REPO, "a2r2-backend.log"), "w", encoding="utf-8", errors="replace")
+    log = open(_out_path("a2r2-backend.log"), "w", encoding="utf-8", errors="replace")
     p = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "server.main:app",
          "--host", "127.0.0.1", "--port", "8000"],
@@ -387,7 +397,7 @@ def main():
                 # 对照组用「已有会话」：先把新会话脏状态清掉（刷新已复位），再点历史会话
                 pass
             q = args.question if sc == "new" else args.control_question
-            png = os.path.join(REPO, "shot-a2r2-%s-%s.png" % (args.tag, sc))
+            png = _out_path("shot-a2r2-%s-%s.png" % (args.tag, sc))
             snap_before = snapshot_sessions()
             obs = run_scenario(cdp, sc, q, snap_before, args.timeout, png)
             obs["checks"] = results_for(obs)
@@ -412,7 +422,7 @@ def main():
 
 
 def finish(res, args):
-    out = os.path.join(REPO, "verify-a2r2-%s.json" % args.tag)
+    out = _out_path("verify-a2r2-%s.json" % args.tag)
     Path(out).write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
     allchecks = {}
     for sc, obs in res.get("scenarios", {}).items():

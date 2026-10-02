@@ -21,6 +21,16 @@
 3. **绝不抛异常**：畸形 JSON / 空串 / 非 str / 无 `results` ⇒ 返回 `([], None)`。
    事件是对话主链路的旁路，抽取失败**不得**打断工具时间线与回答生成。
 
+## ⚠️ A-R1 F5（2026-10-03）：`url` 的 scheme 白名单 —— 第 1 条「只搬运不加工」的**唯一例外**
+
+来源卡的 `href` 直接来自这里搬运的 `url`（前端 `ChatArea` 的 `<a href={s.url}>`）。
+独立审计实测：`javascript:` 之所以不执行，只是 React 19 渲染时把它替换成抛错串 ——
+**框架兜底，不是本仓保证**；而 `data:text/html,...` 会被原样输出。换渲染层即回归。
+⇒ 本函数对 `url` 增加**收窄型**白名单：仅 `http` / `https` 保留，其余（`javascript:` /
+`data:` / `file:` / 相对路径 / 畸形串）**置 None**。`title` 一字不动，仍逐字透传。
+理由：非 http(s) 的 url 本来就**不是可点凭据**，置 None 不会让模型多看到任何东西，
+只会让下游（前端/任何新消费者）拿不到可执行的伪协议。渲染层另有同规则兜底。
+
 ## ⚠️ 双层编码（生产实况，2026-10-02 实测）
 
 `execute_ai_tool_v2` 对**返回字符串的工具**会把结果再 `json.dumps` 一次
@@ -34,8 +44,13 @@
 因此它只用于**同一次运行内的引用回跳**，不可跨构建持久化。
 """
 import json
+from urllib.parse import urlsplit
 
-__all__ = ["SOURCE_FIELDS", "extract_sources"]
+__all__ = ["SAFE_URL_SCHEMES", "SOURCE_FIELDS", "extract_sources", "is_safe_external_url"]
+
+#: 可作为**可点外链**下发的 scheme（白名单，非黑名单 —— 未知 scheme 一律拒绝）。
+#: 见模块 docstring「A-R1 F5」：渲染层的 `<a href={s.url}>` 不能依赖 React 版本行为兜底。
+SAFE_URL_SCHEMES = ("http", "https")
 
 #: 事件体允许出现的字段（顺序即文档顺序；`text` 被刻意排除，见模块 docstring 第 2 条）
 SOURCE_FIELDS = (
@@ -48,6 +63,25 @@ SOURCE_FIELDS = (
     "code",
     "is_table",
 )
+
+
+def is_safe_external_url(url):
+    """`url` 是否可作可点外链（仅 `http` / `https`）。
+
+    白名单口径：非字符串 / 空串 / 无 scheme（相对路径）/ 未知或伪协议（`javascript:`、
+    `data:`、`file:`、`vbscript:` …）一律 False。**绝不抛异常**。
+    """
+    if not isinstance(url, str):
+        return False
+    text = url.strip()
+    if not text:
+        return False
+    try:
+        scheme = urlsplit(text).scheme
+    except ValueError:  # 畸形串（如含非法字符的 IPv6 字面量）
+        return False
+    return scheme.lower() in SAFE_URL_SCHEMES
+
 
 
 def extract_sources(tool_output):
@@ -94,7 +128,11 @@ def extract_sources(tool_output):
     for row in results:
         if not isinstance(row, dict):
             continue
-        sources.append({key: row.get(key) for key in SOURCE_FIELDS})
+        item = {key: row.get(key) for key in SOURCE_FIELDS}
+        # A-R1 F5：url 收窄白名单（唯一加工点，见模块 docstring）。title 不动。
+        if not is_safe_external_url(item.get("url")):
+            item["url"] = None
+        sources.append(item)
     if not sources:
         return [], None
     return sources, level

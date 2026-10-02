@@ -11,6 +11,8 @@ Agent Core（UI 无关可测） - 声明式 Tool Registry + 带规划的 Agent �
 
 实现依据：docs/AGENT_MVP_DESIGN.md §2 / §3 / §5 实施注意。
 """
+import contextvars
+import functools
 import importlib
 import json
 import sys
@@ -401,9 +403,20 @@ def _call_tool_fn(fn, kwargs, timeout):
     """
     if not timeout or timeout <= 0:
         return fn(**kwargs)
+    # ⚠️ A-R1 F2（2026-10-03）：**contextvars 必须显式带进工作线程**。
+    # `ThreadPoolExecutor` 的线程是全新 `Context`（不继承调用方的 contextvars），
+    # 于是 `agent_run` 建立的引用编号作用域在工具里**看不见** —— 真链路实测：
+    # 第 2 次 `retrieve_docs` 仍渲染成「第 1 条 = [1]」（F2 缺陷原样复现）。
+    # `copy_context().run(...)` 把作用域带进去；每次调用**各自复制**（Context 不能被并发进入：
+    # 共享一个 ctx 会让并行/复用场景抛 RuntimeError）。
+    ctx = contextvars.copy_context()
     ex = ThreadPoolExecutor(max_workers=1)
     try:
-        fut = ex.submit(fn, **kwargs)
+        # ⚠️ 用 `functools.partial` 而不是 `ex.submit(ctx.run, fn, **kwargs)`：后者会给
+        # `submit` 传**两个**位置参数，改变既有调用形状 —— 存量测试的假执行器
+        # （`tests/test_tool_contract_hardening.py` 的 `FakeExecutor.submit(self, fn, **kwargs)`）
+        # 会当场 TypeError。保持「单位置参数」形状 = 零回归。
+        fut = ex.submit(functools.partial(ctx.run, fn, **kwargs))
         try:
             return fut.result(timeout=timeout)
         # ⚠️ 2026-09-17：必须**同时**抓 `concurrent.futures.TimeoutError` —— 它到 **3.11 才**成为
@@ -523,6 +536,10 @@ execute_ai_tool = execute_ai_tool_v2
 # ==================== Agent 规划循环 ====================
 
 from utils.rag.messages import NONE_EVIDENCE_DIRECTIVE
+# A-R1 F2：一次运行一个**引用编号作用域**（多次检索的 `[n]` 全局唯一递增，与前端
+# `mergeSources` 同构）。用装饰器而不是把循环体缩进一层 —— 改动面最小，且 `try/finally`
+# 保证异常路径也复位（`contextvars` 在 pytest 主线程跨用例存活，泄漏会污染后续直接调用）。
+from utils.rag.citation_scope import with_citation_scope
 
 # ⚠️ 2026-09-18 第六轮审计二 P1-1：第 3 条的命令措辞改为**从 `messages` 取**。
 # 此前这里（**系统提示词，权威高于工具返回值**）写着「必须明确告诉用户"该数据不可得"」，
@@ -547,6 +564,7 @@ AGENT_SYSTEM_PROMPT = ("""你是"基金小助手"，一位越用越懂你的投�
 用 Markdown 组织回答，简洁清晰，重点突出。""")
 
 
+@with_citation_scope
 def agent_run(task, context=None, memory=False, session_id=None, tools=None,
               model=None, temperature=0.7, max_tool_rounds=8,
               continue_question=False, on_progress=None, structured_progress=False,

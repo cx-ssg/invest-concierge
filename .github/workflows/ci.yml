@@ -28,3 +28,29 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+  # A-R1 F1（2026-10-03）：BUG-001 的修复此前**没有任何自动化回归** —— 把它改回缺陷版，
+  # 上面那个 job 仍 476 全绿。本 job 用 jsdom 跑**真 ChatArea 组件 bundle + 桩 SSE**，
+  # 不需要浏览器、不需要 LLM/Key、不需要 Ollama、不需要后端。
+  # 最后一步是 harness 自检：缺陷版变异体必须被断言抓住（否则等于没测）。
+  frontend-dom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: A2 offline DOM regression (F1 BUG-001 / F2 编号 / F3 代码块 / F5 scheme)
+        run: node scripts/verify_a2_dom.mjs
+
+      - name: A2 DOM harness self-check (mutant must be caught)
+        run: node scripts/verify_a2_dom.mjs --mutate bug001

@@ -8,6 +8,7 @@ import { MarkdownContent } from '../../components/engine/MarkdownContent'
 import { ThinkingFlow } from '../../components/engine/ThinkingFlow'
 import { ToolTimeline } from '../../components/engine/ToolTimeline'
 import { useAgentRun, type AgentRunPhase } from './useAgentRun'
+import { isSafeExternalUrl } from '../../lib/url'
 import { Btn, Spinner } from '../../components/ui/primitives'
 
 /**
@@ -305,6 +306,8 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
  * - 编号 `[n]` 与 `sources` 下标 1-based 对应（正文上标点击后滚到这里并高亮 1.5s）
  * - `url` 与 `title` **都为空**的条目（`none` 档：后端刻意剥掉引用凭据）显示
  *   「（该条证据充分性未确认，不提供来源凭据）」且**不可点外链** —— 不给假凭据
+ * - A-R1 F5：`url` 仅 `http`/`https` 才渲染可点外链，其余 scheme（`javascript:`/`data:`…）
+ *   只显示纯文本、不给 `href`（`lib/url.ts::isSafeExternalUrl`）
  * - 空态不渲染（无 sources 时行为与改造前完全一致）
  */
 function SourceList({ sources }: { sources: RetrievalSource[] }) {
@@ -315,6 +318,9 @@ function SourceList({ sources }: { sources: RetrievalSource[] }) {
       {sources.map((s, i) => {
         const n = i + 1
         const hasCredential = Boolean(s.url || s.title)
+        // A-R1 F5：外链 scheme 白名单 —— 只有 http/https 才渲染可点 `<a>`（其余降级为纯文本）。
+        // 后端 `extract_sources` 已做数据层收窄，这里是不依赖 React 版本行为的第二道。
+        const safeUrl = isSafeExternalUrl(s.url) ? s.url : null
         return (
           <div
             key={`${s.chunk_id ?? 'x'}-${n}`}
@@ -334,9 +340,9 @@ function SourceList({ sources }: { sources: RetrievalSource[] }) {
                     {s.source && s.published_at ? ' · ' : ''}
                     {s.published_at || ''}
                   </span>
-                  {s.url ? (
+                  {safeUrl ? (
                     <a
-                      href={s.url}
+                      href={safeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="打开原文"

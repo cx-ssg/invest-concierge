@@ -343,3 +343,98 @@ def test_sse_stream_events_forwards_sources_to_frontend(monkeypatch, kb):
     assert ends[0]["evidence_level"] == "weak"
     # 事件体必须小：正文不放事件（前端另有 tool_trace 通道）
     assert all("text" not in s for s in ends[0]["sources"])
+
+
+# ==================== 契约锁 7：URL scheme 白名单（A-R1 F5） ====================
+
+
+def _sources_payload(url, title="钓鱼公告"):
+    """单条来源的最小合法载荷（`extract_sources` 的纯函数层输入）。"""
+    return json.dumps({
+        "evidence_level": "weak",
+        "message": "m",
+        "results": [{"rank": 1, "chunk_id": 1, "title": title, "url": url,
+                     "source": "notice", "published_at": "2026-08-15",
+                     "code": "600519", "is_table": False}],
+    }, ensure_ascii=False)
+
+
+@pytest.mark.parametrize("unsafe", [
+    "javascript:alert('audit-xss')",          # 审计实测：React 19 只是渲染时替换，非本仓校验
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "file:///C:/Windows/win.ini",
+    "ftp://example.com/a.pdf",
+    "/relative/notice.pdf",                   # 无 scheme（相对路径）
+    "//example.com/a",                        # 协议相对
+    "",
+    "   ",
+    None,
+    12345,
+])
+def test_extract_sources_drops_unsafe_url_scheme(unsafe):
+    """非 `http`/`https` 的 `url` 不得作为可点外链下发（渲染层 `<a href={s.url}>` 无 scheme 校验）。"""
+    srcs, level = extract_sources(_sources_payload(unsafe))
+    assert level == "weak"
+    assert srcs[0]["url"] is None, "伪协议/相对路径 url 必须在数据层就置 None（A-R1 F5）"
+    assert srcs[0]["title"] == "钓鱼公告", "title 必须仍逐字透传（只收窄 url 一项）"
+
+
+@pytest.mark.parametrize("safe", [
+    "https://example.com/a",
+    "http://example.com/a?b=1#c",
+    "HTTPS://EXAMPLE.COM/A",
+    "  https://example.com/trim  ",
+])
+def test_extract_sources_keeps_http_url_verbatim(safe):
+    """`http`/`https`（含大小写/首尾空白）必须**逐字**保留 —— 修法不得把正常外链一起砍掉。"""
+    srcs, _ = extract_sources(_sources_payload(safe))
+    assert srcs[0]["url"] == safe, "http/https 必须原样搬运（与「只搬运、不加工」一致）"
+
+
+def test_is_safe_external_url_never_raises():
+    """白名单判定器对任意输入都返回 bool，绝不抛异常（事件旁路不得炸主链路）。"""
+    from utils.rag.sources import SAFE_URL_SCHEMES, is_safe_external_url
+
+    assert SAFE_URL_SCHEMES == ("http", "https")
+    for bad in (None, 1, [], {}, "", "   ", "javascript:alert(1)", "data:x",
+                "/rel", "//host/x", "file:///a", "ftp://a", "http://", "https://x"):
+        assert isinstance(is_safe_external_url(bad), bool), "输入 {!r} 未返回 bool".format(bad)
+    assert is_safe_external_url("https://x") is True
+    assert is_safe_external_url("//host/x") is False, "协议相对链接没有 scheme ⇒ 不可点"
+    assert is_safe_external_url("http://") is True, "有 scheme 即算白名单（不校验主机名，避免误杀）"
+
+
+def test_agent_run_tool_end_url_scheme_whitelisted(monkeypatch, tmp_path):
+    """**可达性锁**：语料里真放一个 `javascript:` url 时，真实 `agent_run` 事件的 `sources.url`
+    必须已经是 `None`（不是只测纯函数）—— 审计正是这样做的（改副本 kb.db 后跑真链路）。
+    """
+    db = str(tmp_path / "kb-bad-url.db")
+    conn = rag_store.get_conn(db)
+    rag_store.ensure_schema(conn)
+    doc_id = rag_store.upsert_document(conn, {
+        "code": "600519", "source": "notice", "title": "钓鱼公告",
+        "url": "javascript:alert('audit-xss')", "published_at": "2026-08-15",
+    })
+    ids = rag_store.insert_chunks(conn, doc_id, [
+        {"seq": 0, "text": "贵州茅台上半年营业收入同比增长百分之十五，净利润增速略低于营收增速。",
+         "is_table": False},
+        {"seq": 1, "text": "公司表示直销渠道占比继续提升，i茅台平台贡献显著。", "is_table": False},
+        {"seq": 2, "text": "比亚迪新能源汽车七月销量创新高，海外出口同比增长明显。", "is_table": False},
+    ])
+    rag_store.save_embeddings(conn, ids, [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    conn.close()
+
+    def real_tool(query, code=None, top_n=5):
+        return retrieve_docs(query, code=code, top_n=top_n, db_path=db, query_vec=WEAK_VEC)
+
+    events, _res, _out = _drive_agent_run(
+        monkeypatch, "retrieve_docs", {"query": WEAK_QUERY, "code": "600519"}, real_tool)
+    payload = _tool_ends(events)[0]
+    assert payload["evidence_level"] == "weak", \
+        "前置：必须是可引用档（none 档会连带剥掉 title，测不出 url 白名单是否生效）"
+    assert payload["sources"], "前置：必须命中"
+    assert payload["sources"][0]["url"] is None, \
+        "`javascript:` url 必须被事件层剥离（渲染层 `<a href>` 不能靠 React 版本行为兜底）"
+    assert payload["sources"][0]["title"] == "钓鱼公告", "title 不受影响（只收窄 url）"
+

@@ -39,6 +39,7 @@ A2 真跑暴露（`report-A2.md` §5 原文「回答里出现的引用编号：�
 | `NONE_EVIDENCE_NOTE` | `retrieve.py` 工具返回 | 判据未通过时的警示（**数据**，模型读到的） |
 | `WEAK_EVIDENCE_NOTE` | `retrieve.py` 工具返回 | 弱相关档的安全网 |
 | `CITATION_NOTE` | `retrieve.py` 工具返回（**仅非 none 且有结果**时） | 引用编号规范（**随检索结果注入**，不进全局提示词） |
+| `citation_note(base, numbers)` | `retrieve.py`（同上分支） | 第 2..k 次检索的**全局编号**文案（F2）；`base=0` 时逐字返回 `CITATION_NOTE` |
 | `NONE_EVIDENCE_DIRECTIVE` | `agent_core.py` 系统提示词 | 同上语义，但作为**指令**（权威更高，模型会照做） |
 """
 
@@ -65,9 +66,34 @@ WEAK_EVIDENCE_NOTE = ("检索到的内容与问题只有字面弱相关（证据
 #    - 无结果档（`NO_HIT_MESSAGE`）：无物可引。
 #    这三件事缺一不可：① 用 `[1][2]` 标注 ② 编号与结果列表顺序一致（第 1 条 = `[1]`）
 #    ③ 同时注明来源日期。
+#
+# ⚠️ 2026-10-03 A-R1 F2：本常量是**第一次检索**的口径（也是唯一逐字固定的那一次）。
+#    一次运行发生**第二次**检索时，编号必须**接续**前面的来源（前端把多次 sources 全局合并
+#    去重后编号），故由 `citation_note(base, numbers)` 渲染 —— 见本模块下方函数与
+#    `utils/rag/citation_scope.py`。**不要**直接把 CITATION_NOTE 拼到第 2..k 次检索的返回里。
 CITATION_NOTE = ("【引用规范】回答中引用以下检索结果时：必须用 `[1][2]` 这样的编号标注来源 —— "
                  "编号与结果列表的顺序一致（第 1 条 = `[1]`，不得自造编号，也不得使用超出实际条数的编号）；"
                  "并同时注明来源日期（`published_at`）。")
+
+
+def citation_note(base, numbers):
+    """按**本次运行内的全局编号**渲染引用规范（A-R1 F2）。
+
+    - `base`：本次检索**之前**已返回的来源条数（chunk_id 去重后）；
+    - `numbers`：本次结果逐条对应的全局编号（重复 chunk 沿用原编号）。
+
+    ⚠️ `base == 0` 且编号恰为 `1..n` ⇒ **逐字返回 `CITATION_NOTE`**：第一次检索的文案与
+    A2-R1 完全一致（单一事实源 + 零回归，`tests/test_rag_messages.py` 的逐字断言仍成立）。
+    """
+    nums = list(numbers or [])
+    if base == 0 and nums == list(range(1, len(nums) + 1)):
+        return CITATION_NOTE
+    mapping = "、".join("第{}条=[{}]".format(i + 1, n) for i, n in enumerate(nums))
+    return ("【引用规范】回答中引用以下检索结果时：必须用 `[1][2]` 这样的编号标注来源 —— "
+            "本次编号从 [{}] 起（前面已返回 {} 条，编号在本次运行内**全局唯一递增**）；"
+            "本次逐条编号：{}；"
+            "不得自造编号，也不得使用超出实际条数的编号；并同时注明来源日期（`published_at`）。"
+            ).format(base + 1 if nums else base, base, mapping)
 
 # ── 系统提示词用（模型读到的**指令**，权威更高）──────────────────────
 # 与 `NONE_EVIDENCE_NOTE` **同源** —— 关键差异在最后一句：

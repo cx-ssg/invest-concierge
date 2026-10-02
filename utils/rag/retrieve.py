@@ -38,6 +38,7 @@
 import json
 
 from utils.rag import store as rag_store
+from utils.rag.citation_scope import current_scope
 from utils.rag.evidence import LEVEL_NONE, EvidenceJudge
 from utils.rag.hybrid import run_hybrid
 # ⚠️ 2026-09-18 第六轮审计二 P1-1：措辞抽到 `utils/rag/messages.py`（**单一事实源**）。
@@ -49,6 +50,7 @@ from utils.rag.messages import (
     NO_HIT_MESSAGE,
     NONE_EVIDENCE_NOTE,
     WEAK_EVIDENCE_NOTE,
+    citation_note,
 )
 from utils.rag.tokenize import tokenize
 
@@ -117,6 +119,14 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         for r in results:
             r["url"] = None
             r["title"] = None
+    # A-R1 F2：向本次运行的引用编号作用域领取**全局编号**。
+    # ⚠️ 只要 `results` 非空就要领取 —— 因为 `agent_core` 对这些结果**同样**会附
+    #    `tool_end.sources`（`none` 档也附，只是凭据被剥），前端会把它们一并合并进卡片列表
+    #    并占用卡片编号。若这里只在「可引用档」领取，`none` 档候选就会让后续编号整体错位。
+    _base, _numbers = (0, None)
+    _scope = current_scope()
+    if results and _scope is not None:
+        _base, _numbers = _scope.assign([r.get("chunk_id") for r in results])
     # ⚠️ 2026-09-18 **撤下 `strong` 档**后，只剩「none」与「非 none」两种情况 ——
     # 后者**一律**带 `WEAK_EVIDENCE_NOTE` 警示。**不再有"跳过警示"的通道**：
     # 旧 `else: message = "命中 {} 条"` 那条分支正是第五、六两轮反复攻击的入口
@@ -133,7 +143,15 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         # （模型改用「（2026-07-18）」日期引用）⇒ 前端 `[n]` 上标通路永不触发。
         # ⚠️ 另两档**不得**挂：`none` 档已剥引用凭据（要求编号 = 逼模型编造），
         #    无结果档无物可引。文案在 `utils/rag/messages.py`（单一事实源）。
-        message = WEAK_EVIDENCE_NOTE + "\n" + CITATION_NOTE
+        #
+        # 2026-10-03 A-R1 F2：编号口径由「每次调用从 [1] 起」改成**本次运行的全局编号**
+        # （`citation_note(base, numbers)`；作用域由 `agent_core.agent_run` 建立）。
+        # 第 1 次检索（base=0）逐字返回 CITATION_NOTE，文案零回归。
+        if _numbers is None:
+            # 不在任何运行作用域内（直接调用 / 脚本 / 单测）：退回 A2-R1 的单次调用口径
+            message = WEAK_EVIDENCE_NOTE + "\n" + CITATION_NOTE
+        else:
+            message = WEAK_EVIDENCE_NOTE + "\n" + citation_note(_base, _numbers)
     return _payload(query, code, results, message, ev_level, evidence)
 
 
