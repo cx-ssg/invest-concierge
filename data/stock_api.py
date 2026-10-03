@@ -9,9 +9,124 @@ from datetime import datetime, timedelta
 
 from config import CACHE_TTL
 from data.cache import cached, CACHE_QUOTE, CACHE_FUNDAMENTALS, CACHE_MONEYFLOW
-from utils.common import safe_float_convert, request_with_retry, call_akshare_with_retry
+from utils.common import safe_float_convert, safe_request, request_with_retry, call_akshare_with_retry
 import akshare as ak
 import pandas as pd
+
+
+# ==================== 腾讯行情 fallback（东财不可达时的个股行情/搜索） ====================
+# 2026-10-04 H5：东财 clist/spot 按 IP 限流（本机实测 stock_zh_a_spot_em 整表拉取被掐），
+# 而腾讯行情 qt.gtimg.cn 与 smartbox 稳定可达（大盘指数已用同一通道，见 market_api）。
+# 仅在东财全市场快照不可用时兜底，不改变主路径语义。
+_TENCENT_QUOTE_URL = "https://qt.gtimg.cn/q={}"
+_TENCENT_SEARCH_URL = "https://smartbox.gtimg.cn/s3/?v=2&q={}&t=all"
+_TENCENT_HEADERS = {
+    "Referer": "https://gu.qq.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+}
+
+
+def _tencent_secid(stock_code):
+    """6 位代码 → 腾讯行情 secid（sh/sz/bj 前缀；未知按沪市处理）"""
+    code = str(stock_code or "").strip()
+    if code.startswith(("6", "9")):
+        return "sh" + code
+    if code.startswith(("0", "3")):
+        return "sz" + code
+    if code.startswith(("4", "8")):
+        return "bj" + code
+    return "sh" + code
+
+
+def _get_stock_info_tencent(stock_code):
+    """腾讯单只行情 fallback：返回与 get_stock_info 同结构 dict，失败 None。
+
+    字段位次实测（2026-10-04，v_sh600519 全量 88 段）：
+    1 名称 / 3 现价 / 4 昨收 / 5 今开 / 31 涨跌额 / 32 涨跌幅 / 33 最高 / 34 最低 /
+    36 成交量(手) / 37 成交额(万元) / 38 换手率 / 39 市盈率 / 43 振幅 /
+    44 流通市值(亿) / 45 总市值(亿) / 46 市净率
+    """
+    try:
+        resp = safe_request(
+            _TENCENT_QUOTE_URL.format(_tencent_secid(stock_code)),
+            headers=_TENCENT_HEADERS, timeout=5, max_retries=1,
+        )
+        if resp is None:
+            return None
+        resp.encoding = "gbk"
+        text = resp.text or ""
+        if '"' not in text:
+            return None
+        parts = text.split('"')[1].split("~")
+        if len(parts) < 47 or not parts[3]:
+            return None
+
+        def _f(idx):
+            return safe_float_convert(parts[idx]) if idx < len(parts) else 0
+
+        price = _f(3)
+        if not price:
+            return None
+        return {
+            'name': parts[1].strip(),
+            'code': str(stock_code),
+            'market': _get_market_name(str(stock_code)),
+            'price': price,
+            'high': _f(33),
+            'low': _f(34),
+            'open': _f(5),
+            'prev_close': _f(4),
+            'change': _f(31),
+            'change_percent': _f(32),
+            'volume': _f(36),                 # 手
+            'amount': _f(37) * 10000,         # 万元 → 元
+            'turnover_rate': _f(38),
+            'amplitude': _f(43),
+            'pe': _f(39),
+            'pb': _f(46),
+            'market_cap': _f(44) * 100000000,        # 亿元 → 元
+            'total_market_cap': _f(45) * 100000000,
+            'source': 'tencent',
+        }
+    except Exception as e:
+        print("腾讯获取股票 {} 行情失败：{}".format(stock_code, e))
+        return None
+
+
+def _search_stock_tencent(keyword, limit=20):
+    """腾讯 smartbox 搜索 fallback（东财快照不可用时）：仅保留 A 股（GP-* 类型）。
+
+    响应形如 `v_hint="sh~600519~\\u8d35\\u5dde\\u8305\\u53f0~gzmt~GP-A^sz~..."`，
+    名称是 ASCII 的 \\uXXXX 转义，需还原。
+    """
+    try:
+        import urllib.parse
+        resp = safe_request(
+            _TENCENT_SEARCH_URL.format(urllib.parse.quote(str(keyword).strip())),
+            headers=_TENCENT_HEADERS, timeout=5, max_retries=1,
+        )
+        if resp is None:
+            return []
+        resp.encoding = "gbk"
+        text = resp.text or ""
+        if '"' not in text:
+            return []
+        body = text.split('"')[1]
+        results = []
+        for item in body.split("^"):
+            fields = item.split("~")
+            if len(fields) < 5 or not fields[1]:
+                continue
+            if not fields[4].startswith("GP"):     # 只保留股票（排除 ETF/基金）
+                continue
+            name = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m.group(1), 16)), fields[2])
+            results.append({'code': fields[1].strip(), 'name': name.strip(), 'type': '股票'})
+            if len(results) >= limit:
+                break
+        return results
+    except Exception as e:
+        print("腾讯搜索股票失败：{}".format(e))
+        return []
 
 
 def _get_market_name(stock_code):
@@ -68,11 +183,11 @@ def get_stock_info(stock_code):
     try:
         df = _get_akshare_spot_df()
         if df is None or df.empty:
-            return None
+            return _get_stock_info_tencent(stock_code)
 
         mask = df['代码'] == stock_code
         if not mask.any():
-            return None
+            return _get_stock_info_tencent(stock_code)
 
         row = df[mask].iloc[0]
         price = safe_float_convert(row.get('最新价', 0))
@@ -117,7 +232,7 @@ def get_stock_info(stock_code):
         return result
     except Exception as e:
         print("获取股票 {} 行情失败：{}".format(stock_code, e))
-        return None
+        return _get_stock_info_tencent(stock_code)
 
 
 @cached(CACHE_QUOTE)
@@ -127,7 +242,7 @@ def search_stock(keyword):
         # 使用全市场行情数据做模糊匹配（本地搜索更可靠）
         df = _get_akshare_spot_df()
         if df is None or df.empty:
-            return []
+            return _search_stock_tencent(keyword)
 
         results = []
         keyword_upper = str(keyword).strip().upper()
@@ -145,7 +260,7 @@ def search_stock(keyword):
         return results
     except Exception as e:
         print("搜索股票失败：{}".format(e))
-        return []
+        return _search_stock_tencent(keyword)
 
 
 @cached(CACHE_QUOTE)

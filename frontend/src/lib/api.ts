@@ -31,10 +31,19 @@ import type {
   MemoryRecallPreviewPayload,
   MemorySettingsPayload,
   MemorySummarizePayload,
+  MutateOk,
+  MarketIndexPayload,
+  MarketMoneyflowPayload,
+  MarketSectorsPayload,
+  MarketSentimentPayload,
+  MarketValuationPayload,
   SettingsPayload,
   SSEEvent,
   StatusPayload,
+  StockHoldingsPayload,
+  StockSearchPayload,
   SummaryPayload,
+  WatchlistPayload,
   WeeklyCachedPayload,
   WeeklyReportPayload,
 } from '../types/api'
@@ -217,6 +226,30 @@ export const api = {
     generateWeekly: () =>
       request<WeeklyReportPayload>('/api/reports/weekly', jsonInit('POST'), 180_000),
     latestWeekly: () => request<WeeklyCachedPayload>('/api/reports/weekly'),
+  },
+
+  // ==================== 市场行情（H5 · P2；分 tab 数据源，弱网 40s 上限后降级） ====================
+  market: {
+    index: (signal?: AbortSignal) => request<MarketIndexPayload>('/api/market/index', {}, 40_000, signal),
+    sectors: (signal?: AbortSignal) => request<MarketSectorsPayload>('/api/market/sectors', {}, 40_000, signal),
+    sentiment: (signal?: AbortSignal) => request<MarketSentimentPayload>('/api/market/sentiment', {}, 40_000, signal),
+    moneyflow: (signal?: AbortSignal) => request<MarketMoneyflowPayload>('/api/market/moneyflow', {}, 60_000, signal),
+    valuation: (signal?: AbortSignal) => request<MarketValuationPayload>('/api/market/valuation', {}, 40_000, signal),
+  },
+
+  // ==================== 自选股 / 股票持仓（H5 · P3） ====================
+  watchlist: {
+    list: () => request<WatchlistPayload>('/api/watchlist'),
+    search: (q: string) =>
+      request<StockSearchPayload>(`/api/watchlist/search?q=${encodeURIComponent(q)}`, {}, 30_000),
+    add: (body: { code: string; name?: string; market?: string }) =>
+      request<MutateOk>('/api/watchlist', jsonInit('POST', body), 30_000),
+    remove: (code: string) => request<MutateOk>(`/api/watchlist/${code}`, jsonInit('DELETE')),
+    holdings: () => request<StockHoldingsPayload>('/api/stocks/holdings'),
+    addHolding: (body: { code: string; name?: string; quantity: number; cost_price: number }) =>
+      request<MutateOk>('/api/stocks/holdings', jsonInit('POST', body), 30_000),
+    removeHolding: (code: string) =>
+      request<MutateOk>(`/api/stocks/holdings/${code}`, jsonInit('DELETE')),
   },
 }
 

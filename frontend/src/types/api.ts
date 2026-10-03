@@ -578,6 +578,157 @@ export interface Percentile {
 }
 
 /** GET /api/stocks/{code}/diagnosis —— build_diagnosis_payload 的 JSON 化形态 */
+// ==================== 市场行情（H5 · P2：/api/market/*） ====================
+// 分 tab 依据 docs/AGENT_TOOLS_PLAN.md §P2：指数 / 板块 / 情绪 / 资金 / 估值，
+// 数据源是 P1 已工具化的同一批引擎；`ok=false` 表示该 tab 数据不可得（诚实降级）。
+
+export interface MarketIndexPayload {
+  ok: boolean
+  indices: IndexQuote[]
+  error: string | null
+}
+
+export interface HotSector {
+  name: string
+  code: string
+  change: number
+}
+
+export interface MarketSectorsPayload {
+  ok: boolean
+  sectors: HotSector[]
+  error: string | null
+}
+
+export interface LimitUpDown {
+  limit_up: number
+  limit_down: number
+}
+
+export interface MarketBreadth {
+  up_count: number
+  down_count: number
+  total: number
+  up_ratio: number
+}
+
+/** `utils.market_sentiment_merged.get_market_sentiment`：单指标失败对应字段为 null */
+export interface MarketSentiment {
+  limit_up_down: LimitUpDown | null
+  board_height: number | null
+  breadth: MarketBreadth | null
+  errors: string[]
+}
+
+export interface MarketSentimentPayload {
+  ok: boolean
+  sentiment: MarketSentiment | null
+  error: string | null
+}
+
+/** 大盘资金（单位：亿元；`data.moneyflow_api.get_market_moneyflow`，缺项为 null） */
+export interface MarketMoneyflow {
+  main_flow: number | null
+  super_large_flow: number | null
+  large_flow: number | null
+  medium_flow: number | null
+  small_flow: number | null
+  north_flow: number | null
+  south_flow: number | null
+  update_time: string
+}
+
+export interface SectorMoneyflow {
+  name: string
+  change: number
+  main_flow: number
+  main_flow_ratio: number
+}
+
+export interface MarketMoneyflowPayload {
+  ok: boolean
+  moneyflow: MarketMoneyflow | null
+  sectors: SectorMoneyflow[]
+  error: string | null
+}
+
+export interface ValuationItem {
+  name: string
+  code: string
+  pe: number
+  pe_percentile: number
+  pb: number
+  pb_percentile: number
+  eva_type: string
+  eva_type_int: number
+  update_date: string
+}
+
+export interface MarketValuationPayload {
+  ok: boolean
+  valuation: ValuationItem[]
+  error: string | null
+}
+
+// ==================== 自选股 / 股票持仓（H5 · P3） ====================
+
+/** 自选股一行（库内字段 + 实时行情，行情不可得时 price/change_percent 为 null） */
+export interface WatchlistItem {
+  id: number
+  code: string
+  name: string
+  market: string
+  added_time: string
+  price: number | null
+  change: number | null
+  change_percent: number | null
+}
+
+export interface WatchlistPayload {
+  ok: boolean
+  items: WatchlistItem[]
+}
+
+export interface StockSearchResult {
+  code: string
+  name: string
+  type?: string
+}
+
+export interface StockSearchPayload {
+  ok: boolean
+  results: StockSearchResult[]
+}
+
+/** 股票持仓一行（库内字段 + 行情/市值/浮动盈亏，行情不可得时相关字段为 null） */
+export interface StockHoldingItem {
+  id: number
+  code: string
+  name: string
+  quantity: number
+  cost_price: number
+  created_time?: string
+  updated_time?: string
+  price: number | null
+  change_percent: number | null
+  market_value: number | null
+  pnl: number | null
+  pnl_percent: number | null
+}
+
+export interface StockHoldingsPayload {
+  ok: boolean
+  items: StockHoldingItem[]
+}
+
+/** 写入类接口通用回执（ok=false 时带 error 文案） */
+export interface MutateOk {
+  ok: boolean
+  error?: string
+  code?: string
+  name?: string
+}
+
 export interface DiagnosisPayload {
   ok: boolean
   code: string

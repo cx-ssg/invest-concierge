@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from data.database import init_db
 from server.routers import agent, core, diary, diagnosis, holdings, settings
 from server.routers import alert, reports
-from server.routers import memory
+from server.routers import market, memory, watchlist
 
 
 def create_app() -> FastAPI:
@@ -59,6 +59,8 @@ def create_app() -> FastAPI:
     app.include_router(alert.router)
     app.include_router(reports.router)
     app.include_router(memory.router)
+    app.include_router(market.router)
+    app.include_router(watchlist.router)
 
     # M1：前端构建产物存在则托管（桌面壳/纯浏览器模式的 UI 入口）
     # 打包(exe)时 __file__ 指向 _MEIPASS 临时解包目录，dist 以 'frontend/dist' 打包在其中

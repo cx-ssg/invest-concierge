@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
-import { BarChart3, Bell, ChartLine, MessageSquare, Notebook, Settings, Wallet } from 'lucide-react'
+import { BarChart3, Bell, ChartLine, MessageSquare, Notebook, Settings, Star, TrendingDown, Wallet } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import type { NavTrack } from '../../types/api'
 import { Num } from '../../components/ui/primitives'
@@ -10,12 +10,14 @@ import { useUiStore, type Track } from '../../stores/ui'
 import { useSessionStore } from '../../stores/session'
 import { SessionList } from '../../features/agent/SessionList'
 
-/** 页面 key → 图标（live 7 页：v1.0 六页 + v1.1 价格预警） */
+/** 页面 key → 图标（live 9 页：v1.0 六页 + v1.1 价格预警 + H5 市场行情/自选股） */
 const PAGE_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   dashboard: BarChart3,
   portfolio: Wallet,
   diary: Notebook,
+  market: TrendingDown,
   stock_diagnosis: ChartLine,
+  watchlist: Star,
   ai_chat: MessageSquare,
   settings: Settings,
   alert: Bell,
@@ -30,12 +32,16 @@ const FALLBACK_TRACKS: NavTrack[] = [
       { key: 'dashboard', label: '📊 资产总览' },
       { key: 'portfolio', label: '💼 我的持仓' },
       { key: 'diary', label: '📝 投资日记' },
+      { key: 'market', label: '📉 市场行情' },
     ],
   },
   {
     track: 'stock',
     label: '📈 股票',
-    pages: [{ key: 'stock_diagnosis', label: '🩺 综合诊断' }],
+    pages: [
+      { key: 'stock_diagnosis', label: '🩺 综合诊断' },
+      { key: 'watchlist', label: '⭐ 自选股' },
+    ],
   },
   {
     track: 'common',

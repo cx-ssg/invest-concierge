@@ -30,15 +30,17 @@
 
 一个开源的 **A股与基金分析助手**：不依赖任何收费数据源，克隆下来就能跑。内置 AI 能力（可选接入 DeepSeek），把财报、估值、资金面翻译成普通人能看懂的话。
 
-当前已上线 7 个 live 页面（React 前端，桌面壳 / 浏览器双入口）：
+当前已上线 9 个 live 页面（React 前端，桌面壳 / 浏览器双入口）：
 
 | 页面 | 说明 |
 |---|---|
 | 💬 AI 对话（首页） | 投资问答助手：SSE 流式输出 + 模型原生思考流 + 工具调用时间线（**24 个工具**：行情/财报/估值/资金流/搜索/回测/文档检索…） |
-| 📊 基金 · 资产总览 | 总资产与持仓收益一览 |
+| 📊 基金 · 资产总览 | 总资产与持仓收益一览（含一键生成持仓周报） |
 | 💼 基金 · 持仓管理 | 录入持仓，自动追踪收益与当日实时估值 |
 | 📔 基金 · 投资日记 | 记录每笔操作的理由，与未来的自己对话 |
+| 📉 基金 · 市场行情 | 指数 / 板块 / 情绪 / 资金 / 估值 五 tab 速览（真实行情，取不到就如实显示「不可得」） |
 | 🩺 股票 · 综合诊断 | 基本面 / 排雷 / 护城河 / 估值 / 财报三表 / AI 辩论 六引擎体检 |
+| ⭐ 股票 · 自选股 | 自选股 / 持仓股票两个 tab：搜索加入、实时行情、市值与浮动盈亏 |
 | 🔔 价格预警 | 到价提醒：规则增删 + 触发事件时间线（判定在后端低频调度器，桌面壳走托盘气泡） |
 | ⚙️ 设置 | API Key 状态 / 应用信息 / 长期记忆管理（M2） |
 
@@ -183,7 +185,7 @@ flowchart LR
 ```
 
 - **前端**：React 19 单页应用（三区壳：标题栏 / 侧边栏 / 状态栏），通过 HTTP + SSE 与后端通信。
-- **后端**：FastAPI 提供 REST（持仓/日记/诊断/设置/记忆/预警）+ SSE（AI 对话流式事件：`status → reasoning → tool_start/tool_end → done`）。
+- **后端**：FastAPI 提供 REST（持仓/日记/诊断/设置/记忆/预警/行情/自选）+ SSE（AI 对话流式事件：`status → reasoning → tool_start/tool_end → done`）。
 - **数据层**：`data/` 模块统一走缓存 + fallback 降级（弱网自动切备用源，失败显示「--」不崩溃）。
 - **Agent 引擎**：`utils/agent_core.py` 工具注册表（**24 个工具**，晚绑定 importlib）+ 8 轮规划循环，`utils/agent_memory.py` 会话摘要注入。
 - **知识层（M1）**：`utils/rag/` 私域文档检索（切块 / `bge-m3` 向量 + BM25 → **RRF 融合** / 两档证据判定），采集与评测脚本在 `scripts/rag_*.py`。
@@ -205,7 +207,7 @@ invest-concierge/
 ├─ utils/orchestrator/   图编排 M3（flags / state / graph / nodes / adapters）
 ├─ scripts/           采集与评测脚本（rag_ingest*.py / rag_eval.py / rag_rerank_probe.py）
 ├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
-├─ tests/             **625 个 pytest 用例**（v1.3.2 实测全绿，2026-10-04；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额）
+├─ tests/             **644 个 pytest 用例**（H5 实测全绿，2026-10-04；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额 / 行情与自选）
 ├─ assets/            设计素材（mockups）
 ├─ .env.example       环境变量模板（复制为 .env 使用）
 ├─ requirements.txt   Python 依赖
@@ -232,7 +234,7 @@ invest-concierge/
 - **本地向量模型**：默认走本地 Ollama `bge-m3`；未安装 Ollama 时可改用 OpenAI 兼容端点。
 - **长期记忆不入仓**：M2 的记忆存在本机 SQLite（`memories` / `memories_pending` 两表），仓库不带任何历史记忆；经验记忆的向量召回依赖本地 Ollama `bge-m3`，未安装时降级为按时间倒序，并在注入文本里如实标注「未向量化，按时间序」（不报错、也不假装记得）。
 - **图编排是 experimental**：仅 `ORCHESTRATOR=graph` 时生效，**只图化「股票深度诊断」一条链路**，其余 23 个工具仍走原线性循环；M2 未接进图（两者独立）。
-- **当前 live 页面 7 个**：其余规划页（回测/定投/基金对比等）数据层函数已就绪，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+- **当前 live 页面 9 个**：其余规划页（回测/定投/基金对比等）数据层函数已就绪，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 🔍 私域知识层（带引用的文档检索）
 
@@ -392,7 +394,7 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 
 ## 🧪 测试与质量
 
-- 后端：`pytest tests/`（**625 passed**，2026-10-04 实测全绿）
+- 后端：`pytest tests/`（**644 passed**，2026-10-04 H5 实测全绿）
 - 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）
 - 桌面壳：`python desktop\smoke_test.py`（依赖 / dist 产物 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）
 - CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）+ gitleaks 密钥扫描

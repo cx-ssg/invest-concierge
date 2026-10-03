@@ -68,6 +68,11 @@
 > 走通可行性已验：巨潮 `static.cninfo.com.cn` 可直下（`%PDF-1`，832 KB，`pypdf` 抽取 2.7 s）；
 > **东财 PDF 有反爬**（`EO_Bot_Ssid` 混淆 JS 挑战页，加 Referer 无效）。
 > 是否切换需拍板 —— 见 `docs/M1_EVAL_REPORT.md` §5 与黑板本轮条目。
+>
+> ⚠️ **现状订正（2026-10-03）**：**PDF 全文采集已实现** ——
+> `scripts/rag_ingest_pdf.py`（巨潮 PDF → `pypdf` 抽全文）+ `requirements.txt:29-31` 的 `pypdf>=4.0`
+> （引入理由即「东财 API 正文 ~5000 字截断，大文档需走 PDF 全文」）。
+> ⇒ 上面那句「已设计、未实现」是**当时的记录**，**非当前状态**。
 
 ### 3.2 数据流
 
@@ -102,6 +107,10 @@
      原第三档 **`strong`**（"正常返回、跳过警示"）**已撤下**（`7270159`）—— 它的 `results` 与 `weak` 完全相同、
      而消费该差别的 LLM 判官从未实现 ⇒ 纯装饰；`SAR_STRONG` / `V1_STRONG` 随之删除。
      （**2026-10-01 F1** 又删掉了 `--scan` 里那条"假想 strong 曲线"，位置让给 `SAR_NONE` 敏感性表。）
+     ⚠️ **现状订正（2026-10-03）**：**LLM 判官已实现**（B1 阶段；现为 **A3b 判据** ——
+     `judge_fp ≤0.10` / `judge_fn ≤0.20` / `span_valid ≥0.95`，见 `docs/M1_EVAL_REPORT.md` L147）。
+     ⇒ 上面「从未实现」是**撤 `strong` 档当时**的表述，**非当前状态**；
+     但 **`strong` 档本身仍未恢复**（判官现挂在 `weak` 档的出口上）。
      **向量退回纯排序**（不再当闸门）。实现：`utils/rag/evidence.py`。
 
      **阈值与实测**（真实公告语料 814 块；工具 `scripts/rag_threshold_probe.py`，支持 `--holdout`）：

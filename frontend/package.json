@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:a2-dom": "node ../scripts/verify_a2_dom.mjs"
+    "test:a2-dom": "node ../scripts/verify_a2_dom.mjs",
+    "test:h5-dom": "node ../scripts/verify_h5_pages.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

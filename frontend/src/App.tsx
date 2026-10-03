@@ -6,14 +6,16 @@ import { AiChatPage } from './pages/AiChatPage'
 import { AlertsPage } from './pages/AlertsPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DiaryPage } from './pages/DiaryPage'
+import { MarketPage } from './pages/MarketPage'
 import { PortfolioPage } from './pages/PortfolioPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StockDiagnosisPage } from './pages/StockDiagnosisPage'
+import { WatchlistPage } from './pages/WatchlistPage'
 
 /**
  * 三区壳：行 = [TitleBar 44px | 内容 1fr | StatusBar 28px]；
  * 列 = [Sidebar 200px | 主区 1fr]。主内容 max-w 1120px 居中（UI_POLISH_PLAN §5）。
- * 路由骨架 = v1.0 live 6 页 + v1.1 价格预警 /alerts（粘性三件套 A）。
+ * 路由骨架 = v1.0 live 6 页 + v1.1 价格预警 /alerts + H5 市场行情/自选股（粘性三件套 A）。
  */
 export default function App() {
   return (
@@ -31,7 +33,9 @@ export default function App() {
               <Route path="/fund/dashboard" element={<DashboardPage />} />
               <Route path="/fund/portfolio" element={<PortfolioPage />} />
               <Route path="/fund/diary" element={<DiaryPage />} />
+              <Route path="/fund/market" element={<MarketPage />} />
               <Route path="/stock/stock_diagnosis" element={<StockDiagnosisPage />} />
+              <Route path="/stock/watchlist" element={<WatchlistPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </div>

@@ -46,7 +46,7 @@ async def test_health_and_nav(tmp_db):
         assert r.status_code == 200
         tracks = {t["track"]: t for t in r.json()["tracks"]}
         assert set(tracks) == {"fund", "stock", "common"}
-        assert [p["key"] for p in tracks["fund"]["pages"]] == ["dashboard", "portfolio", "diary"]
+        assert [p["key"] for p in tracks["fund"]["pages"]] == ["dashboard", "portfolio", "diary", "market"]
         assert tracks["stock"]["pages"][0]["key"] == "stock_diagnosis"
 
 

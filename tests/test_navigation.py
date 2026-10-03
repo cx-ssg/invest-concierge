@@ -3,10 +3,13 @@
 双轨导航 v1.0 渲染集验收测试
 定案：<vault>/Handoff/fund_agent-融合版计划-给zcode-20260830.md §6（用户 2026-08-30 拍板）
 
-验收标准（§6 修正版，消除空验）:
-  1. v1.0 渲染集精确匹配：#基金轨 3 页（dashboard/portfolio/diary）
-     + 股票轨 1 页（stock_diagnosis）+ 通用 ai_chat + settings
+验收标准（§6 修正版，消除空验 + H5 增补）:
+  1. 渲染集精确匹配：#基金轨 4 页（dashboard/portfolio/diary/market）
+     + 股票轨 2 页（stock_diagnosis/watchlist）+ 通用 ai_chat + settings + alert
   2. live 页源码（pages/*.py + ui_components/*.py）`grep "敬请期待"` 零命中
+
+H5（2026-10-04）：市场行情（P2）与自选股（P3）由占位转 live——React 前端承载，
+pages/market.py、pages/watchlist.py 同步改为路由兼容页（不再有占位文案）。
 
 范围说明：占位页按项目约束只隐藏不删除（live=false 不进导航），
 其源码保留"敬请期待"占位文案属正常——本测试只断言 live 页源码 + UI 组件无占位文案。
@@ -17,10 +20,10 @@ from ui_components.sidebar import PAGE_META, get_live_page_keys, get_live_pages
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# v1.1 渲染集（v1.0 六页 + 价格预警，按轨道顺序：基金→股票→通用）
+# v1.1 渲染集（v1.0 六页 + 价格预警）+ H5 新增（市场行情 / 自选股），按轨道顺序：基金→股票→通用
 RENDER_SET = {
-    "fund": ["dashboard", "portfolio", "diary"],
-    "stock": ["stock_diagnosis"],
+    "fund": ["dashboard", "portfolio", "diary", "market"],
+    "stock": ["stock_diagnosis", "watchlist"],
     "common": ["ai_chat", "settings", "alert"],
 }
 FULL_RENDER_SET = RENDER_SET["fund"] + RENDER_SET["stock"] + RENDER_SET["common"]
@@ -30,9 +33,9 @@ TRACK_PAGE_COUNTS = {"fund": 10, "stock": 7, "common": 4}
 
 # 占位页：live=false，一律不进导航（不渲染 = 不存在）
 PLACEHOLDER_PAGES = {
-    "fund": ["fund_search", "market", "compare", "dingtou",
+    "fund": ["fund_search", "compare", "dingtou",
              "dingtou_calc", "backtest", "analysis"],
-    "stock": ["stock_search", "stock_holdings", "watchlist",
+    "stock": ["stock_search", "stock_holdings",
               "stock_market_overview", "stock_deep_analysis", "stock_tools"],
     "common": ["profile"],
 }
@@ -51,19 +54,21 @@ def test_v1_render_set_exact_per_track():
 
 
 def test_v1_render_set_exact_overall():
-    """全量渲染集精确匹配：基金3 + 股票1 + ai_chat + settings + alert，共 7 页"""
+    """全量渲染集精确匹配：基金4 + 股票2 + ai_chat + settings + alert，共 9 页"""
     assert get_live_page_keys() == FULL_RENDER_SET
-    assert len(get_live_page_keys()) == 7
+    assert len(get_live_page_keys()) == 9
 
 
 def test_v1_render_set_labels_match():
-    """live 页导航 label 与定案命名一致（资产总览/我的持仓/投资日记/综合诊断/AI对话/系统设置/价格预警）"""
+    """live 页导航 label 与定案命名一致（资产总览/我的持仓/投资日记/市场行情/综合诊断/自选股/AI对话/系统设置/价格预警）"""
     labels = dict(get_live_pages("fund") + get_live_pages("stock") + get_live_pages("common"))
     assert labels == {
         "dashboard": "📊 资产总览",
         "portfolio": "💼 我的持仓",
         "diary": "📝 投资日记",
+        "market": "📉 市场行情",
         "stock_diagnosis": "🩺 综合诊断",
+        "watchlist": "⭐ 自选股",
         "ai_chat": "💬 AI 对话",
         "settings": "⚙️ 系统设置",
         "alert": "🔔 价格预警",
