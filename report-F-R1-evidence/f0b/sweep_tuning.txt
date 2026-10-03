@@ -1,0 +1,44 @@
+[baseline a] A3a=21/30=0.700  oa(rel)=0/13=0.000  by_kind={'in_domain_unanswerable': [30, 0], 'near_miss': [25, 0], 'out_of_domain': [30, 21]}
+
+=== 候选 b（撤 v1，只留 SAR）扫描 ===
+  sar<S   A3a      oa     none_by_kind
+  0.02   10/30=0.333  0/13   {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 10}
+  0.04   18/30=0.600  0/13   {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 18}
+  0.05   21/30=0.700  0/13   {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 21}
+  0.06   22/30=0.733  0/13   {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  0.08   28/30=0.933  1/13   {'in_domain_unanswerable': 4, 'near_miss': 2, 'out_of_domain': 28}
+  0.10   29/30=0.967  2/13   {'in_domain_unanswerable': 13, 'near_miss': 4, 'out_of_domain': 29}
+  0.12   29/30=0.967  5/13   {'in_domain_unanswerable': 20, 'near_miss': 10, 'out_of_domain': 29}
+  0.15   30/30=1.000  7/13   {'in_domain_unanswerable': 20, 'near_miss': 13, 'out_of_domain': 30}
+  0.20   30/30=1.000  11/13   {'in_domain_unanswerable': 21, 'near_miss': 20, 'out_of_domain': 30}
+  0.25   30/30=1.000  12/13   {'in_domain_unanswerable': 28, 'near_miss': 24, 'out_of_domain': 30}
+  0.30   30/30=1.000  13/13   {'in_domain_unanswerable': 30, 'near_miss': 24, 'out_of_domain': 30}
+
+=== 候选 c（换 band，S×V 网格）—— 每形式的最优行（oa=0 且 A3a 最大）===
+  form                     band@N   S      V      A3a        oa    none_by_kind
+  max(1,0.05N)               84.55  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 29}
+  df<=2                       2.00  0.06   0.35   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=4                       4.00  0.06   0.45   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=6                       6.00  0.06   0.45   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=8                       8.00  0.08   0.35   26/30=0.867  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 26}
+  df<=10                     10.00  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 25}
+  df<=12                     12.00  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 25}
+  df<=14                     14.00  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 25}
+  df<=16                     16.00  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 25}
+  df<=20                     20.00  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 1, 'out_of_domain': 25}
+  df<=25                     25.00  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 3, 'out_of_domain': 29}
+  df<=30                     30.00  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 3, 'out_of_domain': 29}
+  df<=40                     40.00  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 29}
+  df<=60                     60.00  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 1, 'out_of_domain': 29}
+  df<=quantile0.50            2.00  0.06   0.35   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=quantile0.60            3.00  0.06   0.45   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=quantile0.70            4.00  0.06   0.45   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=quantile0.80            6.00  0.06   0.45   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=quantile0.90           15.00  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 25}
+  df<=quantile0.95           27.00  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 3, 'out_of_domain': 29}
+  df<=0.002N                  3.38  0.06   0.45   22/30=0.733  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 22}
+  df<=0.005N                  8.46  0.08   0.35   26/30=0.867  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 26}
+  df<=0.010N                 16.91  0.08   0.35   25/30=0.833  0/13  {'in_domain_unanswerable': 0, 'near_miss': 2, 'out_of_domain': 25}
+  df<=0.020N                 33.82  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 3, 'out_of_domain': 29}
+  df<=0.030N                 50.73  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 1, 'out_of_domain': 29}
+  df<=0.050N                 84.55  0.1    0.45   29/30=0.967  0/13  {'in_domain_unanswerable': 0, 'near_miss': 0, 'out_of_domain': 29}

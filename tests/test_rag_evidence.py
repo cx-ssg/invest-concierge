@@ -17,7 +17,10 @@
 - `V1 = |{t ∈ q : 0 < df(t) < N·ρ}| / |{t ∈ q : df(t) < N·ρ}|` —— 特征词存在率，
   第二票，对"词表外的查询"给出确定性信号（`ρ = FEATURE_DF_FRACTION`，2026-10-03 F0b 由 0.05 收紧到 0.02）
 
-⚠️ **当前阈值 = `0.08 / 0.45`**（以 `utils/rag/evidence.py` 为准，本行曾写旧值 `0.06/0.35`）。
+⚠️ **当前阈值不在此写死**（F-R1 · 审计 F5/F11 抓出：本行曾写 `0.08 / 0.45`，而生产是
+`0.075 / 0.45` ⇒ 引用者按错值复算，且与同句"以 `utils/rag/evidence.py` 为准"自相矛盾）。
+唯一事实源 = `utils/rag/evidence.py` 的 `SAR_NONE` / `V1_NONE` / `FEATURE_DF_FRACTION`
+（本文件已 `import SAR_NONE, V1_NONE`，需要断言时直接断言模块值）。
 2026-10-03 F0b 的三候选并列实测与取舍理由见 `report-F0b.md`；两条必须记住的性质：
 1. （历史）`SAR_STRONG = 0.15` 曾是**在 holdout 上选出的拟合值** —— 该档已撤下，本行仅作留档；
 2. `V1_STRONG = 0.0` 使 `v1 >= V1_STRONG` **恒真** —— strong 档的活性护栏是 `v1 > 0`
@@ -147,6 +150,19 @@ def test_none_thresholds_are_ordered():
     """
     assert 0 < SAR_NONE < 1, "SAR_NONE 必须落在 (0,1)"
     assert 0 < V1_NONE <= 1, "V1_NONE 必须落在 (0,1]"
+
+
+def test_production_none_thresholds_are_locked_to_module_values():
+    """生产 `none` 档阈值的**数值锁**（F-R1 · 审计 F5/F11）。
+
+    为什么补这一条：本文件的 docstring 曾写死「当前阈值 = `0.08 / 0.45`」，
+    而生产是 `0.075 / 0.45` —— 文档与代码漂移，引用者会按错值复算。
+    现在唯一事实源是 `utils/rag/evidence.py`；本用例把它的**当前取值**钉住，
+    改阈值时**必须同时**改这里（强制一次有意识的更新，而不是静默漂移）。
+    """
+    import utils.rag.evidence as e_mod
+    assert (e_mod.SAR_NONE, e_mod.V1_NONE) == (0.075, 0.45)
+    assert e_mod.FEATURE_DF_FRACTION == 0.02
 
 
 def test_is_none_boundaries_track_constants():

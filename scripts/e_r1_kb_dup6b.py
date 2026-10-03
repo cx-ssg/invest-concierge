@@ -12,11 +12,24 @@ N=281→1686，规模 +6×）——
   * 对照自身只有**反向** `weak→none` 变化（E1：6 条；F0b：16 条 —— 多出来的部分来自
     `SAR_NONE` 0.06→0.075 之后 idf 的 0.5 平滑残差**开始跨过阈值**，见 CHK3/CHK5）。
 
-⇒ 真机制是判据统计量对**语料内容异质性**敏感（`idf(N,df)` 与 `v1` 的相对带宽
-`max(1, N·ρ)` 都**不是尺度不变的**），**不是**"库变大"。
-⚠️ F0b 只改了 `ρ`（0.05→0.02）与阈值（0.075/0.45）：`v1` 一侧已作到**纯复制逐位不变**，
-但 `SAR` 一侧的 idf 平滑残差**仍在**（它正是 CHK2 的 tol 会被顶到的地方 —— S=0.08 时
-`irr-0354` 的 base/ctrl sar = 0.0891/0.0761 跨阈值 ⇒ Δ(A3a)=0.020 → CHK2 FAIL）。
+⇒ 真机制是判据统计量对**语料内容异质性**敏感：`SAR` 侧用的是带 `+0.5` 平滑的 idf，
+它在纯复制下**本身就不逐位不变**（本夹具 CHK3 实测 16 条 `weak→none`）；而 `v1` 侧
+**并不是"尺度不变性缺失"** —— 旧带 `max(1, N·ρ)` 本来就是 `df/N` 形式的相对带
+（纯复制下 `v1` 逐位不变，98/98 条 tuning 查询）。**不是"库变大"，也不是"带宽非尺度不变"。**
+
+⚠️ **F-R1 归因订正（两路审计 F5/F-R3）**：F0b 的动作是**两个重定标** ——
+① 带宽份额 `ρ` 0.05→0.02；② 阈值 0.06/0.35→0.075/0.45。收益归属（F-R1 实测消融）：
+
+```
+  语料        旧点(ρ=.05,S=.06/V=.35)  只紧带宽(ρ=.02,旧阈值)  只重定阈值(ρ=.05,新阈值)  两者都做
+  holdout A3a      37/51=0.725              39/51=0.765(+2)         41/51=0.804(+4)      44/51=0.863(+7)
+  tuning  A3a      21/30=0.700              21/30=0.700(+0)         27/30=0.900(+6)      27/30=0.900(+6)
+```
+
+⇒ `v1` 一侧「纯复制逐位不变」在**旧带宽下就已成立**（上面的 CHK5 只是把它印出来，不是 F0b 新增的性质）；
+A3a 的增益主要由**阈值重定标**贡献。`SAR` 一侧的 idf 平滑残差**仍在**
+（它正是 CHK2 的 tol 会被顶到的地方 —— S=0.08 时 `irr-0354` 的 base/ctrl sar = 0.0891/0.0761
+跨阈值 ⇒ Δ(A3a)=0.020 → CHK2 FAIL）。
 
 ## 为什么它是 F 阶段的回归夹具
 
@@ -34,8 +47,11 @@ strict 模式校验的是「**当前判据口径下的记录值**」——判据
 | `E1`（E 阶段自证） | (0.05, 0.06, 0.35) | 47/51 · 47/51 | 16（10） |
 | `F0b`（本阶段修 v1 相对带） | (0.02, 0.075, 0.45) | 50/51 · 50/51 | 18（6） |
 
-`--arm auto`（默认）按当前生产判据三元组选臂；**匹配不上则关闭 strict 并告警**
-（防止将来改了判据却拿旧常数"验"自己）。详见 `report-F0b.md`。
+`--arm auto`（默认）按当前生产判据三元组选臂；**匹配不上则硬失败（退出码 1）**，
+要跳过记录值校验必须**显式**传 `--no-strict`（F-R1 · 审计 F11①：不得静默降级 ——
+判据改了却拿旧常数"验"自己，旧实现只打一行 `[WARN]`，报警只活在 stdout 里）。
+三条**不变量**（结构/零新内容、纯复制 Δ(A3a)=0、真实翻转 0 条被复现）**不受 strict 影响**，
+始终强制校验。详见 `report-F0b.md` / `report-F-R1.md`。
 
 ## 用法
 
@@ -43,7 +59,7 @@ strict 模式校验的是「**当前判据口径下的记录值**」——判据
 python scripts/e_r1_kb_dup6b.py                      # 按当前判据自动选记录臂（默认 pre-E1 备份 + 现库）
 python scripts/e_r1_kb_dup6b.py --base X.db --real Y.db --work .e-r1   # F 阶段的任意两库回归
 python scripts/e_r1_kb_dup6b.py --no-strict          # 只打印不校验记录值（换库时用）
-python scripts/e_r1_kb_dup6b.py --arm E1             # 指定记录臂（判据不匹配时自动降级为非 strict）
+python scripts/e_r1_kb_dup6b.py --arm E1             # 指定记录臂（判据不匹配时**硬失败**；如确要跳过校验加 --no-strict）
 ```
 
 **只读**打开源库（`mode=ro&immutable=1`，不写 kb.db、不产生 -wal/-shm）；
@@ -245,6 +261,21 @@ def block_signature(path, doc_limit=None):
     return [(rank[r[0]],) + r[1:] for r in rows if r[0] in rank]
 
 
+def resolve_strict(strict_flag, base_sha, arm_matched):
+    """记录值校验（strict）的**决策函数**（F-R1 · 审计 F11① 抽出的可测单点）。
+
+    - `arm_matched=False`（当前判据不匹配任何记录臂）⇒ 返回 `None` = **硬失败**：
+      记录值校验**无法执行**，旧实现只打一行 `[WARN]` 就继续（报警只活在 stdout 里）。
+      要跳过必须**显式** `--no-strict`（`strict_flag is False`）。
+    - 未显式指定时：`base` 是 E1 记录备份才开 strict（换库时记录值本就不适用）。
+    """
+    if not arm_matched and strict_flag is not False:
+        return None
+    if strict_flag is None:
+        return base_sha == PRE_E1_SHA1
+    return bool(strict_flag)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="E-R1 kb_dup6b 零新内容对照夹具（F 阶段回归夹具）")
     ap.add_argument("--base", default=DEFAULT_BASE,
@@ -264,19 +295,25 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     arm_name, expect, arm_matched = pick_arm(args.arm)
-
     with open(os.path.join(GOLDEN, "queries_holdout_irr.json"), encoding="utf-8") as f:
         irr = json.load(f)
     assert len(irr) == 113, "[FATAL] holdout 负例应为 113 条，实际 %d" % len(irr)
 
     base_sha = sha1_file(args.base)
-    if args.strict is None:
-        # 默认：base 是 E1 记录备份 **且**判据口径能匹配上记录臂 → 开 strict
-        args.strict = (base_sha == PRE_E1_SHA1) and arm_matched
-    if args.strict and not arm_matched:
-        print("[WARN] strict 已关闭：当前生产判据 %r 不匹配任何记录臂 %r"
+    # ⚠️ F-R1（审计 F11①）：判据不匹配任何记录臂 ⇒ **记录值校验无法执行**。
+    # 旧实现在这个情形只打一行 `[WARN]` 就把 strict 关掉 ⇒ 「改了判据、却拿旧常数验自己」
+    # 的报警**只存在于 stdout 里**，退出码仍是 0。现改为**默认硬失败**：
+    # 要继续跑必须显式传 `--no-strict`（把"我知道记录值校验没跑"变成一次明确的署名决定）。
+    resolved = resolve_strict(args.strict, base_sha, arm_matched)
+    if resolved is None:
+        print("[FAIL] 当前生产判据 %r 不匹配任何记录臂 %r ⇒ **记录值校验无法执行**；"
+              "若确实只想跑不变量（Δ(A3a)=0 / 翻转复现），请显式传 `--no-strict`。"
               % (current_predicate(), [a["predicate"] for a in ARMS.values()]))
-        args.strict = False
+        return 1
+    args.strict = resolved
+    if args.strict is False and not arm_matched:
+        print("[WARN] 已按 `--no-strict` 跳过**记录值校验**：当前判据不匹配任何记录臂 ——"
+              "不变量（Δ(A3a)=0 / 真实翻转 0 条被复现）仍然强制校验")
     os.makedirs(args.work, exist_ok=True)
     ctrl_path = os.path.join(args.work, "kb_dup6b.db")
 
@@ -397,7 +434,8 @@ def main(argv=None):
         print("       %s %s" % (qid, q[:22]))
         print("         %s" % ("; ".join(cells) or "（token df 无变化）"))
     band_ok = abs(band(n_ctrl) / band(n_base) - n_ctrl / n_base) < 1e-9
-    print("       带宽随块数同倍放大（尺度不变）....... %s" % ("PASS" if band_ok else "FAIL"))
+    print("       带宽随块数同倍放大 ⇒ 准入词集合尺度不变（**旧带 max(1,N·0.05) 同理**，"
+          "F0b 改的只是 ρ）....... %s" % ("PASS" if band_ok else "FAIL"))
     print("       ^进带 = df 从 band_base(%.2f) 之外进入 band_real(%.2f) 之内 —— v1 的分母变大、比值跳变"
           % (band(n_base), band(n_real)))
 
@@ -406,7 +444,10 @@ def main(argv=None):
     print("kb_dup6b RESULT: %s" % ("OK" if all_ok else "FAIL"))
     print("  判读：A3a 在**纯复制**下不动（%d/%d）；真实语料 %d 条翻转 %d 条被复现"
           % (c_a3a[0], c_a3a[1], len(real_flips), len(reproduced)))
-    print("        ⇒ 归因是「语料内容异质性」下的 idf/带宽非尺度不变，**不是「库变大」**")
+    print("        ⇒ 归因是「异质新内容」改变了 idf（`+0.5` 平滑残差**非尺度不变**）与"
+          "中频词的真实 df，**不是「库变大」**")
+    print("        ⚠️ `v1` 侧**不是**尺度不变性缺失：旧带 `max(1,N·0.05)` 本就是相对带 ——"
+          "F0b 的动作是 ρ 重定标(0.05→0.02) + 阈值重定标（消融见脚本头注 / report-F-R1.md）")
     if expect:
         print("        记录臂 %s：真实翻转记录值 %d（OOD %d）｜本次实测 %d（OOD %d）"
               % (arm_name, expect["real_flips"],

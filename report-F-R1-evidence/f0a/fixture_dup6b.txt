@@ -1,0 +1,37 @@
+=== E-R1 · kb_dup6b 零新内容对照夹具 ===
+copies=6  strict=True
+base  D:/Vault/Handoff/itt-20261002/e1-scratch/pre_e1_kb.db  sha1=57ccee1906de76f70020992a9997b7d8e2bbec67
+real  D:\work\python1\fund_agent\kb.db  sha1=ab7610da9bc235ff94e070573304af493d406f0a
+ctrl  .f0a/dup6b\kb_dup6b.db  (built: 6 份逐字节复制)
+chunks: base=281  ctrl=1686  real=1691
+[CHK1] 结构 base×6=1686 == ctrl 1686 ....... PASS
+       副本1 的 281 块 文本+向量 与 base 逐字节相同 ....... PASS
+[CHK2] A3a: base 47/51=0.922  ctrl 47/51=0.922  real 37/51=0.725
+       纯复制 Δ(A3a) = 0.000 <= tol 0.000 ....... PASS
+[CHK3] 对照库自身档位变化 = 6/113 方向=['weak->none']（应全为 weak->none）
+       方向全为反向 weak->none ....... PASS
+         irr-0231  near_miss                ('weak', 0.0679, 0.222) -> ('none', 0.056, 0.222)
+         irr-0406  in_domain_unanswerable   ('weak', 0.0642, 0.286) -> ('none', 0.0552, 0.286)
+         irr-0418  in_domain_unanswerable   ('weak', 0.0666, 0.222) -> ('none', 0.0557, 0.222)
+         irr-0420  in_domain_unanswerable   ('weak', 0.0659, 0.273) -> ('none', 0.0553, 0.273)
+         irr-0429  in_domain_unanswerable   ('weak', 0.0631, 0.273) -> ('none', 0.0523, 0.273)
+         irr-0489  near_miss                ('weak', 0.0615, 0.3) -> ('none', 0.0509, 0.3)
+[CHK4] 真实翻转 real vs base = 16 条  by_kind={'out_of_domain': 10, 'in_domain_unanswerable': 3, 'near_miss': 3}
+       被零新内容对照复现 = 0/16（out_of_domain 0/10）
+       ⇒ 翻转由「异质新内容」而非「规模」造成 ....... PASS
+[CHK5] v1 相对带宽 max(1,0.05N): base=14.05 ctrl=84.30 real=84.55（**非尺度不变**）
+       irr-0306 Excel 里 VLOOKUP 跨表匹配不到
+         excel:df 0->0(ctrl 0); vlookup:df 0->0(ctrl 0); 不到:df 0->1(ctrl 0); 么原:df 0->0(ctrl 0); 什么:df 0->3(ctrl 0); 到数:df 0->0(ctrl 0); 匹配:df 4->6(ctrl 24); 原因:df 21->107(ctrl 126); 据是:df 0->0(ctrl 0); 数据:df 18->60(ctrl 108)^进带; 是什:df 0->1(ctrl 0); 表匹:df 0->0(ctrl 0); 跨表:df 0->0(ctrl 0); 配不:df 0->2(ctrl 0)
+       irr-0331 电视剧《三体》一共多少集？
+         一共:df 0->0(ctrl 0); 三体:df 0->0(ctrl 0); 共多:df 0->0(ctrl 0); 多少:df 0->0(ctrl 0); 少集:df 0->1(ctrl 0); 电视:df 0->3(ctrl 0); 视剧:df 0->0(ctrl 0)
+       irr-0357 网店一直不发货可以要求赔偿吗？
+         一直:df 2->4(ctrl 12); 不发:df 0->0(ctrl 0); 以要:df 0->0(ctrl 0); 偿吗:df 0->0(ctrl 0); 发货:df 0->1(ctrl 0); 可以:df 3->23(ctrl 18); 求赔:df 0->0(ctrl 0); 直不:df 0->0(ctrl 0); 网店:df 0->0(ctrl 0); 要求:df 32->96(ctrl 192); 货可:df 1->2(ctrl 6); 赔偿:df 0->5(ctrl 0)
+       irr-0120 世界杯下一届在哪个国家举办？
+         一届:df 0->28(ctrl 0); 下一:df 4->10(ctrl 24); 世界:df 4->12(ctrl 24); 个国:df 0->1(ctrl 0); 举办:df 1->9(ctrl 6); 哪个:df 0->0(ctrl 0); 国家:df 9->41(ctrl 54); 在哪:df 0->0(ctrl 0); 家举:df 0->0(ctrl 0); 届在:df 0->0(ctrl 0); 杯下:df 0->0(ctrl 0); 界杯:df 0->3(ctrl 0)
+       带宽随真实语料变宽（纯复制亦然）....... PASS
+       ^进带 = df 从 band_base(14.05) 之外进入 band_real(84.55) 之内 —— v1 的分母变大、比值跳变
+
+kb_dup6b RESULT: OK
+  判读：A3a 在**纯复制**下不动（47/51）；真实语料 16 条翻转 0 条被复现
+        ⇒ 归因是「语料内容异质性」下的 idf/带宽非尺度不变，**不是「库变大」**
+        ⇒ F 阶段：纯调 SAR_NONE 修不了 v1 越界的条目（见报告 §E-F2）

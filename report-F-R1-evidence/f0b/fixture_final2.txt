@@ -1,0 +1,51 @@
+=== E-R1 · kb_dup6b 零新内容对照夹具 ===
+copies=6  strict=True  记录臂=F0b (2026-10-03 修 v1 相对带)
+当前生产判据 (ρ, SAR_NONE, V1_NONE) = (0.02, 0.075, 0.45)
+  记录臂 E1 (2026-10-03 E 阶段自证)       判据=(0.05, 0.06, 0.35)  A3a(base,ctrl)=(47, 51)  real_flips=16
+  记录臂 F0b (2026-10-03 修 v1 相对带)    判据=(0.02, 0.075, 0.45)  A3a(base,ctrl)=(50, 51)  real_flips=18  <== 本次记录臂
+base  D:/Vault/Handoff/itt-20261002/e1-scratch/pre_e1_kb.db  sha1=57ccee1906de76f70020992a9997b7d8e2bbec67
+real  D:\work\python1\fund_agent\kb.db  sha1=ab7610da9bc235ff94e070573304af493d406f0a
+ctrl  .f0b/e-r1\kb_dup6b.db  (built: 6 份逐字节复制)
+chunks: base=281  ctrl=1686  real=1691
+[CHK1] 结构 base×6=1686 == ctrl 1686 ....... PASS
+       副本1 的 281 块 文本+向量 与 base 逐字节相同 ....... PASS
+[CHK2] A3a: base 50/51=0.980  ctrl 50/51=0.980  real 44/51=0.863
+       纯复制 Δ(A3a) = 0.000 <= tol 0.000 ....... PASS
+[CHK3] 对照库自身档位变化 = 16/113 方向=['weak->none']（应全为 weak->none）
+       方向全为反向 weak->none ....... PASS
+         irr-0202  in_domain_unanswerable   ('weak', 0.0816, 0.143) -> ('none', 0.0672, 0.143)
+         irr-0205  in_domain_unanswerable   ('weak', 0.0848, 0.0) -> ('none', 0.0699, 0.0)
+         irr-0206  in_domain_unanswerable   ('weak', 0.0895, 0.167) -> ('none', 0.0749, 0.167)
+         irr-0234  near_miss                ('weak', 0.0858, 0.333) -> ('none', 0.0739, 0.333)
+         irr-0238  near_miss                ('weak', 0.0817, 0.222) -> ('none', 0.0693, 0.222)
+         irr-0240  near_miss                ('weak', 0.0778, 0.444) -> ('none', 0.0674, 0.444)
+         irr-0402  in_domain_unanswerable   ('weak', 0.0801, 0.444) -> ('none', 0.0715, 0.444)
+         irr-0405  in_domain_unanswerable   ('weak', 0.0752, 0.25) -> ('none', 0.0641, 0.25)
+         irr-0407  in_domain_unanswerable   ('weak', 0.0758, 0.091) -> ('none', 0.062, 0.091)
+         irr-0413  in_domain_unanswerable   ('weak', 0.0857, 0.444) -> ('none', 0.0749, 0.444)
+         irr-0419  in_domain_unanswerable   ('weak', 0.0868, 0.308) -> ('none', 0.0731, 0.308)
+         irr-0422  in_domain_unanswerable   ('weak', 0.0875, 0.25) -> ('none', 0.074, 0.25)
+         irr-0483  near_miss                ('weak', 0.0777, 0.25) -> ('none', 0.0661, 0.25)
+         irr-0487  near_miss                ('weak', 0.0887, 0.2) -> ('none', 0.0733, 0.2)
+         irr-0509  near_miss                ('weak', 0.0842, 0.25) -> ('none', 0.0712, 0.25)
+         irr-0518  near_miss                ('weak', 0.0772, 0.333) -> ('none', 0.0671, 0.333)
+[CHK4] 真实翻转 real vs base = 18 条  by_kind={'out_of_domain': 6, 'in_domain_unanswerable': 7, 'near_miss': 5}
+       被零新内容对照复现 = 0/18（out_of_domain 0/6）
+       ⇒ 翻转由「异质新内容」而非「规模」造成 ....... PASS
+[CHK5] v1 特征词带 feature_band(N)=max(1, N·ρ), ρ=0.02: base=5.62 ctrl=33.72 real=33.82
+       纯复制下带宽同倍放大（ctrl/base=6.000，理想值=6.000）⇒ 准入词集合不变
+       irr-0306 Excel 里 VLOOKUP 跨表匹配不到
+         excel:df 0->0(ctrl 0); vlookup:df 0->0(ctrl 0); 不到:df 0->1(ctrl 0); 么原:df 0->0(ctrl 0); 什么:df 0->3(ctrl 0); 到数:df 0->0(ctrl 0); 匹配:df 4->6(ctrl 24); 原因:df 21->107(ctrl 126); 据是:df 0->0(ctrl 0); 数据:df 18->60(ctrl 108); 是什:df 0->1(ctrl 0); 表匹:df 0->0(ctrl 0); 跨表:df 0->0(ctrl 0); 配不:df 0->2(ctrl 0)
+       irr-0331 电视剧《三体》一共多少集？
+         一共:df 0->0(ctrl 0); 三体:df 0->0(ctrl 0); 共多:df 0->0(ctrl 0); 多少:df 0->0(ctrl 0); 少集:df 0->1(ctrl 0); 电视:df 0->3(ctrl 0); 视剧:df 0->0(ctrl 0)
+       irr-0357 网店一直不发货可以要求赔偿吗？
+         一直:df 2->4(ctrl 12); 不发:df 0->0(ctrl 0); 以要:df 0->0(ctrl 0); 偿吗:df 0->0(ctrl 0); 发货:df 0->1(ctrl 0); 可以:df 3->23(ctrl 18); 求赔:df 0->0(ctrl 0); 直不:df 0->0(ctrl 0); 网店:df 0->0(ctrl 0); 要求:df 32->96(ctrl 192); 货可:df 1->2(ctrl 6); 赔偿:df 0->5(ctrl 0)
+       irr-0120 世界杯下一届在哪个国家举办？
+         一届:df 0->28(ctrl 0); 下一:df 4->10(ctrl 24); 世界:df 4->12(ctrl 24); 个国:df 0->1(ctrl 0); 举办:df 1->9(ctrl 6); 哪个:df 0->0(ctrl 0); 国家:df 9->41(ctrl 54); 在哪:df 0->0(ctrl 0); 家举:df 0->0(ctrl 0); 届在:df 0->0(ctrl 0); 杯下:df 0->0(ctrl 0); 界杯:df 0->3(ctrl 0)
+       带宽随块数同倍放大（尺度不变）....... PASS
+       ^进带 = df 从 band_base(5.62) 之外进入 band_real(33.82) 之内 —— v1 的分母变大、比值跳变
+
+kb_dup6b RESULT: OK
+  判读：A3a 在**纯复制**下不动（50/51）；真实语料 18 条翻转 0 条被复现
+        ⇒ 归因是「语料内容异质性」下的 idf/带宽非尺度不变，**不是「库变大」**
+        记录臂 F0b (2026-10-03 修 v1 相对带)：真实翻转记录值 18（OOD 6）｜本次实测 18（OOD 6）

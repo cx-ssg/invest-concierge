@@ -1,0 +1,97 @@
+{
+ "bands": {
+  "max(1,0.05N)": {
+   "base": 14.05,
+   "ctrl": 84.30000000000001,
+   "real": 84.55000000000001
+  },
+  "df<=14": {
+   "base": 14.0,
+   "ctrl": 14.0,
+   "real": 14.0
+  },
+  "df<=8": {
+   "base": 8.0,
+   "ctrl": 8.0,
+   "real": 8.0
+  },
+  "df<=0.02N": {
+   "base": 5.62,
+   "ctrl": 33.72,
+   "real": 33.82
+  },
+  "df<=0.005N": {
+   "base": 1.405,
+   "ctrl": 8.43,
+   "real": 8.455
+  },
+  "df<=q0.90": {
+   "base": 8.0,
+   "ctrl": 48.0,
+   "real": 15.0
+  },
+  "df<=q0.95": {
+   "base": 13.0,
+   "ctrl": 78.0,
+   "real": 27.0
+  }
+ },
+ "detail": {
+  "max(1,0.05N)": {
+   "v1_diff": 0,
+   "changes": [
+    "ctrl 5 / real 7",
+    "ctrl 6 / real 14",
+    "ctrl 4 / real 20"
+   ]
+  },
+  "df<=14": {
+   "v1_diff": 76,
+   "changes": [
+    "ctrl 16 / real 7",
+    "ctrl 17 / real 13",
+    "ctrl 18 / real 20"
+   ]
+  },
+  "df<=8": {
+   "v1_diff": 69,
+   "changes": [
+    "ctrl 17 / real 7",
+    "ctrl 16 / real 13",
+    "ctrl 16 / real 19"
+   ]
+  },
+  "df<=0.02N": {
+   "v1_diff": 0,
+   "changes": [
+    "ctrl 9 / real 7",
+    "ctrl 7 / real 21",
+    "ctrl 5 / real 26"
+   ]
+  },
+  "df<=0.005N": {
+   "v1_diff": 0,
+   "changes": [
+    "ctrl 15 / real 9",
+    "ctrl 7 / real 20",
+    "ctrl 6 / real 27"
+   ]
+  },
+  "df<=q0.90": {
+   "v1_diff": 0,
+   "changes": [
+    "ctrl 7 / real 7",
+    "ctrl 7 / real 12",
+    "ctrl 4 / real 18"
+   ]
+  },
+  "df<=q0.95": {
+   "v1_diff": 0,
+   "changes": [
+    "ctrl 5 / real 7",
+    "ctrl 7 / real 14",
+    "ctrl 4 / real 19"
+   ]
+  }
+ }
+}

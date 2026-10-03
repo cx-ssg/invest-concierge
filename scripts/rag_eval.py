@@ -36,6 +36,26 @@
 **改写**查询：把样本答案所属标的的**公司名**前缀到 query 上 —— 依据是 F0a 真实链路实测
 （`report-F0a.md` §1.2：LLM 喂给 `retrieve_docs` 的 query **一律带公司名**）。
 **改写只动查询文本，不动语料 / 不改样本 / 不动金标 / 不动阈值**；`full` 口径同时并列报出。
+
+## ⚠️⚠️ 2026-10-03 F-R1 · **`prod` 臂是「答案泄漏」的 oracle 上界，不是产线实测**（审计 F3 复核）
+
+`prod_queries()` 的前缀**来自金标块所属的 `code`**（`answer_chunk_ids` → `meta[*].code`），
+即**金标信息被写进了 query**。F-R1 实测（原始输出 `.fr1/fr1_fr2_prod_leak.txt`）：
+
+```
+  臂A  prod 改写（prefixed query, code=None→auto） Recall@5=0.926 MRR@10=0.781 混标的=0/27
+  臂B1  同一段 prefixed query + 硬编码 code=600519  Recall@5=0.926 MRR@10=0.781 混标的=0/27
+        ⇒ 两条臂 top-10 chunk_id 序列**逐位相同（27/27）**
+  臂B2  原始椭圆 query + code=600519（F0a 口径②）  Recall@5=0.926 MRR@10=0.661（查询文本不同 ⇒ MRR 不同）
+  口径③ full + prefixed query（不收窄）             Recall@5=0.889 MRR@10=0.758 混标的=7/27
+```
+
+⇒ `prod` 度量的是「**若已知标的**（金标码），检索能不能找到答案」= **带标签的上界**。
+⇒ **净效应**只有 **0.889 → 0.926**（+0.037，混标的 7/27→0/27）；
+`0.593 → 0.889` 是**查询形态效应**（椭圆 → 带标的），与 F0a 修复无关。
+commit `c12d3e1` 的信息「Recall@5 0.593 → 0.926 恢复」把这两段混成一段 ⇒ **本轮订正**。
+⇒ 引用 `[prod]` 时必须写成「**已知标的条件下的上界（oracle）**」；**不得**当作产线成绩。
+真正的产线口径需要**真实 LLM 改写**（F0a 实测 LLM 时带时不带 `code`，那是另一件事）。
 """
 import argparse
 import json
@@ -272,7 +292,13 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K,
 # 因此 `query_scope` 的退化（识别不出标的 / 误收窄池）会**真的改变指标**。
 
 def prod_queries(rows_rel, meta):
-    """把 27 条**椭圆**评测查询改写成「用户点名某个标的」的产线形态（**模拟**）。
+    """把 27 条**椭圆**评测查询改写成「用户点名某个标的」的 **oracle** 形态（**模拟**）。
+
+    ⚠️ **F-R1 复核：这不是产线口径。** 前缀的公司名由**金标块所属 `code`** 派生
+    （`answer_chunk_ids` → `meta[*].code`）⇒ **答案信息被写进了 query**。
+    实测（`.fr1/fr1_fr2_prod_leak.txt`）：同一段改写文本下，`code=None`（auto）与
+    `code="600519"`（硬编码）两条臂的 top-10 chunk 序列**逐位相同（27/27）**
+    ⇒ 它的 `Recall@5` 是「**已知标的**」条件下的**上界**，不是产线成绩。
 
     - 标的来源 = 该样本**答案块所属的 `code`**（`answer_chunk_ids` → `meta[*].code`），
       再由 `query_scope.company_names()` 取公司名（与 `query_scope` 里**同一套**数据驱动规则）。
@@ -299,7 +325,10 @@ def prod_queries(rows_rel, meta):
 
 
 def evaluate_prod(rows_rel, meta, qvecs, db_path=None, queries=None, k=TOP_K):
-    """**产线形态**评测臂：`retrieve_docs`（经 `query_scope`）→ `Recall@5` / `MRR@10` / 混标的。
+    """**「已知标的」上界（oracle）**评测臂：`retrieve_docs`（经 `query_scope`）→ `Recall@5` / `MRR@10` / 混标的。
+
+    ⚠️ 名字里的 `prod` 是历史叫法（F0a-2 时期）。F-R1 复核后口径订正为：**金标 code 派生查询**
+    ⇒ 该臂是**上界估计**，不是产线实测（见模块头注与 `.fr1/fr1_fr2_prod_leak.txt`）。
 
     - `queries`：本次实际送进 `retrieve_docs` 的查询文本（默认 = `prod_queries()` 的**带标的**改写形态；
       传原样查询即得 `[prod·raw]` 退化诊断 —— 识别不到标的 ⇒ 与 `full` 几乎重合）。
@@ -376,8 +405,23 @@ def _gold_in_candidates(o):
 
 
 def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
-                  llm_fn=None, timeout_s=None, max_judge=0):
+                  llm_fn=None, timeout_s=None, max_judge=0, top_n=None):
     """B1 · LLM 判官的评测口径（判据落 **`judge_fp`**，不在 `weak_fp`）。
+
+    ## 候选窗（2026-10-03 F-R1 · 审计 F9/F-R5 修复）
+
+    判官喂进去的候选块 = `retrieve_docs(query, top_n=top_n)["results"]`，
+    `top_n` 缺省 = **`max(k, 10)`** —— 与 `evaluate_prod()` 的 `top_n` **完全一致**。
+    修复前这里是 `top_n=k`（=5），而 `evaluate_prod` / `evaluate` 用 `max(k,10)`：
+    两个「top-5」来自**不同候选池**（`hybrid.kk = min(max(k*20,50), N)` ⇒ kk=100 vs 200），
+    于是 `judge_fn=0.192` 里的「检索没召回到」被系统性地多算：
+    实测 6 条 fn 里 **3 条**（`rel-0016`/`0029`/`0044`，gold rank 6/9/9）只需把窗口提到 10
+    就能进候选，**2 条**（`rel-0020`/`0021`，gold rank **1**）是判官真漏判，只有 **1 条**
+    （`rel-0002`，rank 124）属真未召回 ⇒ 「修检索」只该留给 rank>100 的那一类。
+
+    ⚠️ 与**产线**的差别（如实标注）：生产侧 `judge_service.JUDGE_MAX_CANDIDATES = 5`
+    （判官只看 `retrieve_docs` 返回后截断的 5 条）。本参数对齐的是**评测器内部**两条臂的
+    候选池，不是改产线判官窗口。
 
     ## 口径（每个数字都必须带状态口径报出）
 
@@ -400,11 +444,15 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
     from utils.rag.retrieve import retrieve_docs
 
     n_total = len(rows_rel) + len(rows_irr)
+    if top_n is None:
+        # F-R1（审计 F9）：与 `evaluate_prod()` 的候选窗对齐（`max(k, 10)`），
+        # 否则「judge_fn 里多少是检索没召回到」的归因建立在**更小的池**上。
+        top_n = max(k, 10)
     observed = []
     for tag, rows, qs in (("rel", rows_rel, qvecs[:len(rows_rel)]),
                           ("irr", rows_irr, qvecs[len(rows_rel):])):
         for r, qv in zip(rows, qs):
-            raw = retrieve_docs(r["query"], top_n=k, db_path=db_path, query_vec=qv)
+            raw = retrieve_docs(r["query"], top_n=top_n, db_path=db_path, query_vec=qv)
             # ⚠️ 生产实况：`execute_ai_tool_v2` 对**返回字符串的工具**会再 `json.dumps` 一次
             #    （双层编码）⇒ 这里同样造双层，走的是与 SSE 完全相同的抽取函数。
             trace = [{"name": "retrieve_docs", "arguments": {"query": r["query"]},
@@ -676,11 +724,15 @@ def main(argv=None):
     print("         Recall@5 = %.3f  MRR@10 = %.3f  混入其它标的 = %d/%d  n=%d"
           % (m["Recall@%d" % TOP_K], m["MRR@10"], m["contaminated_count"],
              m["n_rel"], m["n_rel"]))
-    print("  [prod] 产线形态（`retrieve_docs` **经** `query_scope`；带标的查询形态[模拟 LLM 改写]）"
-          " = 用户**实际问某个标的**时的能力  <<< 代表产线")
+    print("  [prod] **已知标的条件下的上界（oracle）**：`retrieve_docs` **经** `query_scope`，"
+          "但查询里的标的取自**金标块 code**（= 答案泄漏）")
+    print("         它**不是产线实测** —— 它度量「若已知标的，检索能不能找到答案」；"
+          "真正的产线需真实 LLM 改写（F-R1 复核见 .fr1/fr1_fr2_prod_leak.txt）")
     print("         Recall@5 = %.3f  MRR@10 = %.3f  混入其它标的 = %d/%d  n=%d"
           % (pm["Recall@%d" % TOP_K], pm["MRR@10"], pm["contaminated_count"],
              pm["n_rel"], pm["n_rel"]))
+    print("  [!] 该口径的**净效应**只有 0.889→0.926（+0.037，混标的 7/27→0/27）；"
+          "0.593→0.889 是查询形态效应（椭圆→带标的），与 F0a 修复无关")
     if raw_pm is not None:
         print("  [prod·raw] 同一条产线路径，但用**评测集原样查询**（椭圆、不含标的 ⇒ 识别不到 "
               "⇒ 退化为全库）：Recall@5 = %.3f  MRR@10 = %.3f  混入其它标的 = %d/%d"
@@ -719,8 +771,12 @@ def main(argv=None):
         # F1：A3b 判据的另外两个量（此前本工具未实现 ⇒ 判据只被报出 1/3）
         print("  judge_fn           = %.3f   (%d/%d weak 档正例**未被确认相关** —— A3b 判据之一；"
               "含 uncertain)" % (jm["judge_fn"], jm["judge_fn_n"], jm["n_weak_rel"]))
-        print("      └ 归因：其中 gold **确实在 top-k 内**的只有 %d 条（= %.3f）—— 其余是检索没召回到，"
-              "不是判官误杀" % (jm["judge_fn_gold_recalled_n"], jm["judge_fn_gold_recalled"]))
+        print("      └ 归因：其中 gold **确实在候选窗（top-%d）内**的只有 %d 条（= %.3f）——"
+              " 其余是检索没召回到，不是判官误杀"
+              % (max(TOP_K, 10), jm["judge_fn_gold_recalled_n"], jm["judge_fn_gold_recalled"]))
+        print("        （F-R1：候选窗已与 `evaluate_prod` 对齐为 top-%d；"
+              "「修检索」只留给 rank>100 那类，rank 6~9 属窗口不一致、rank=1 属判官真漏判）"
+              % (max(TOP_K, 10),))
         print("  span_valid         = %.3f   (判官**提出**的 relevant 里引文逐字通过的占比；"
               "%d 条被拒 / 共 %d 条 —— A3b 判据之一)"
               % (jm["span_valid"], jm["span_rejected"], jm["span_proposed"]))

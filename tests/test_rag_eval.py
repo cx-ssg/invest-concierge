@@ -679,7 +679,11 @@ def test_main_prints_both_qualifiers_with_own_labels(monkeypatch, capsys):
     assert "Recall@5 = 0.926" in out, "`prod`（产线形态）的数字丢了"
     assert "混入其它标的 = 3/4" in out, "`full` 口径的混标的条数没打印"
     assert "混入其它标的 = 0/4" in out, "`prod` 口径的混标的条数没打印"
-    assert "代表产线" in out, "没有说明**哪种口径代表产线**（V5）"
+    assert "oracle" in out and "已知标的条件下的上界" in out, \
+        "没有把 `prod` 标成**金标派生的上界**（F-R1 · 审计 F3：答案泄漏 ⇒ 不是产线口径）"
+    assert "不是产线实测" in out, "没有明说 `prod` **不是产线实测**（F-R1）"
+    assert "净效应" in out and "0.889" in out, \
+        "没有报 `prod` 口径的**净效应**（0.889→0.926）—— 会把查询形态效应算成修复功劳（F-R1）"
     assert "不走检索" in out and "不受本次新增口径影响" in out, \
         "没有说明 A3a 不走检索、不受新口径影响（V5）"
 
@@ -694,3 +698,37 @@ def test_cli_exposes_prod_raw_flag():
                        encoding="utf-8", errors="replace")
     out = (r.stdout or "") + (r.stderr or "")
     assert "--prod-raw" in out, out[:600]
+
+
+def test_judge_metrics_candidate_window_matches_prod_arm(monkeypatch):
+    """F-R1（审计 F9/F-R5）：判官候选窗必须与 `evaluate_prod` 同为 `max(k,10)`。
+
+    修复前 `judge_metrics` 用 `top_n=k`（=5），而 `evaluate_prod` 用 `max(k,10)`：
+    两个「top-5」来自**不同候选池**（`hybrid.kk` 100 vs 200）⇒ `judge_fn` 里的
+    「检索没召回到」被系统性多算（实测 6 条 fn 里 3 条 gold 只在 rank 6/9/9）。
+    本用例钉住"两个调用点的 top_n 一致"，实现再改回 5 立刻变红。
+    """
+    import services.judge_service as js
+    import utils.rag.retrieve as rt
+
+    seen = []
+
+    def fake_retrieve(query, code=None, top_n=5, db_path=None, query_vec=None):
+        seen.append(top_n)
+        return json.dumps({"scope": {"mode": "full", "codes": []},
+                           "evidence_level": "weak",
+                           "results": [{"rank": 1, "chunk_id": 1, "code": "600519",
+                                        "title": "t", "text": "x"}]})
+
+    def fake_rounds(reqs, **kw):
+        return [{"query": r.get("query"), "level": "uncertain", "items": [],
+                 "checked": False, "reason": "stub"} for r in reqs]
+
+    monkeypatch.setattr(rt, "retrieve_docs", fake_retrieve)
+    monkeypatch.setattr(js, "judge_rounds", fake_rounds)
+    rows_rel = [{"id": "rel-1", "query": "q1", "answer_chunk_ids": [1]}]
+    rows_irr = [{"id": "irr-1", "kind": "out_of_domain", "query": "q2"}]
+    ev.judge_metrics(rows_rel, rows_irr, [[0.0], [0.0]])
+
+    assert seen == [max(ev.TOP_K, 10)] * 2, \
+        "判官候选窗 %r != 评测臂口径 max(k,10)=%d" % (seen, max(ev.TOP_K, 10))

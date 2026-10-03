@@ -1,0 +1,47 @@
+[eval] holdout —— ⚠️ **已用于阈值选择（拟合集）**，其上的阈值结论不得作为泛化依据
+[eval] chunks=1691 阈值：none 档 sar<0.075 v1<0.45（**strong 档已撤下**：非 none 一律 weak）
+[eval] n_rel=27 n_irr=113
+  A3a 域外主动弃权  = 44/51 = 0.863   <<< 主结论
+  delegated_rate    = 0.549   (**非 none 占比** —— 判据未通过、但结果仍返回给模型；
+                                判官从未实现 ⇒ 这是**风险面**不是成本（2026-09-18 撤档后语义已变）)
+  abstain_recall    = 0.451   (= 1 − delegated_rate；README 早已定义、**本轮才实现** ——
+                                ⚠️ **请按 kind 读**：out_of_domain 应为 1.0，另两类字面判据做不到)
+  over_abstain_rate = 0.037   (1/27 判 none —— **闸门标注保守度**，不是召回损失：
+                                none 档不再无条件清空结果；零 bigram 交集仍硬停)
+  --- 检索侧 ---
+  Recall@5          = 0.593   (judge=None **裸检索**能力 —— 旧版在 none 档 `continue`，分子被少算)
+  tool_recall       = 0.593   (judge 生效 + 分层硬停 —— 但它**仍只走 `run_hybrid`**，
+                                 **不经 `retrieve_docs`/`query_scope`** ⇒ 不是产线入口；真正的产线入口见下方 [prod])
+  硬停触发          = 0/27   (零 bigram 交集 → 物理回空；此前在评测里**完全不可见** ——
+                                覆盖率从 5/20 掉到 0 也不会有别的指标变红)
+  trusted_recall    = 0.593   (gold 在 top-k **且** 判据采信 —— 判据退化时它会变红；
+                                ⚠️ **派生量**：在**当前评测集上**数值恰好等于 `Recall@k − over_abstain`
+                                  —— 这是**经验巧合，不是构造性恒等**：被判 none 的正例若其 gold 不在 top-k 内，两者立刻背离（第八轮外部审计实跑反例证实）
+                                  —— 判据退化时它会变红（对照用例：tests/test_rag_eval.py::test_trusted_recall_turns_red_when_judge_degrades）
+  MRR@10            = 0.386
+  --- 检索口径对照（两种口径**并列**，不得用新口径替换旧口径）---
+  [full] 全库口径（`run_hybrid` 直调，**不经** `retrieve_docs`/`query_scope`） = 系统**无法识别标的**时的能力
+         Recall@5 = 0.593  MRR@10 = 0.386  混入其它标的 = 23/27  n=27
+  [prod] 产线形态（`retrieve_docs` **经** `query_scope`；带标的查询形态[模拟 LLM 改写]） = 用户**实际问某个标的**时的能力  <<< 代表产线
+         Recall@5 = 0.926  MRR@10 = 0.781  混入其它标的 = 0/27  n=27
+  [prod] 改写只动 **query 文本**（语料 65 docs/1691 chunks、样本 27+113、金标块、阈值**全未动**）；`full` 口径**原样保留**，两个数字各自独立
+  [!] A3a = 44/51 = 0.863 —— **不走检索**（判据恒在**全库**上判定）⇒ **不受本次新增口径影响**
+  --- 按 kind 分列（混池会互相抵消，必须分列看）---
+   in_domain_unanswerable     n=31  none=5   weak=26 
+   near_miss                  n=31  none=2   weak=29 
+   out_of_domain              n=51  none=44  weak=7  
+[judge] LLM 判官（B1）—— 口径：**仅 weak 档触发**；none 档已弃权、判官零调用（分母不含它们）
+  judge_trigger_rate = 0.629   (88/140 条查询落 weak 档且有结果 —— 判官的入口面)
+  judge_fp           = 0.113   (7/62 **weak 档负例**被判官放行 —— 分母是 weak 负例，不是全部负例)
+  judge_fp_all_irr   = 0.062   (以**全部负例**为分母；none 档不触发 ⇒ 按未放行计)
+  judge_kill_rate    = 0.115   (3 条 weak 档正例被判 irrelevant —— 相关查询误杀)
+  judge_fn           = 0.154   (4/26 weak 档正例**未被确认相关** —— A3b 判据之一；含 uncertain)
+      └ 归因：其中 gold **确实在 top-k 内**的只有 0 条（= 0.000）—— 其余是检索没召回到，不是判官误杀
+  span_valid         = 0.953   (判官**提出**的 relevant 里引文逐字通过的占比；2 条被拒 / 共 43 条 —— A3b 判据之一)
+  未判出（超时/解析失败）= 0 条；延迟 p50 = 880ms  p90 = 1150ms（n=88，仅计已判出）
+   in_domain_unanswerable     判官放行 4/26
+   near_miss                  判官放行 3/29
+   out_of_domain              判官放行 0/7
+  !! 验收线**不能定 0**：难例（in_domain_unanswerable + near_miss）首跑实测 ≈0.29（n=14，probe-judge-batch.json），且有 4 条的引文**全部通过逐字校验**
+     —— 引文校验挡不住「断章取义」；判官是增益，不是保证（样本量小，勿过度推断）
+[eval] RESULT: OK

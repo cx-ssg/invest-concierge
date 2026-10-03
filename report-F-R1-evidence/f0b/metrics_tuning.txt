@@ -1,0 +1,6 @@
+candidate                              A3a           oa        Recall@5  MRR@10    by_kind(none/n)
+a 现状 ρ=0.05 S=0.06 V=0.35              21/30=0.700  0/13=0.000  0.769     0.524     {'in_domain_unanswerable': '0/30', 'near_miss': '0/25', 'out_of_domain': '21/30'}
+b 撤v1 S=0.072（oa=0 最优点）                26/30=0.867  0/13=0.000  0.769     0.524     {'in_domain_unanswerable': '0/30', 'near_miss': '0/25', 'out_of_domain': '26/30'}
+b 撤v1 S=0.075（A3a 顶到 0.900 但 oa=1）     27/30=0.900  1/13=0.077  0.769     0.524     {'in_domain_unanswerable': '2/30', 'near_miss': '1/25', 'out_of_domain': '27/30'}
+c ρ=0.02 S=0.075 V=0.45（选定）            27/30=0.900  0/13=0.000  0.769     0.524     {'in_domain_unanswerable': '0/30', 'near_miss': '0/25', 'out_of_domain': '27/30'}
+[write] .f0b/metrics_tuning.json
