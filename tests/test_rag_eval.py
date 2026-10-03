@@ -732,3 +732,49 @@ def test_judge_metrics_candidate_window_matches_prod_arm(monkeypatch):
 
     assert seen == [max(ev.TOP_K, 10)] * 2, \
         "判官候选窗 %r != 评测臂口径 max(k,10)=%d" % (seen, max(ev.TOP_K, 10))
+
+
+def test_judge_fn_attribution_uses_the_window_judge_actually_saw(monkeypatch):
+    """H2（2026-10-03）：`judge_fn` 的归因必须用**判官实际收到的**候选窗。
+
+    为什么（H2 定因）：`retrieve_docs(top_n=10)` 返回 10 条，但
+    `judge_service.collect_from_tool_trace()` 会把候选截到 `JUDGE_MAX_CANDIDATES = 5`
+    （与产线 `retrieve_docs` 默认 `top_n=5` 对齐）⇒ 判官**从未见过** rank 6~10 的块。
+    旧实现却用检索返回的 10 条当"判官看到了"：holdout 上 `rel-0016`/`rel-0029`/`rel-0044`
+    （gold rank 6/8/9）被系统性算成"判官误判"，而判官连 gold 的文本都没拿到。
+
+    本用例把一个 gold 排第 6（在检索结果内、**不在判官窗内**）的正例和一个 gold 排第 1
+    （在判官窗内）的正例放在一起，钉住两个口径**并列**：
+      · `judge_fn_gold_recalled`（判官窗归因）= 1/2 —— 只有 gold#1 够得上"判官责任"；
+      · `judge_fn_gold_retrieved`（检索窗诊断）= 2/2 —— 两条检索都召回到了。
+    把 `_gold_in_candidates()` 改回 `got_ids` ⇒ `judge_fn_gold_recalled_n` 变 2，**立刻红**
+    （H2 红证：`.h2-scratch/red_attribution.txt`）。
+    """
+    import services.judge_service as js
+    import utils.rag.retrieve as rt
+
+    def fake_retrieve(query, code=None, top_n=5, db_path=None, query_vec=None):
+        return json.dumps({"scope": {"mode": "full", "codes": []},
+                           "evidence_level": "weak",
+                           "results": [{"rank": i, "chunk_id": i, "code": "600519",
+                                        "title": "t", "text": "正文-%d 足够长的候选文本" % i}
+                                       for i in range(1, 11)]}, ensure_ascii=False)
+
+    def fake_rounds(reqs, **kw):
+        # 判官看不到 gold#6 ⇒ 只能给 uncertain；gold#1 那条同样判 uncertain（模拟误判）
+        return [{"query": r.get("query"), "level": "uncertain", "items": [],
+                 "checked": True, "reason": ""} for r in reqs]
+
+    monkeypatch.setattr(rt, "retrieve_docs", fake_retrieve)
+    monkeypatch.setattr(js, "judge_rounds", fake_rounds)
+
+    rows_rel = [{"id": "rel-gold6", "query": "q1", "answer_chunk_ids": [6]},
+                {"id": "rel-gold1", "query": "q2", "answer_chunk_ids": [1]}]
+    m = ev.judge_metrics(rows_rel, [], [[0.0], [0.0]])
+
+    assert m["judge_fn_n"] == 2 and m["n_weak_rel"] == 2
+    assert m["judge_fn_gold_recalled_n"] == 1, \
+        "归因窗被当成了 `retrieve_docs` 的返回长度（判官压根没看到 gold#6）"
+    assert m["judge_fn_gold_recalled"] == 0.5
+    assert m["judge_fn_gold_retrieved_n"] == 2, \
+        "检索窗诊断（gold 是否被召回）必须仍然报满，两个口径不得互相替代"

@@ -397,7 +397,28 @@ def _pct(values, p):
 
 
 def _gold_in_candidates(o):
-    """该行的 gold 块是否在本轮 top-k 里（`judge_fn` 的归因分母）。缺标注 ⇒ 视为不可归因。"""
+    """该行的 gold 块是否在**判官实际收到的候选窗**里（`judge_fn` 的归因分母）。
+
+    ⚠️ 2026-10-03 **H2 口径订正**：旧实现用 `o["got_ids"]`（= `retrieve_docs` 返回的
+    **全部**结果，`top_n=max(k,10)`）。但判官**拿不到全部** —— `judge_service.
+    collect_from_tool_trace()` 会把候选截到 `JUDGE_MAX_CANDIDATES = 5`（与产线
+    `retrieve_docs` 默认 `top_n=5` 对齐）。于是「归因」用的是**判官从未见过的窗口**：
+    gold 排第 6~10 的行会被算成"判官看到了却没确认"，而判官连它的文本都没有。
+    H2 实测（holdout，`gold_rank_top10` 为 6/8/9 的三条 `rel-0016/0029/0044`）
+    ⇒ 这三条的真实归因是**窗口/检索**，不是判官误判。
+
+    ⇒ 现在只用**判官实际收到的那几条**判断"gold 是否进了判官的窗"；
+      「gold 是否被检索召回」另由 `_gold_in_retrieval` 报出（两个数字并列，不得互相替代）。
+    缺标注 ⇒ 视为不可归因。
+    """
+    gold = o["row"].get("answer_chunk_ids") or []
+    if not gold:
+        return False
+    return bool({str(g) for g in gold} & (o.get("fed_ids") or set()))
+
+
+def _gold_in_retrieval(o):
+    """该行的 gold 块是否在**本轮检索结果**里（诊断量：检索侧召回到没有）。"""
     gold = o["row"].get("answer_chunk_ids") or []
     if not gold:
         return False
@@ -422,6 +443,17 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
     ⚠️ 与**产线**的差别（如实标注）：生产侧 `judge_service.JUDGE_MAX_CANDIDATES = 5`
     （判官只看 `retrieve_docs` 返回后截断的 5 条）。本参数对齐的是**评测器内部**两条臂的
     候选池，不是改产线判官窗口。
+
+    ## ⚠️⚠️ 2026-10-03 **H2 定因**：F-R5 的窗口对齐**只做了一半**
+
+    上面 `top_n=max(k,10)` 对齐的是**检索候选池**；但 `collect_from_tool_trace()` 会把
+    **判官实际收到的**候选截到 `JUDGE_MAX_CANDIDATES = 5`。⇒ 判官**从未见过** rank 6~10 的块，
+    而 `_gold_in_candidates()` 旧实现却拿 `top_n=10` 的结果当"判官看到了"：
+    holdout 上 `rel-0016`/`rel-0029`/`rel-0044`（gold rank 6/8/9）被系统性算成"判官误判"。
+    H2 实测（`.h2-scratch/probe_holdout_rel.jsonl` / `repeat_focus.log`）：
+    **判官 8/8 次在这些行上说 irrelevant/uncertain，而 gold 一次都没喂给它**。
+    ⇒ 归因已订正为**判官实际收到的窗**（`judge_fn_gold_recalled`），并另报
+    `judge_fn_gold_retrieved`（检索窗）——两个数字并列，谁的责任一目了然。
 
     ## 口径（每个数字都必须带状态口径报出）
 
@@ -466,7 +498,11 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
             except Exception:  # noqa: BLE001 - 记不到就退化为"不可归因"
                 got_ids = set()
             observed.append({"tag": tag, "row": r, "req": reqs[0] if reqs else None,
-                             "got_ids": got_ids})
+                             "got_ids": got_ids,
+                             # H2：判官**实际收到**的候选（`collect_from_tool_trace`
+                             # 会截到 `JUDGE_MAX_CANDIDATES=5`）—— 归因必须用这个窗口
+                             "fed_ids": {str(c.get("chunk_id"))
+                                         for c in (reqs[0]["candidates"] if reqs else [])}})
 
     triggered = [o for o in observed if o["req"]]
     if max_judge > 0:
@@ -492,7 +528,11 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
     #     提出 = `verdict == relevant`（通过）**或** `quote_rejected == True`（被拒后已降级）；
     #     主体边界闸门降级的那批**不置** `quote_rejected` ⇒ 不计入跨度分母（它们不是跨度问题）。
     fn = [o for o in weak_rel if (o["event"] or {}).get("level") != "relevant"]
+    # H2（2026-10-03）：两个归因口径**并列**报出 —— 不得只用其中一个解释 `judge_fn`：
+    #   · `judge_fn_gold_recalled`  = gold 在**判官实际收到的窗**内（判官责任的**上界**）；
+    #   · `judge_fn_gold_retrieved` = gold 在**本轮检索结果**内（判官看都没看到，归因检索/窗口）。
     fn_gold = [o for o in fn if _gold_in_candidates(o)]
+    fn_retr = [o for o in fn if _gold_in_retrieval(o)]
     span_ok = span_bad = 0
     for o in triggered:
         for it in ((o["event"] or {}).get("items") or []):
@@ -524,6 +564,8 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
         "judge_fn_n": len(fn),
         "judge_fn_gold_recalled_n": len(fn_gold),
         "judge_fn_gold_recalled": len(fn_gold) / n_weak_rel,
+        "judge_fn_gold_retrieved_n": len(fn_retr),
+        "judge_fn_gold_retrieved": len(fn_retr) / n_weak_rel,
         "span_valid": (span_ok / (span_ok + span_bad)) if (span_ok + span_bad) else 1.0,
         "span_proposed": span_ok + span_bad,
         "span_rejected": span_bad,
@@ -771,12 +813,15 @@ def main(argv=None):
         # F1：A3b 判据的另外两个量（此前本工具未实现 ⇒ 判据只被报出 1/3）
         print("  judge_fn           = %.3f   (%d/%d weak 档正例**未被确认相关** —— A3b 判据之一；"
               "含 uncertain)" % (jm["judge_fn"], jm["judge_fn_n"], jm["n_weak_rel"]))
-        print("      └ 归因：其中 gold **确实在候选窗（top-%d）内**的只有 %d 条（= %.3f）——"
-              " 其余是检索没召回到，不是判官误杀"
-              % (max(TOP_K, 10), jm["judge_fn_gold_recalled_n"], jm["judge_fn_gold_recalled"]))
-        print("        （F-R1：候选窗已与 `evaluate_prod` 对齐为 top-%d；"
-              "「修检索」只留给 rank>100 那类，rank 6~9 属窗口不一致、rank=1 属判官真漏判）"
-              % (max(TOP_K, 10),))
+        print("      └ 归因（H2 双口径，**必须并列读**）：")
+        print("         · gold 在**判官实际收到的候选窗**内 = %d 条（= %.3f）⇒ 判官责任的上界"
+              % (jm["judge_fn_gold_recalled_n"], jm["judge_fn_gold_recalled"]))
+        print("         · gold 在**本轮检索结果**内 = %d 条（= %.3f）⇒ 其中差额是**判官压根没看到**"
+              "（判官输入窗 = `judge_service.JUDGE_MAX_CANDIDATES`，产线为 5）"
+              % (jm["judge_fn_gold_retrieved_n"], jm["judge_fn_gold_retrieved"]))
+        print("         · 其余 = gold 连检索都没召回到（检索侧）")
+        print("        （F-R1 对齐的是**检索候选池** top-%d；H2 实测判官仍只收到前 5 条 ⇒"
+              " 归因不得用 top-%d 当判官的窗）" % (max(TOP_K, 10), max(TOP_K, 10)))
         print("  span_valid         = %.3f   (判官**提出**的 relevant 里引文逐字通过的占比；"
               "%d 条被拒 / 共 %d 条 —— A3b 判据之一)"
               % (jm["span_valid"], jm["span_rejected"], jm["span_proposed"]))
