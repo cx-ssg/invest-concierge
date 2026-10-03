@@ -43,6 +43,9 @@
 
 - 🔴 高①②两条（fallback NameError / load_funds 丢首笔）：**已修复**（commit c1dd35b）
 - 🟡 中 `cached` 无锁：已加 contains() 但**加锁未做**（MemoryCache threading.Lock 留待 React 重构时一并）
+  - ⚠️ **现状订正（2026-10-04）**：**加锁已完成** —— `data/cache.py` 的 `MemoryCache` 已有
+    `self._lock = threading.RLock()`，且 `get` / `set` / `contains` 等**全部走 `with self._lock`**
+    （L50 / 54 / 66 / 74 / 82 / 87 / 95，`git grep` 实查）⇒ 本条「加锁未做」**已过时**。
 - 🟡 moneyflow 重复请求 / _get_fund_list 永久缓存：**未修**（非紧急，随重构）
 - 🟡 性能类（build_system_prompt 串行 / 深诊链重复拉 / fetch_with_timeout 线程池）：**未修**（重构优化项，进 v1.2 清单）
 - 🟢 React 对接（st 泄漏）：**设计已清**（见 BACKEND_REVIEW_BRIEF.md §3.5），执行随前端重写
