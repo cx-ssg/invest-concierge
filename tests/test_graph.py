@@ -532,26 +532,38 @@ def test_graph_path_keeps_response_contract(monkeypatch):
     assert out["_orchestrator"]["report_chars"] == 2
 
 
+def _stub_graph_sources(monkeypatch):
+    """把真图的外部数据源桩在 **`adapters`** 上（节点经 `adapters.X` 晚绑定）。
+
+    ⚠️ C-R1（审计 C-F3）：旧版这个测试把桩打在 `graph` 模块
+    （`monkeypatch.setattr(gmod, "_retrieve_evidence", ...)`），而 `_node_retrieve`
+    实际调用的是 `adapters._retrieve_evidence`（`nodes.py:148`）⇒ 打桩**完全无效**，
+    真检索照跑：`retrieve_docs(无 db_path)` → `store.get_conn(None)` →
+    默认 `config._DATA_DIR/kb.db` —— 即**读生产语料**，且在无库的机器上会**新建空库**。
+    `graph.py` 顶部的 re-export 只是向后兼容，不是打桩落点（见其文件头注释）。
+    """
+    monkeypatch.setattr(ad, "_fetch_quote", lambda code: {"code": code})
+    monkeypatch.setattr(ad, "_fetch_financials", lambda code: {})
+    monkeypatch.setattr(ad, "_fetch_moneyflow", lambda code: {})
+    monkeypatch.setattr(ad, "_run_engines", lambda state: {})
+    monkeypatch.setattr(ad, "_retrieve_evidence",
+                        lambda code: {"items": [], "level": "", "note": ""})
+    monkeypatch.setattr(ad, "_synthesize_report", lambda state: "报告")
+
+
 def test_graph_response_keys_match_legacy_on_reachable_branch(monkeypatch):
     """**不打桩 `run_diagnosis_graph`** 的契约测试：走真图（只桩化数据源）时，
     graph 响应键集必须与 legacy 逐字一致。
 
     ⚠️ 2026-10-02 hermes 审计 A7：原契约测试把 `run_diagnosis_graph` 整个打桩
     ⇒ 只测了映射代码、不测**真实可达分支**（fallback 只返回 5 个键，前端 13 个字段全缺）。
+    ⚠️ 2026-10-03 C-R1 审计 C-F3：桩必须打在 `adapters`（见 `_stub_graph_sources`）。
     """
     monkeypatch.setenv("ORCHESTRATOR", "graph")
     from services import diagnosis_service as svc
     from data.diagnosis import empty_diagnosis_payload
-    import utils.orchestrator.graph as gmod
 
-    # 只桩化**数据源**，图本身真跑
-    monkeypatch.setattr(gmod, "_fetch_quote", lambda code: {"code": code})
-    monkeypatch.setattr(gmod, "_fetch_financials", lambda code: {})
-    monkeypatch.setattr(gmod, "_fetch_moneyflow", lambda code: {})
-    monkeypatch.setattr(gmod, "_run_engines", lambda state: {})
-    monkeypatch.setattr(gmod, "_retrieve_evidence",
-                        lambda code: {"items": [], "level": "", "note": ""})
-    monkeypatch.setattr(gmod, "_synthesize_report", lambda state: "报告")
+    _stub_graph_sources(monkeypatch)
 
     out = svc.get("600519")
     expected = set(empty_diagnosis_payload("600519").keys()) | {"ok", "_orchestrator"}
@@ -559,6 +571,53 @@ def test_graph_response_keys_match_legacy_on_reachable_branch(monkeypatch):
     assert not missing, f"graph 响应缺失键（前端契约会断）：{sorted(missing)}"
     assert out["ok"] is True
     assert out["_orchestrator"]["branch"] == "fallback", out["_orchestrator"]
+
+
+def _kb_fingerprint(path):
+    """生产 kb.db 的指纹；文件不存在返回 None（区分「没被创建」与「被改了」）。"""
+    if not os.path.exists(path):
+        return None
+    import hashlib
+    with open(path, "rb") as fh:
+        digest = hashlib.sha1(fh.read()).hexdigest()
+    st = os.stat(path)
+    return (st.st_size, st.st_mtime_ns, digest)
+
+
+def test_graph_offline_case_does_not_open_production_kb(monkeypatch):
+    """C-R1（C-F3）隔离断言：离线用例不得在生产路径**创建/读取/修改** kb.db。
+
+    判据有两层（任一层破都算失败）：
+    ① `utils.rag.store.get_conn` 被调用过 —— 只要调用，无论 path 是否显式，
+       都说明离线桩没盖住检索层（历史 bug 就是漏打了 `adapters`）；
+       spy 直接拒绝打开，保证本用例自身**不会**去碰生产库。
+    ② 生产 kb.db 的 (size, mtime_ns, sha1) 指纹前后不变（不存在则必须仍不存在）
+       —— 覆盖「无库机器上留下 4096 B 空库」这一形态。
+    """
+    from utils.rag import store as rag_store
+
+    prod_path = rag_store.db_path(None)          # 生产默认路径 = config._DATA_DIR/kb.db
+    before = _kb_fingerprint(prod_path)
+
+    opened = []
+
+    def _refuse(path=None):
+        opened.append(path)
+        raise RuntimeError("测试隔离：离线用例试图打开 RAG 库 %r" % (path or prod_path,))
+
+    monkeypatch.setattr(rag_store, "get_conn", _refuse)
+
+    monkeypatch.setenv("ORCHESTRATOR", "graph")
+    from services import diagnosis_service as svc
+
+    _stub_graph_sources(monkeypatch)
+    out = svc.get("600519")
+
+    assert out["ok"] is True
+    assert opened == [], (
+        "离线用例打开了 RAG 库（path=%r）—— 桩没打在 adapters 上，会读生产语料" % (opened,))
+    assert _kb_fingerprint(prod_path) == before, (
+        "离线用例改动了生产 kb.db：%s" % prod_path)
 
 
 def test_empty_payload_is_single_source_of_truth(monkeypatch):

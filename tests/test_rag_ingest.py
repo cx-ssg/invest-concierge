@@ -325,3 +325,122 @@ def test_main_art_code_not_found_is_no_data(monkeypatch, tmp_path, capsys):
     rc = ri.main(["--art-code", "NOPE", "--db", str(tmp_path / "kb.db"), "--no-embed"])
     assert rc == 2
     assert "NO_DATA" in capsys.readouterr().out
+
+
+# ==================== C-R1（审计 C-F6/C-F8）：翻页终止边界加固 ====================
+# 2026-10-03 两路审计指出两处边界（本次 20 篇未触发，但都是「静默截断」族）：
+#   ① 「整页重复」一律停 ⇒ 合法文档相邻两页同文时，第 3 页起**从未被请求**（静默丢页）；
+#   ② max_pages=60 硬截断时，DB 与逐篇日志都**没有截断标记**（库里像完整文档）。
+# 修法：区分「文档内重复」（继续翻到 reported）与「越界/末尾重复」（安全停）；
+#       新增 truncated/fetched_pages/duplicate_pages 随 --body-log 长存并逐篇外显。
+
+def test_fetch_notice_body_internal_duplicate_page_continues_to_reported(monkeypatch):
+    """★C-F6①：上游自称 3 页、第 2 页与第 1 页同文 ⇒ **第 3 页必须被请求**（不再静默丢页）。"""
+    calls = []
+    monkeypatch.setattr(ri, "_http_get",
+                        _pager({1: "A页", 2: "A页", 3: "C页"}, page_size=3, calls=calls))
+    stats = []
+    body = ri.fetch_notice_body("AN1", stats_sink=stats)
+    assert calls == [1, 2, 3], "文档内重复不得提前停止，实际 %s" % calls
+    assert body == "A页\nC页", "重复页不重复拼进正文（与上一页逐字相同，信息零损失）"
+    assert stats[0]["pages"] == 2 and stats[0]["fetched_pages"] == 3
+    assert stats[0]["duplicate_pages"] == 1
+    assert "page_size=3" in stats[0]["stop_reason"]
+    assert stats[0]["truncated"] is False, "取到 reported 页数 ⇒ 未截断"
+
+
+def test_fetch_notice_body_out_of_range_duplicate_still_safely_stops(monkeypatch):
+    """★C-F6①：未声明总页数时的「相邻重复」仍是**末尾哨兵** ⇒ 安全停（原语义不变）。"""
+    calls = []
+    monkeypatch.setattr(ri, "_http_get",
+                        _pager({1: "A页", 2: "B页", 3: "B页", 4: "C页"}, calls=calls))
+    stats = []
+    body = ri.fetch_notice_body("AN1", stats_sink=stats)
+    assert body == "A页\nB页"
+    assert calls == [1, 2, 3], "越界/末尾重复后不得继续翻"
+    assert "整页重复（越界/末尾）" in stats[0]["stop_reason"], stats[0]["stop_reason"]
+    assert stats[0]["truncated"] is False
+
+
+def test_fetch_notice_body_truncated_flag_on_max_pages(monkeypatch):
+    """★C-F6②：`max_pages` 硬截断必须**可观测**（truncated=True），不再「库里像完整文档」。"""
+    monkeypatch.setattr(ri, "_http_get",
+                        _pager({i: "第%d页" % i for i in range(1, 6)}, page_size=99))
+    stats = []
+    body = ri.fetch_notice_body("AN1", stats_sink=stats, max_pages=2)
+    assert body == "第1页\n第2页"
+    assert "安全上限" in stats[0]["stop_reason"]
+    assert stats[0]["truncated"] is True
+
+
+def test_fetch_notice_body_truncated_false_when_reported_reached(monkeypatch):
+    """反例锁：正常取到 reported 页数时 **不得**误标 truncated（否则告警泛滥=无告警）。"""
+    monkeypatch.setattr(ri, "_http_get", _pager({1: "第1页", 2: "第2页"}, page_size=2))
+    stats = []
+    ri.fetch_notice_body("AN1", stats_sink=stats)
+    assert stats[0]["truncated"] is False
+    assert stats[0]["fetched_pages"] == 2 and stats[0]["duplicate_pages"] == 0
+
+
+def test_fetch_notice_body_truncated_true_on_midway_failure(monkeypatch):
+    """中途请求失败 ⇒ 降级保留已取页，且**必须**标 truncated（正文不完整）。"""
+    monkeypatch.setattr(ri, "_http_get",
+                        _pager({1: "第一页正文"}, page_size=44, fail_on=2))
+    stats = []
+    body = ri.fetch_notice_body("AN1", stats_sink=stats)
+    assert body == "第一页正文"
+    assert stats[0]["truncated"] is True
+    assert "降级保留" in stats[0]["stop_reason"]
+
+
+def test_fetch_notice_body_total_timeout_degrades_keeping_pages(monkeypatch):
+    """★C-F8：单篇全局时限（total_timeout_s）生效 ⇒ 降级保留已取页 + 可观测（不再最坏 90 分钟）。"""
+    clock = {"t": 0.0}
+    monkeypatch.setattr(ri.time, "monotonic", lambda: clock["t"])
+
+    def _slow(url, timeout=30):
+        pi = int(re.search(r"page_index=(\d+)", url).group(1))
+        clock["t"] += 3.0                       # 每次请求耗时 3s
+        return json.dumps({"data": {"notice_content": "第%d页" % pi, "page_size": 5}})
+
+    monkeypatch.setattr(ri, "_http_get", _slow)
+    stats = []
+    body = ri.fetch_notice_body("AN1", stats_sink=stats, total_timeout_s=5)
+    assert body == "第1页\n第2页", "总时限用尽前取到的页必须保留"
+    assert "总时限 5s 用尽" in stats[0]["stop_reason"]
+    assert stats[0]["truncated"] is True
+    assert stats[0]["pages"] == 2
+
+
+def test_fetch_notice_body_generous_default_total_timeout_does_not_fire(monkeypatch):
+    """默认总时限必须**给足**：正常多页采集（真实时钟）不得被它打断（20 篇实测最慢 588.9s）。"""
+    assert ri.TOTAL_TIMEOUT_S >= 1800, "默认总时限不得小于 30 分钟"
+    monkeypatch.setattr(ri, "_http_get", _pager({1: "A", 2: "B", 3: "C"}, page_size=3))
+    stats = []
+    ri.fetch_notice_body("AN1", stats_sink=stats)
+    assert stats[0]["truncated"] is False
+    assert "总时限" not in stats[0]["stop_reason"]
+
+
+def test_main_body_log_records_truncated_and_warns(monkeypatch, tmp_path, capsys):
+    """★C-F6②：截断标记必须**随日志长存**（--body-log JSONL）+ 逐篇 stdout 可见。"""
+    rows = [{"code": "600519", "source": "notice", "title": "公告一", "url": "https://a",
+             "published_at": "2026-08-15", "art_code": "A1", "notice_type": "", "name": "贵州茅台"}]
+    monkeypatch.setattr(ri, "fetch_notices", lambda *a, **k: rows)
+
+    def _stub_body(art, error_sink=None, stats_sink=None, **kw):
+        if stats_sink is not None:
+            stats_sink.append({"art_code": art, "pages": 1, "chars": 10,
+                               "stop_reason": "达到安全上限 max_pages=1",
+                               "reported_page_size": 44, "retries": 0, "truncated": True})
+        return "正文" * 20
+
+    monkeypatch.setattr(ri, "fetch_notice_body", _stub_body)
+    log = tmp_path / "body.jsonl"
+    rc = ri.main(["--art-code", "A1", "--db", str(tmp_path / "kb.db"), "--no-embed",
+                  "--limit", "5", "--body-log", str(log)])
+    assert rc == 0
+    rec = json.loads(log.read_text(encoding="utf-8").strip())
+    assert rec["truncated"] is True, "JSONL 必须落 truncated"
+    out = capsys.readouterr().out
+    assert "⚠️ truncated" in out and "被截断" in out, out

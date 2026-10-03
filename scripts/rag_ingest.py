@@ -51,6 +51,11 @@ MAX_PAGES = 60          # 翻页安全上限（实测半年报 44 页；留余�
 PAGE_SLEEP = 0.3        # 页间延时（秒）—— 限速，避免打爆上游
 EMPTY_RETRIES = 2       # 「上游自称这页存在、却回空」时的重试次数（抖动/限流）
 EMPTY_RETRY_BACKOFF = 1.0   # 空页重试退避基数（秒；第 n 次重试等 n×基数）
+# C-R1（审计 C-F8）：**单篇全局时限**。没有它时最坏 = max_pages ×(1+2 重试)× timeout 30s
+# = 5400s（90 分钟），函数内无上界。默认给足（30 分钟）：实测最慢篇（44 页半年报，
+# 走系统代理）588.9s，1800s 有 ~3× 余量；把最坏情况从 90 分钟压到 30 分钟。
+# 0/负数 = 不设全局时限（保留旧行为，供驱动层自带 900s 兜底的场景使用）。
+TOTAL_TIMEOUT_S = 1800
 
 
 def _http_get(url, timeout=30):
@@ -127,12 +132,21 @@ def _as_int(value):
         return None
 
 
-def _report_pages(sink, art_code, pages, chars, stop_reason, reported_page_size, retries=0):
-    """把「这篇取了几页 / 几个字 / 为什么停」交给调用方（可观测性，V5）。"""
+def _report_pages(sink, art_code, pages, chars, stop_reason, reported_page_size, retries=0,
+                  truncated=False, fetched_pages=None, duplicate_pages=0):
+    """把「这篇取了几页 / 几个字 / 为什么停 / 是否被截断」交给调用方（可观测性，V5）。
+
+    C-R1（审计 C-F6②）：新增 `truncated`（是否**有理由怀疑正文不完整**）与
+    `fetched_pages` / `duplicate_pages`。这三个字段随 `--body-log` JSONL 长存，
+    并在 `main()` 的逐篇输出里以 `⚠️ truncated` 直接可见 —— 硬截断不再「库里像完整文档」。
+    """
     if sink is not None:
         sink.append({"art_code": art_code, "pages": pages, "chars": chars,
                      "stop_reason": stop_reason, "retries": retries,
-                     "reported_page_size": reported_page_size})
+                     "reported_page_size": reported_page_size,
+                     "truncated": bool(truncated),
+                     "fetched_pages": pages if fetched_pages is None else fetched_pages,
+                     "duplicate_pages": duplicate_pages})
 
 
 def _fetch_page(art_code, page_index, timeout=30):
@@ -149,7 +163,8 @@ def _fetch_page(art_code, page_index, timeout=30):
 def fetch_notice_body(art_code, timeout=30, error_sink=None, stats_sink=None,
                       max_pages=MAX_PAGES, page_sleep=PAGE_SLEEP,
                       empty_retries=EMPTY_RETRIES,
-                      empty_retry_backoff=EMPTY_RETRY_BACKOFF):
+                      empty_retry_backoff=EMPTY_RETRY_BACKOFF,
+                      total_timeout_s=TOTAL_TIMEOUT_S):
     """公告正文 —— **翻页聚合**；任何异常返回 None（调用方回退标题，不中断整轮 ingest）。
 
     2026-10-03 C1 实测：`notice_content` 每次请求**恒定只回 5000 字**（`page_size`
@@ -158,10 +173,11 @@ def fetch_notice_body(art_code, timeout=30, error_sink=None, stats_sink=None,
 
     终止条件（任一命中即停）：
       ① `page_index` 达到返回字段 `page_size`（总页数）
-      ② 本页与上一页**整页重复**
+      ② 本页与上一页**整页重复**（**区分两种情形**，见 C-R1 说明）
       ③ 本页为空（**重试后**仍为空 —— 见下）
       ④ 达到安全上限 `max_pages`
       ⑤ 中途请求失败 ⇒ **降级保留已取页**（硬约束：不因某页失败整篇丢弃）
+      ⑥ 达到全局时限 `total_timeout_s`（C-R1 新增，小于等于 0 = 不设限）
 
     ⚠️ **空页必须先重试**（C1 实跑教训）：上游会**偶发**返回空 `notice_content`
     （同一页 10 分钟后原样可取而无需改任何参数）。若一见空页就停，整篇会静默截断 ——
@@ -169,8 +185,19 @@ def fetch_notice_body(art_code, timeout=30, error_sink=None, stats_sink=None,
     重试只在**上游自称这一页存在**（`page_size >= page_index`）时发生；否则空响应
     就是真到头，不浪费请求。
 
+    ⚠️ **C-R1（审计 C-F6①）整页重复必须分两种**（原实现一律停 ⇒ 会静默丢页）：
+      · **文档内重复**（`reported` 存在且 `pi <= reported`）：上游自称这页存在，
+        合法文档也可能相邻两页同文（重复长块/版权页/同文附件）⇒ **继续翻到 reported**。
+        重复文本不再拼进正文（与上一页逐字相同 ⇒ 信息零损失），只计入 `duplicate_pages`。
+      · **越界/末尾重复**（`reported` 缺失，或 `pi > reported`）：上游对越界页重发末页
+        （C1 实测 page_index=45 返回与 44 相同），或未声明总页数时把「相邻重复」当末尾哨兵
+        ⇒ **安全停止**（原有语义不变）。
+
     `stats_sink`：可选 list；每次调用 append 一条
-    `{"art_code","pages","chars","stop_reason","retries","reported_page_size"}`。
+    `{"art_code","pages","chars","stop_reason","retries","reported_page_size",
+      "truncated","fetched_pages","duplicate_pages"}`。
+    `truncated=True` 表示**有理由怀疑正文不完整**（空页/请求失败/max_pages/总时限/
+    越界重复时页数不足），随 `--body-log` 落盘、并在逐篇 stdout 上可见。
     """
     if not art_code:
         if error_sink is not None:
@@ -178,8 +205,18 @@ def fetch_notice_body(art_code, timeout=30, error_sink=None, stats_sink=None,
         _report_pages(stats_sink, art_code, 0, 0, "EMPTY_ART_CODE", None)
         return None
 
+    deadline = None
+    if total_timeout_s and total_timeout_s > 0:
+        deadline = time.monotonic() + float(total_timeout_s)
+
     pages, stop_reason, reported, prev, retries, err = [], None, None, None, 0, None
+    fetched, duplicates, truncated = 0, 0, False
     for pi in range(1, max_pages + 1):
+        if deadline is not None and time.monotonic() >= deadline:
+            stop_reason = "总时限 {}s 用尽（**降级保留已取 {} 页**）".format(
+                total_timeout_s, len(pages))
+            truncated = True
+            break
         page, err, attempt = "", None, 0
         while True:
             page, pg_size, err = _fetch_page(art_code, pi, timeout)
@@ -199,27 +236,40 @@ def fetch_notice_body(art_code, timeout=30, error_sink=None, stats_sink=None,
                     pi, " retry%d" % attempt if attempt else "", err))
             stop_reason = ("请求失败 page_index={}（**降级保留已取 {} 页**）".format(pi, len(pages))
                            if pages else "请求失败 page_index={}: {}".format(pi, err))
+            truncated = True
             break
         if not page:
             stop_reason = "空页 page_index={}{}".format(
                 pi, "（重试 {} 次仍为空）".format(attempt) if attempt else "")
+            # 上游声明这页存在却给空 ⇒ 截断；未声明总页数时的空页 = 真到头
+            truncated = bool(reported is not None and pi <= reported)
             break
+        fetched += 1
 
         if prev is not None and page == prev:
-            stop_reason = "整页重复 page_index={}".format(pi)
-            break
-        prev = page
-        pages.append(page)
+            if reported is not None and pi <= reported:
+                # 文档内重复：继续翻（不拼重复文本），否则第 3 页起从未被请求
+                duplicates += 1
+            else:
+                stop_reason = "整页重复（越界/末尾） page_index={}".format(pi)
+                truncated = bool(reported is not None and len(pages) < reported)
+                break
+        else:
+            prev = page
+            pages.append(page)
+
         if reported and pi >= reported:
             stop_reason = "达到返回字段 page_size={}".format(reported)
             break
         if pi >= max_pages:
             stop_reason = "达到安全上限 max_pages={}".format(max_pages)
+            truncated = True
             break
         time.sleep(page_sleep)          # 限速：仅在**还要继续翻页**时休眠
 
     body = "\n".join(pages)
-    _report_pages(stats_sink, art_code, len(pages), len(body), stop_reason, reported, retries)
+    _report_pages(stats_sink, art_code, len(pages), len(body), stop_reason, reported, retries,
+                  truncated=truncated, fetched_pages=fetched, duplicate_pages=duplicates)
     return body or None
 
 
@@ -252,6 +302,8 @@ def main(argv=None):
                     help="只重采这一篇（按 art_code 从列表定位 ⇒ 幂等键/文档 id 不变）")
     ap.add_argument("--max-pages", type=int, default=MAX_PAGES, help="翻页安全上限")
     ap.add_argument("--page-sleep", type=float, default=PAGE_SLEEP, help="页间延时（秒）")
+    ap.add_argument("--total-timeout-s", type=float, default=TOTAL_TIMEOUT_S,
+                    help="单篇全局时限（秒）；<=0 = 不设限（默认 %(default)s）")
     ap.add_argument("--body-log", default=None,
                     help="把每篇的页数/字符数/终止原因追加写 JSONL（V5 事后核对用）")
     args = ap.parse_args(argv)
@@ -290,7 +342,8 @@ def main(argv=None):
         if not args.no_body:
             body = fetch_notice_body(row.get("art_code"), error_sink=body_errors,
                                      stats_sink=page_stats, max_pages=args.max_pages,
-                                     page_sleep=args.page_sleep)
+                                     page_sleep=args.page_sleep,
+                                     total_timeout_s=args.total_timeout_s)
             if page_stats:                       # 标注标题，便于日志/JSONL 阅读
                 page_stats[-1].setdefault("title", row.get("title", ""))
             if body:
@@ -310,9 +363,15 @@ def main(argv=None):
     print("[ingest] 正文命中 {}/{} 条；切块为空 {} 条；落库块 {} 个".format(
         body_ok, len(rows), empty_chunks, len(pending)))
     for st in page_stats:                        # 逐篇可观测：页数 / 字符数 / 终止原因
-        print("[ingest]   正文 {}：{} 页 / {} 字符 / 终止={}{}".format(
+        print("[ingest]   正文 {}：{} 页 / {} 字符 / 终止={}{}{}".format(
             st["art_code"] or "-", st["pages"], st["chars"], st["stop_reason"],
-            "（空页重试 {} 次）".format(st.get("retries") or 0) if st.get("retries") else ""))
+            "（空页重试 {} 次）".format(st.get("retries") or 0) if st.get("retries") else "",
+            " ⚠️ truncated" if st.get("truncated") else ""))
+    n_trunc = sum(1 for st in page_stats if st.get("truncated"))
+    if n_trunc:
+        # C-R1（C-F6②）：硬截断必须自己喊出来 —— 否则「库里的文档看起来是完整的」
+        print("[ingest] ⚠️ 有 {} 篇正文被截断（truncated=True，详见逐篇终止原因 / --body-log）"
+              .format(n_trunc))
     if args.body_log and page_stats:
         with open(args.body_log, "a", encoding="utf-8") as fh:
             for st in page_stats:
