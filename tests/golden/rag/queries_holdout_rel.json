@@ -232,5 +232,83 @@
   "coverage_vs_source": 0.636,
   "note": "由已删的 irr-0211 转来（2026-09-17 独立审计 F6）：chunk 12 明确含「2.4 经销商情况／单位：个／国内 2,307 220 266／国外 119 14 21」→ 该问题**可答**，当初判 strong 是正确行为（判据零误报）。转正例而非删除：避免白丢一条 gold 明确的样本（报告正抱怨正例覆盖面不足）。",
   "id": "rel-0035"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "500ml 飞天茅台在自家 App 上的零售价调整到多少了",
+  "answer_chunk_ids": [
+   24
+  ],
+  "source_doc": "贵州茅台重大事项公告",
+  "coverage_vs_title": 0.056,
+  "coverage_vs_source": 0.333,
+  "batch": "v2",
+  "note": "C2 补造（2026-10-02）：v2 正例（gold 逐字校验通过；answer=1639 元/瓶）。chunk 24 为重大事项公告全文；『零售价由 1539 元/瓶调整为 1639 元/瓶』单块自足。⚠️ 未经人工标注，由模型构造",
+  "id": "rel-0041"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "公司当初计划最多掏多少钱出来回购股票",
+  "answer_chunk_ids": [
+   61
+  ],
+  "source_doc": "贵州茅台关于回购股份实施结果暨股份变动的公告",
+  "coverage_vs_title": 0.118,
+  "coverage_vs_source": 0.235,
+  "batch": "v2",
+  "note": "C2 补造（2026-10-02）：v2 正例（gold 逐字校验通过；answer=人民币 30亿元）。chunk 61『重要内容提示』给出预计回购金额区间 15亿~30亿（chunk 62 只有实际金额）。⚠️ 未经人工标注，由模型构造",
+  "id": "rel-0043"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "这批回购的股票平均每股成交价是多少",
+  "answer_chunk_ids": [
+   62
+  ],
+  "source_doc": "二、回购实施情况",
+  "coverage_vs_title": 0.062,
+  "coverage_vs_source": 0.125,
+  "batch": "v2",
+  "note": "C2 补造（2026-10-02）：v2 正例（gold 逐字校验通过；answer=1,370.70）。chunk 62『二、回购实施情况』给出回购均价 1,370.70 元/股；均价只此一处。⚠️ 未经人工标注，由模型构造",
+  "id": "rel-0044"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "回购期间控股股东有没有增持，增持了多少股",
+  "answer_chunk_ids": [
+   62
+  ],
+  "source_doc": "二、回购实施情况",
+  "coverage_vs_title": 0.062,
+  "coverage_vs_source": 0.438,
+  "batch": "v2",
+  "note": "C2 补造（2026-10-02）：v2 正例（gold 逐字校验通过；answer=1,274,234）。chunk 62『三、回购期间相关主体买卖股票情况』：集团累计增持 1,274,234 股。⚠️ 未经人工标注，由模型构造",
+  "id": "rel-0045"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "这次每股分红的方案调整之前，原本打算派多少",
+  "answer_chunk_ids": [
+   51
+  ],
+  "source_doc": "贵州茅台关于调整2025年年度利润分配方案每股分红金额的公告",
+  "coverage_vs_title": 0.278,
+  "coverage_vs_source": 0.278,
+  "batch": "v2",
+  "note": "C2 补造（2026-10-02）：v2 正例（gold 逐字校验通过；answer=27.993）。chunk 51『重要内容提示』：由 27.993 元调整为 28.02423 元；调整前数值只此一处。⚠️ 未经人工标注，由模型构造",
+  "id": "rel-0047"
+ },
+ {
+  "kind": "in_domain_answerable",
+  "query": "新选出来的职工董事现在还在公司担任什么职务",
+  "answer_chunk_ids": [
+   41
+  ],
+  "source_doc": "贵州茅台关于职工董事选举结果的公告",
+  "coverage_vs_title": 0.15,
+  "coverage_vs_source": 0.2,
+  "batch": "v2",
+  "note": "C2 补造（2026-10-02）：v2 正例（gold 逐字校验通过；answer=群团工作部部长）。chunk 41 附件简历：现任职工董事、工会副主席、群团工作部部长、机关党委副书记。⚠️ 未经人工标注，由模型构造",
+  "id": "rel-0052"
  }
 ]
