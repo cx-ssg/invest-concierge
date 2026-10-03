@@ -41,6 +41,8 @@ from utils.rag import store as rag_store
 from utils.rag.citation_scope import current_scope
 from utils.rag.evidence import LEVEL_NONE, EvidenceJudge
 from utils.rag.hybrid import run_hybrid
+# 2026-10-03 F0a：查询侧标的识别（`code is None` 时收窄检索池）——定因与规则见该模块 docstring。
+from utils.rag.query_scope import detect_targets
 # ⚠️ 2026-09-18 第六轮审计二 P1-1：措辞抽到 `utils/rag/messages.py`（**单一事实源**）。
 # 原委：`NONE_EVIDENCE_NOTE` 改了措辞（「没有」→「未能确认」），但
 # `agent_core.AGENT_SYSTEM_PROMPT` 里**权威更高**的同一句仍命令模型
@@ -58,12 +60,23 @@ from utils.rag.tokenize import tokenize
 def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
     """检索私域语料（公告 / 研报 / 财报），返回 JSON 字符串。
 
-    - `code`：限定标的（None = 全库检索）。**只影响返回哪些块，不影响判据**（判据恒用全库）
+    - `code`：限定标的（None = **查询侧自动识别**——识别到才收窄，识别不到即全库）。
+      **只影响返回哪些块，不影响判据**（判据恒用全库）
     - `query_vec`：可注入查询向量（单测 / 批量场景复用，避免重复调用 embedding）
     - 返回体含 `evidence_level`（**none / weak 两档**）与 `evidence`（sar / v1）
       ⚠️ 2026-09-18：`strong` 档**已撤下**（`LEVEL_STRONG` 已删 —— 它与 `weak` 返回的
       `results` 完全相同、唯一差别是 `message` 一句话，而应消费该差别的 LLM 判官从未实现）。
       本行原写「none / weak / strong」，是撤档的语义残留（第七轮审计二 P3 指出）。
+    - 返回体含 `scope`：`{"mode": explicit|auto|full, "codes": [...]}`
+      —— `code=None` 时**实际生效**的检索范围（F0a：把"悄悄收窄了池"变成可观测字段）。
+
+    ⚠️ **2026-10-03 F0a 交叉标的污染修复（情形 B：LLM 时带时不带 code）**：
+    真实链路实测 5 条带明确标的问题里 LLM **2 条没传 `code`**
+    （`五粮液今年一季度的营业收入是多少` / `山西汾酒最近有哪些公告`），
+    前者 top-5 混入 600519 与 000568（产线真实污染）。
+    现改为：`code is None` 时先跑 `query_scope.detect_targets`，
+    识别到标的 ⇒ 走**与显式 `code` 完全相同**的池过滤；识别不到 ⇒ 保持全库
+    （「白酒行业上市公司有哪些」必须仍能跨标的返回）。**不开阈值、不动 top-k**。
     """
     conn = rag_store.get_conn(db_path)
     try:
@@ -72,18 +85,23 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
         conn.close()
 
     if not meta_all or matrix is None:
-        return _payload(query, code, [], NO_HIT_MESSAGE, LEVEL_NONE)
+        return _payload(query, code, [], NO_HIT_MESSAGE, LEVEL_NONE,
+                        scope=_scope_info(code, []))
 
     # ① 判据：**全库**构建 —— 不受 code 过滤影响（旧实现 bug 的修复点）
     judge = EvidenceJudge([tokenize(m.get("text") or "") for m in meta_all])
 
-    # ② 检索池：按 code 过滤，决定「从哪些块里挑」
+    # ② 检索池：按 `code`（或查询识别到的标的）过滤，决定「从哪些块里挑」
+    targets = detect_targets(query, meta_all) if code is None else []
+    scope_codes = [code] if code else targets
     pool_meta, pool_matrix = meta_all, matrix
     bm25_index = judge.index          # 池 == 全库时可复用，省一次 O(N·L) 构建
-    if code:
-        keep = [i for i, m in enumerate(meta_all) if m.get("code") == code]
+    if scope_codes:
+        wanted = set(scope_codes)
+        keep = [i for i, m in enumerate(meta_all) if m.get("code") in wanted]
         if not keep:
-            return _payload(query, code, [], NO_HIT_MESSAGE, LEVEL_NONE)
+            return _payload(query, code, [], NO_HIT_MESSAGE, LEVEL_NONE,
+                            scope=_scope_info(code, targets))
         pool_meta = [meta_all[i] for i in keep]
         pool_matrix = matrix[keep]
         # 池 ≠ 全库 → 排序用的 BM25 必须在**池内**重建，否则分数与 meta 索引错位
@@ -152,10 +170,25 @@ def retrieve_docs(query, code=None, top_n=5, db_path=None, query_vec=None):
             message = WEAK_EVIDENCE_NOTE + "\n" + CITATION_NOTE
         else:
             message = WEAK_EVIDENCE_NOTE + "\n" + citation_note(_base, _numbers)
-    return _payload(query, code, results, message, ev_level, evidence)
+    return _payload(query, code, results, message, ev_level, evidence,
+                    scope=_scope_info(code, targets))
 
 
-def _payload(query, code, results, message, evidence_level=None, evidence=None):
+def _scope_info(code, targets):
+    """`scope` 字段：本次**实际生效**的检索范围（F0a）。
+
+    - `explicit`：调用方传了 `code`（产线里 = LLM 自己填的）
+    - `auto`：`code=None` 但查询点名的标的被识别出来 ⇒ 池已收窄（F0a 新增）
+    - `full`：未识别到标的 ⇒ 全库检索（跨标的查询必须保持这个形态）
+    """
+    if code:
+        return {"mode": "explicit", "codes": [code]}
+    if targets:
+        return {"mode": "auto", "codes": list(targets)}
+    return {"mode": "full", "codes": []}
+
+
+def _payload(query, code, results, message, evidence_level=None, evidence=None, scope=None):
     # ⚠️ 2026-09-18 第六轮审计一 P2：**两个安全字段必须排在 `results` 之前**。
     # `agent_core._truncate`（`max_len=8000`）对超长返回值是**从尾部**截断的，
     # 而 `results` 是体积最大的字段：一旦超限，`message`（警示语）与 `evidence_level`（档位）
@@ -168,6 +201,7 @@ def _payload(query, code, results, message, evidence_level=None, evidence=None):
     return json.dumps({
         "query": query,
         "code": code,
+        "scope": scope,
         "message": message,
         "evidence_level": evidence_level,
         "evidence": ({"sar": round(evidence.sar, 4), "v1": round(evidence.v1, 3)}

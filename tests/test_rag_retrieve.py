@@ -128,3 +128,95 @@ def test_retrieve_docs_filters_by_code(kb):
     out = json.loads(retrieve_docs("销量", db_path=kb, code="000001",
                                    query_vec=[0.0, 1.0]))
     assert out["results"] == [], "code 不匹配时不得返回别的标的的块"
+
+
+# ==================== F0a：`code=None` 时的查询侧标的识别（情形 B 修复） ====================
+# 定因证据（report-F0a.md 第一步，真实链路 5 条带明确标的问题）：
+#   LLM **2 条没传 `code`**（五粮液/山西汾酒），其中「五粮液今年一季度的营业收入是多少」
+#   的 top-5 = 000858×3 + **600519 + 000568** ⇒ 产线**真实污染**。
+# 因此修检索链路：`code=None` 时先识别查询点名的标的，识别到就走**与显式 code 相同的池过滤**。
+
+
+@pytest.fixture()
+def kb_multi(tmp_path):
+    """**两条标的**的临时 kb（F0a 回归用）：600519 与 000568 各 2 块，均含「分红」「白酒」。
+
+    标题用 `scripts/rag_ingest.py` 的 `公司名:标题` 形态 —— 公司名靠它推导，
+    与真实语料（`贵州茅台:贵州茅台2026年半年度报告`）同构。
+    """
+    db = str(tmp_path / "kb_multi.db")
+    conn = rag_store.get_conn(db)
+    rag_store.ensure_schema(conn)
+    doc_a = rag_store.upsert_document(conn, {
+        "code": "600519", "source": "notice", "title": "贵州茅台:2025年度分红派息实施公告",
+        "url": "https://example.com/maotai-div", "published_at": "2026-06-20",
+    })
+    ids_a = rag_store.insert_chunks(conn, doc_a, [
+        {"seq": 0, "text": "贵州茅台2025年度分红派息实施方案：每10股派发现金红利276.24元。",
+         "is_table": False},
+        {"seq": 1, "text": "贵州茅台白酒业务毛利率保持稳定，直销渠道占比继续提升。",
+         "is_table": False},
+    ])
+    doc_b = rag_store.upsert_document(conn, {
+        "code": "000568", "source": "notice", "title": "泸州老窖:2025年度分红派息实施公告",
+        "url": "https://example.com/lzlj-div", "published_at": "2026-07-01",
+    })
+    ids_b = rag_store.insert_chunks(conn, doc_b, [
+        {"seq": 0, "text": "泸州老窖2025年度分红派息实施方案：每10股派发现金红利13.0元。",
+         "is_table": False},
+        {"seq": 1, "text": "泸州老窖白酒业务毛利率同比提升，中高档酒占比提高。",
+         "is_table": False},
+    ])
+    rag_store.save_embeddings(conn, ids_a + ids_b,
+                              [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0], [0.1, 0.9]])
+    conn.close()
+    return db
+
+
+def test_auto_scope_ticker_named_query_not_contaminated(kb_multi):
+    """**必补回归 ①**：带明确标的的查询（「茅台的分红方案」）top-5 **全为本标的**。
+
+    红（修复前）：`code=None` 走全库池，top-5 里出现 000568 的块
+    —— 与真实链路实测形态一致（`五粮液…营收` → 混入 600519/000568）。
+    绿（修复后）：查询点名的标的被识别 ⇒ 池收窄到 600519。
+    """
+    out = json.loads(retrieve_docs("茅台的分红方案是什么", db_path=kb_multi,
+                                   query_vec=[0.7, 0.3]))
+    assert out["results"], "必须命中本标的的块（不能因为收窄而检索为空）"
+    codes = [r["code"] for r in out["results"]]
+    assert set(codes) == {"600519"}, \
+        "带明确标的的查询不得混入其它标的（实得 codes={}）".format(codes)
+    assert out["scope"] == {"mode": "auto", "codes": ["600519"]}, \
+        "`scope` 必须如实报告本次实际生效的检索范围（可观测，不静默）"
+
+
+def test_auto_scope_untargeted_query_still_searches_full_corpus(kb_multi):
+    """**必补回归 ②**：无标的查询（「白酒行业对比」）仍须**跨标的**返回。
+
+    这是任务书 §2 的硬约束 —— 不得用「硬过滤」把这类查询锁死在一个标的上。
+    """
+    out = json.loads(retrieve_docs("白酒行业对比", db_path=kb_multi,
+                                   query_vec=[0.7, 0.3]))
+    codes = {r["code"] for r in out["results"]}
+    assert len(codes) >= 2, \
+        "无标的查询必须仍能跨标的返回（实得 codes={}）".format(sorted(codes))
+    assert out["scope"] == {"mode": "full", "codes": []}, \
+        "未识别到标的 ⇒ scope 必须报 full（全库口径）"
+
+
+def test_auto_scope_multi_target_query_keeps_both_tickers(kb_multi):
+    """点名**两个**标的时取并集：跨标的对比查询不得被单标的硬过滤掉一家。"""
+    out = json.loads(retrieve_docs("茅台和泸州老窖的分红方案对比", db_path=kb_multi,
+                                   query_vec=[0.7, 0.3]))
+    codes = {r["code"] for r in out["results"]}
+    assert codes == {"600519", "000568"}, \
+        "多标的查询必须同时保留两家（实得 codes={}）".format(sorted(codes))
+
+
+def test_explicit_code_scope_reported(kb_multi):
+    """显式 `code` 的 `scope.mode` 必须是 `explicit`（与自动识别可区分）。"""
+    out = json.loads(retrieve_docs("分红方案", db_path=kb_multi, code="000568",
+                                   query_vec=[0.0, 1.0]))
+    assert out["scope"] == {"mode": "explicit", "codes": ["000568"]}
+    assert {r["code"] for r in out["results"]} == {"000568"}
+
