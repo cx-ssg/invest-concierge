@@ -687,6 +687,10 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         record_message(session_id, "user", str(task))
 
     tool_trace = []
+    # G1-2：本轮运行**全局合并**的检索来源（跨多轮 retrieve_docs，按 chunk_id 去重、
+    # 保留首次出现顺序，与前端 useAgentRun.mergeSources 同口径）。助手消息收口时随
+    # `meta={"sources": [...]}` 落库 ⇒ 历史回放能像新消息一样渲染来源卡。
+    _sources_all = []
     # P0-3-B：token 记账（跨轮累加；上游没给 usage 的轮次只计 calls）
     usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "calls": 0}
     if tools is None:
@@ -708,8 +712,13 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
         if result.get("type") != "tool_call":
             _progress("writing", "组织最终回答")
             content = result.get("content") or ""
+            assistant_message_id = 0
             if memory:
-                record_message(session_id, "assistant", content)
+                # G1-2 写入点②：助手消息带上本轮检索来源（无来源 ⇒ meta 为 None，
+                # 与老行同形，历史回放不显示来源区）。
+                assistant_message_id = record_message(
+                    session_id, "assistant", content,
+                    meta={"sources": _sources_all} if _sources_all else None)
                 _n_rounds = maybe_summarize_session(session_id)
                 # M2 隐式记忆（docs/COVERAGE_DESIGN.md §4.2）：**与"会话摘要"同一触发点**
                 # （每满 SUMMARY_TRIGGER_ROUNDS 轮用户消息）抽取候选 ⇒ 落 pending 等用户确认。
@@ -727,6 +736,9 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
             result.setdefault("tool_trace", tool_trace)
             result["session_id"] = session_id
             result["usage"] = usage_total
+            # G1-2：助手消息 id 交给 SSE 层 —— 判官结论（done 之后才到）要回填到
+            # 同一条消息的 meta 上（`merge_agent_message_meta`）。
+            result["assistant_message_id"] = assistant_message_id
             return result
 
         tool_calls = result.get("content") or []
@@ -789,12 +801,14 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
                 # 2026-10-03 二路审计 F5：`evidence_level` 原先在分支里**无条件**写（`_srcs` 为空
                 # 时也写 `None`）⇒ 与上面这句契约不符。且 `extract_sources` 在**所有**「无来源」
                 # 路径都返回 `([], None)` ⇒ 该键只可能写出 `None`，是纯噪声（键存在与否零信息量）。
-                from utils.rag.sources import extract_sources
+                from utils.rag.sources import extract_sources, merge_sources
 
                 _srcs, _lvl = extract_sources(output)
                 if _srcs:
                     _payload["sources"] = _srcs
                     _payload["evidence_level"] = _lvl
+                    # G1-2 写入点①：累积本轮来源（落库用；事件体不受影响）
+                    _sources_all = merge_sources(_sources_all, _srcs)
             _progress_structured("tool_end", _payload)
             tool_trace.append({"name": name, "arguments": args, "output": output})
             messages.append({
@@ -807,10 +821,15 @@ def agent_run(task, context=None, memory=False, session_id=None, tools=None,
 
     # 轮数超限：封顶提示
     content = "⚠️ 工具调用轮数超限，请把问题拆分后再试。"
+    assistant_message_id = 0
     if memory:
-        record_message(session_id, "assistant", content)
+        # G1-2 写入点②（收口分支）：轮数超限的助手消息同样带上已累积的来源
+        assistant_message_id = record_message(
+            session_id, "assistant", content,
+            meta={"sources": _sources_all} if _sources_all else None)
     return {"type": "text", "content": content, "tool_trace": tool_trace,
-            "session_id": session_id, "usage": usage_total}
+            "session_id": session_id, "usage": usage_total,
+            "assistant_message_id": assistant_message_id}
 
 
 def build_tool_schemas():

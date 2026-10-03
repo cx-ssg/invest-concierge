@@ -76,6 +76,17 @@ export interface SessionSummary {
 export interface SessionMessage {
   role: 'user' | 'assistant'
   content: string
+  /**
+   * G1-2 历史回放：该助手消息落库时携带的检索来源（与 SSE `tool_end.sources` 同构）。
+   * **无来源时该键不出现**（老会话 `meta IS NULL` ⇒ 不显示来源区，也不显示占位）
+   * —— 消费方一律 `?? []` 兜底。
+   */
+  sources?: RetrievalSource[]
+  /**
+   * G1-2 历史回放：该助手消息的判官结论（`chunk_id → 结论`，与 `useAgentRun.phase.judge`
+   * 同构）。**无结论时该键不出现**（`checked=false` / 非 weak 档 / 老会话）。
+   */
+  judge?: Record<number, JudgeItem>
 }
 
 export interface ToolTraceEntry {

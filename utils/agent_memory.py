@@ -119,16 +119,20 @@ def ensure_session(session_id, title=""):
     return create_agent_session(title=title)
 
 
-def record_message(session_id, role, content):
-    """落库一条消息（对外薄封装，页面可复用）。
+def record_message(session_id, role, content, meta=None):
+    """落库一条消息（对外薄封装，页面可复用），返回新消息 id（失败 0）。
 
     P0-5：`role="tool"` 时只存**摘要**（前 TOOL_MESSAGE_LIMIT 字符 + 截断标记），不落全文 ——
     工具返回的完整 JSON（行情 / K 线 / 财报可达数十 KB）对「越用越懂」（记住用户偏好与
     关注点）没有价值，却会让 agent_messages 无界膨胀，并污染 summarize_session 的 transcript。
     user / assistant 消息不受限：对话内容本身才是记忆的原料。
+
+    G1-2：`meta`（可选 dict）落 `agent_messages.meta`（JSON）—— 助手消息用它承载
+    检索来源 `{"sources": [...]}` 与判官结论 `{"judge": {...}}`，供历史回放渲染来源卡。
+    判官结论在 SSE `done` 之后才到 ⇒ 由 `data.database.merge_agent_message_meta` 回填。
     """
     text = content if isinstance(content, str) else \
         json.dumps(content, ensure_ascii=False, default=str)
     if role == "tool" and len(text) > TOOL_MESSAGE_LIMIT:
         text = "{}…[P0-5 截断，原始 {} 字符]".format(text[:TOOL_MESSAGE_LIMIT], len(text))
-    return add_agent_message(session_id, role, text)
+    return add_agent_message(session_id, role, text, meta=meta)

@@ -103,7 +103,12 @@ def init_db():
             session_id INTEGER NOT NULL,
             role TEXT NOT NULL DEFAULT '',
             content TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            -- G1-2：消息级元数据（JSON 对象）。当前承载检索来源与判官结论：
+            --   {"sources": [...A2 来源体...], "judge": {"<chunk_id>": {...B1 结论...}}}
+            -- ⚠️ 可空：老行 meta IS NULL ⇒ 读取侧**不得**补默认 `sources` 键
+            --   （前端据此不渲染来源区，见 services/agent_service.session_messages）。
+            meta TEXT
         )
     """)
     cursor.execute("""
@@ -216,6 +221,16 @@ def init_db():
         cursor.execute("ALTER TABLE agent_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
     if "archived" not in sess_cols:
         cursor.execute("ALTER TABLE agent_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+
+    # ===== 旧表迁移：agent_messages 补 meta（G1-2：引用来源 + 判官结论落库） =====
+    # 幂等：`CREATE TABLE IF NOT EXISTS` 不会给已存在的旧表加列，故沿用本仓既有的
+    # PRAGMA table_info + ALTER TABLE 模式（重复启动 = 第二次 PRAGMA 已含该列 ⇒ 空操作）。
+    # ⚠️ 刻意**可空、无默认值**：老行保持 meta IS NULL（产品决策「老会话不回填」，
+    #    回放时不显示来源区），新行由写入方显式给 JSON。
+    cursor.execute("PRAGMA table_info(agent_messages)")
+    msg_cols = {row[1] for row in cursor.fetchall()}
+    if "meta" not in msg_cols:
+        cursor.execute("ALTER TABLE agent_messages ADD COLUMN meta TEXT")
 
     conn.commit()
     conn.close()
@@ -928,19 +943,107 @@ def create_agent_session(title=""):
         conn.close()
 
 
-def add_agent_message(session_id, role, content):
-    """写入一条 Agent 会话消息（role: user / assistant / tool）"""
+def _meta_to_json(meta):
+    """meta（dict | JSON 字符串 | None）→ 可落库的 TEXT（None ⇒ NULL）。
+
+    落库口径（G1-2）：只接受 JSON **对象**；空字典按 NULL 存（老行语义 = 无元数据，
+    读取侧因此不会补出 `sources` 键）。畸形输入一律退化为 NULL，绝不抛。
+    """
+    if meta is None:
+        return None
+    if isinstance(meta, (bytes, bytearray)):
+        try:
+            meta = bytes(meta).decode("utf-8")
+        except Exception:  # noqa: BLE001
+            return None
+    if isinstance(meta, str):
+        text = meta.strip()
+        if not text:
+            return None
+        try:
+            meta = json.loads(text)
+        except Exception:  # noqa: BLE001 - 坏 JSON 按无元数据处理
+            return None
+    if not isinstance(meta, dict) or not meta:
+        return None
+    try:
+        return json.dumps(meta, ensure_ascii=False, default=str)
+    except Exception:  # noqa: BLE001 - 不可序列化按无元数据处理
+        return None
+
+
+def parse_message_meta(value):
+    """meta 列原始值（TEXT/NULL）→ dict；NULL / 坏 JSON / 非对象 ⇒ `{}`。绝不抛。"""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = bytes(value).decode("utf-8")
+        except Exception:  # noqa: BLE001
+            return {}
+    if not isinstance(value, str):
+        return {}
+    try:
+        data = json.loads(value)
+    except Exception:  # noqa: BLE001 - 坏 JSON 是预期分支，不是异常
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def add_agent_message(session_id, role, content, meta=None):
+    """写入一条 Agent 会话消息（role: user / assistant / tool）。
+
+    `meta`（可选）：消息级元数据 dict（如 `{"sources": [...]}`），序列化成 JSON 落 `meta` 列；
+    None / 空 / 不可序列化 ⇒ 存 NULL（= 无元数据，回放时不显示来源区）。
+
+    返回**新消息 id**（int，失败返回 0）。旧调用方按真值判断（`assert add_agent_message(...)`）
+    行为不变 —— 成功恒为非零 id。
+    """
     conn = get_conn()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO agent_messages (session_id, role, content) VALUES (?, ?, ?)",
-            (int(session_id), str(role), str(content or ""))
+            "INSERT INTO agent_messages (session_id, role, content, meta) VALUES (?, ?, ?, ?)",
+            (int(session_id), str(role), str(content or ""), _meta_to_json(meta))
         )
+        conn.commit()
+        return int(cursor.lastrowid or 0)
+    except Exception as e:
+        print("写入 Agent 消息失败：{}".format(e))
+        return 0
+    finally:
+        conn.close()
+
+
+def merge_agent_message_meta(message_id, patch):
+    """把 `patch`（dict）**合并**进某条消息已有的 meta 后写回；返回是否成功。
+
+    G1-2 的判官回填点：`evidence_judged` 在 SSE `done` **之后**才到（回答不等判官），
+    而 sources 已随助手消息落库 ⇒ 必须做 read-modify-write 合并，而不是整列覆盖
+    （否则回填判官会把来源抹掉）。已存在的同键由 `patch` 覆盖；NULL/坏 JSON 视为 `{}`。
+    """
+    if not message_id or not isinstance(patch, dict) or not patch:
+        return False
+    conn = get_conn()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT meta FROM agent_messages WHERE id = ?", (int(message_id),))
+        row = cursor.fetchone()
+        if row is None:
+            return False
+        merged = parse_message_meta(row["meta"])
+        merged.update(patch)
+        text = _meta_to_json(merged)
+        if text is None:
+            return False
+        cursor.execute("UPDATE agent_messages SET meta = ? WHERE id = ?",
+                       (text, int(message_id)))
         conn.commit()
         return True
     except Exception as e:
-        print("写入 Agent 消息失败：{}".format(e))
+        print("更新 Agent 消息 meta 失败：{}".format(e))
         return False
     finally:
         conn.close()
@@ -962,7 +1065,12 @@ def get_agent_session(session_id):
 
 
 def get_agent_messages(session_id, limit=None):
-    """按 id 顺序读取会话消息；limit 为 None 返回全部"""
+    """按 id 顺序读取会话消息；limit 为 None 返回全部。
+
+    `meta` 列在这里就解析成 dict（NULL / 坏 JSON ⇒ `{}`），消费方无需再 json.loads；
+    ⚠️ `{}` 表示"无元数据"，与"有元数据但没有 sources"同形 —— 读取侧据此**不输出**
+    `sources` / `judge` 键（老会话不回填，回放不显示来源区）。
+    """
     conn = get_conn()
     cursor = conn.cursor()
     try:
@@ -977,7 +1085,12 @@ def get_agent_messages(session_id, limit=None):
                 (int(session_id),)
             )
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["meta"] = parse_message_meta(item.get("meta"))
+            out.append(item)
+        return out
     except Exception as e:
         print("读取 Agent 消息失败：{}".format(e))
         return []

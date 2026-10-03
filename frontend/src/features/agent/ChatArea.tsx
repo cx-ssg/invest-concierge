@@ -168,8 +168,15 @@ export function ChatArea({
                 </div>
               </div>
             ) : (
-              <div key={`h-${i}`} className="max-w-[92%] rounded-card border border-hairline bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink">
-                <MarkdownContent content={m.content} />
+              // G1-2：历史回放的助手消息与「运行中/刚完成」视图**同构** ——
+              // 复用 MarkdownContent 的 citations（正文 [n] 可点上标回跳）与 SourceList
+              // （来源卡 + 判官标注）。老会话无 `sources` 键 ⇒ SourceList 空态不渲染，
+              // 行为与改造前完全一致（不显示"无来源"占位）。
+              <div key={`h-${i}`} className="flex min-w-0 flex-col gap-2">
+                <div className="max-w-[92%] rounded-card border border-hairline bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink">
+                  <MarkdownContent content={m.content} sources={m.sources} />
+                </div>
+                <SourceList sources={m.sources ?? []} judge={m.judge ?? {}} />
               </div>
             ),
           )}

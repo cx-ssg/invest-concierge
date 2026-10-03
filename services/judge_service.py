@@ -57,6 +57,7 @@ from utils.rag.llm_judge import (
 __all__ = [
     "JUDGE_ENABLED", "JUDGE_TIMEOUT_S", "JUDGE_MAX_ROUNDS", "JUDGE_MAX_CANDIDATES",
     "submit_judge", "collect_from_tool_trace", "judge_rounds", "judge_tool_trace",
+    "judge_items_map",
 ]
 
 #: 总开关（脚本做「开/关判官」对照用；默认开）。读取发生在**调用时**，可 patch。
@@ -286,3 +287,33 @@ def judge_tool_trace(tool_trace, *, llm_fn=None, timeout_s=None,
                             total_budget_s=total_budget_s, max_rounds=max_rounds)
     except Exception:  # noqa: BLE001 - 旁路失败不得打断主链路
         return []
+
+
+def judge_items_map(events):
+    """`evidence_judged` 事件列表 → `{str(chunk_id): 结论体}`（G1-2 落库形态）。
+
+    为什么是这个形态：历史回放的来源卡与新消息**复用同一组件**
+    （`ChatArea.SourceList`），它的 `judge` 入参就是「`chunk_id` → 结论」的映射。
+
+    - `checked=false`（超时 / 无 LLM / 解析失败）⇒ `items` 为空 ⇒ **不贡献任何键**
+      （沉默好过编造"未确认"）；前端因此不会标注这张卡。
+    - `chunk_id` 缺失的条目无法回挂卡片 ⇒ 丢弃（与前端 `useAgentRun.applyEvent`
+      的 `if (it.chunk_id != null)` 同口径）。
+    - 同一 `chunk_id` 多次出现时**后者覆盖前者**（同一事件流内的重判取最新）。
+    - 绝不抛异常：畸形输入 ⇒ `{}`。
+    """
+    out = {}
+    try:
+        for ev in events or []:
+            if not isinstance(ev, dict):
+                continue
+            for item in ev.get("items") or []:
+                if not isinstance(item, dict):
+                    continue
+                cid = item.get("chunk_id")
+                if cid is None:
+                    continue
+                out[str(cid)] = _item_payload(item)
+    except Exception:  # noqa: BLE001 - 旁路：落库失败不得影响已发出的回答
+        return {}
+    return out

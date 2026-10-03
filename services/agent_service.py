@@ -70,14 +70,32 @@ def sessions_create(title=""):
 
 
 def session_messages(session_id, limit=None):
-    """GET /api/agent/sessions/{id}/messages：历史回放（只回 user/assistant 文本）"""
+    """GET /api/agent/sessions/{id}/messages：历史回放（user/assistant 文本 + 来源/判官）。
+
+    G1-2：助手消息若落库时带了 `meta`（`{"sources": [...], "judge": {...}}`），
+    这里**透传**成同名的 `sources` / `judge` 键 —— 前端历史分支据此复用新消息的
+    `SourceList`（来源卡 + 判官标注 + `[n]` 上标回跳）。
+
+    ⚠️ 协议纪律（沿用 A-R2/F5「与 sources 同条件」）：**没有**就不出现该键 ——
+    老会话 `meta IS NULL` ⇒ 返回体仍是 `{role, content}`（前端不显示来源区，
+    也不会出现"无来源"占位）。既有消费方只读 role/content，增键不影响。
+    """
     raw = get_agent_messages(session_id, limit=limit)
     out = []
     for m in raw:
         role = m.get("role")
         content = str(m.get("content") or "")
         if role in ("user", "assistant") and content:
-            out.append({"role": role, "content": content})
+            item = {"role": role, "content": content}
+            meta = m.get("meta")
+            if isinstance(meta, dict):
+                sources = meta.get("sources")
+                if isinstance(sources, list) and sources:
+                    item["sources"] = sources
+                judge = meta.get("judge")
+                if isinstance(judge, dict) and judge:
+                    item["judge"] = judge
+            out.append(item)
     return out
 
 
@@ -199,14 +217,18 @@ def stream_events(task, session_id=None, context=None):
             )
             _emit({"type": "done", **_pick_result(res)})
             # ★ 判官在 done **之后**：回答已经发出，判官只补充可信度标注。
-            _emit_judge(res.get("tool_trace"))
+            _emit_judge(res.get("tool_trace"), res.get("assistant_message_id"))
         except Exception as e:  # noqa: BLE001 - worker 在线程里，异常必须走队列
             _emit({"type": "error", "message": str(e)})
         finally:
             _emit(_SENTINEL)
 
-    def _emit_judge(tool_trace):
+    def _emit_judge(tool_trace, assistant_message_id=None):
         """把判官结论送进 SSE 队列（旁路：任何失败都不得影响已发出的 done）。
+
+        G1-2 写入点③：判官结论与 sources **同一 `meta` 列** —— 事件照发的同时，
+        把 `{chunk_id: 结论}` 合并回**该轮助手消息**的 meta（read-modify-write，
+        不会抹掉已落库的 sources）。回填失败只影响"回放能看到判官标注"，不影响对话。
 
         ⚠️ `total_budget_s` **必须**显式传：判官最多让**流**多活 `JUDGE_TIMEOUT_S`
         （不是每轮各等一次）—— 「超时不得拖住流」在参数层就锁死。
@@ -221,11 +243,27 @@ def stream_events(task, session_id=None, context=None):
         """
         try:
             from services import judge_service as js
+            events = []
             for ev in js.judge_tool_trace(tool_trace,
                                           timeout_s=js.JUDGE_TIMEOUT_S,
                                           total_budget_s=js.JUDGE_TIMEOUT_S):
+                events.append(ev)
                 _emit(ev)
+            # G1-2：落库（在事件全部发出之后，纯附加动作）
+            _persist_judge(assistant_message_id, events)
         except Exception:  # noqa: BLE001 - 判官是增强项，不是依赖项
+            pass
+
+    def _persist_judge(assistant_message_id, events):
+        """把判官结论并入助手消息 meta（失败静默：回放少个标注 ≠ 对话出错）。"""
+        try:
+            from data.database import merge_agent_message_meta
+            from services import judge_service as js
+
+            judge = js.judge_items_map(events)
+            if judge and assistant_message_id:
+                merge_agent_message_meta(assistant_message_id, {"judge": judge})
+        except Exception:  # noqa: BLE001 - 旁路
             pass
 
     t = threading.Thread(target=_worker, daemon=True, name="agent-sse-worker")

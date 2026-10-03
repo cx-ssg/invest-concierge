@@ -46,7 +46,8 @@
 import json
 from urllib.parse import urlsplit
 
-__all__ = ["SAFE_URL_SCHEMES", "SOURCE_FIELDS", "extract_sources", "is_safe_external_url"]
+__all__ = ["SAFE_URL_SCHEMES", "SOURCE_FIELDS", "extract_sources", "is_safe_external_url",
+           "merge_sources"]
 
 #: 可作为**可点外链**下发的 scheme（白名单，非黑名单 —— 未知 scheme 一律拒绝）。
 #: 见模块 docstring「A-R1 F5」：渲染层的 `<a href={s.url}>` 不能依赖 React 版本行为兜底。
@@ -136,3 +137,30 @@ def extract_sources(tool_output):
     if not sources:
         return [], None
     return sources, level
+
+
+def merge_sources(prev, incoming):
+    """把一轮检索的 `sources` 并入已有列表（**按 `chunk_id` 去重，保留首次出现顺序**）。
+
+    与前端 `useAgentRun.mergeSources` **同口径**（G1-2）：一次 `agent_run` 可能调用
+    `retrieve_docs` 多轮，落库的 `meta.sources` 必须是全局合并后的列表，
+    否则回答正文里的 `[n]` 上标与历史回放的来源卡序号会对不上。
+    无 `chunk_id` 的条目无法判重（真实返回恒有该字段）⇒ 按出现顺序追加，不静默丢弃。
+    任何非 list 输入按空处理，**绝不抛异常**。
+    """
+    base = list(prev) if isinstance(prev, (list, tuple)) else []
+    if not isinstance(incoming, (list, tuple)) or not incoming:
+        return base
+    seen = {item.get("chunk_id") for item in base
+            if isinstance(item, dict) and item.get("chunk_id") is not None}
+    out = base
+    for item in incoming:
+        if not isinstance(item, dict):
+            continue
+        cid = item.get("chunk_id")
+        if cid is not None:
+            if cid in seen:
+                continue
+            seen.add(cid)
+        out.append(item)
+    return out
