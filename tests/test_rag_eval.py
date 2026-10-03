@@ -299,22 +299,27 @@ def _sensitivity_judge():
     | `r05` | 0.05 | 0.10 | 低于所有上界 → 每个点都判 none |
     | `r10c` | **0.10** | 0.10 | **边界锁**：sar 恰等于扫描点 ⇒ 只有严格 `<` 才不判 none |
     | `r12` | 0.12 | 0.10 | 仅 `sar_n > 0.12` 的点判 none |
-    | `r10b` | 0.10 | **0.36** | **v1 阈值锁（上侧）**：只比 `V1_NONE=0.35` 高 0.01 |
-    | `r10e` | 0.10 | **0.34** | **v1 阈值锁（下侧）**：只比 `V1_NONE=0.35` 低 0.01 —— 与 `r10b` 一起**夹住 0.35** |
+    | `r10b` | 0.10 | **0.46** | **v1 阈值锁（上侧）**：只比 `V1_NONE=0.45` 高 0.01 |
+    | `r10e` | 0.10 | **0.44** | **v1 阈值锁（下侧）**：只比 `V1_NONE=0.45` 低 0.01 —— 与 `r10b` 一起**夹住 0.45** |
     | `i03` | 0.03 | 0.10 | 每个点都判 none → 永不暴露 |
     | `i18` | 0.18 | 0.10 | 仅 `sar_n > 0.18` 的点判 none |
 
     实测期望（n_rel=5 / n_irr=2）：
 
-    | sar_n | 0.06 | 0.10 | 0.15 | 0.20 | 0.25 | 0.30 |
-    |---|---|---|---|---|---|---|
-    | oa（正例判 none） | 0.20 | 0.20 | 0.80 | 0.80 | 0.80 | 0.80 |
-    | neg（负例未判 none） | 0.5 | 0.5 | 0.5 | 0.0 | 0.0 | 0.0 |
+    | sar_n | 0.06 | 0.08 | 0.10 | 0.15 | 0.20 | 0.25 | 0.30 |
+    |---|---|---|---|---|---|---|---|
+    | oa（正例判 none） | 0.20 | 0.20 | 0.20 | 0.80 | 0.80 | 0.80 | 0.80 |
+    | neg（负例未判 none） | 0.5 | 0.5 | 0.5 | 0.5 | 0.0 | 0.0 | 0.0 |
+
+    ⚠️ **2026-10-03 F0b**：`V1_NONE` 由 0.35 改为 **0.45** ⇒ 上面两个贴边样本
+    （`r10b`/`r10e`）由 0.36/0.34 **重新钉到 0.46/0.44**（夹住新阈值）。
+    这是**判据取值变更的同步**，不是把测试改松 —— 三条锁的**结构**（边界严格小于、
+    v1 阈值两侧各钉一个贴边样本）原样保留。
 
     ⚠️ 三条锁的**具体**含义：
     - 若实现把 `sar < sar_n` 写成 `<=` ⇒ `sar_n=0.10` 处 oa 从 0.20 变 0.40（`r10c`/`r10e` 被误判）
-    - 若 v1 阈值被写死成 `> 0.36`（如 0.40 / 0.45）⇒ `sar_n=0.30` 处 oa 变 1.00（`r10b` 被误判）
-    - 若 v1 阈值被写死成 `< 0.34`（如 0.30）⇒ 同上处 oa 变 0.60（`r10e`/`r10b` 被误判）
+    - 若 v1 阈值被写死成 `> 0.46`（如 0.50 / 0.55）⇒ `sar_n=0.30` 处 oa 变 1.00（`r10b` 被误判）
+    - 若 v1 阈值被写死成 `< 0.44`（如 0.40）⇒ 同上处 oa 变 0.60（`r10e`/`r10b` 被误判）
     ⚠️ **但有限样本永远有盲区**（第八轮外部审计实测：阈值落在 `(0.10, 0.36]` 时六格全不变、四条锁全绿）。
     结构性修法不在这里，而在「**表与生产判据共享唯一实现**」——
     见 `test_scan_uses_shared_none_predicate` 与 `utils/rag/evidence.py::is_none`。
@@ -323,8 +328,8 @@ def _sensitivity_judge():
         "r05": Evidence(0.05, 0.10, "none"),
         "r10c": Evidence(0.10, 0.10, "none"),   # 边界：恰等于扫描点 0.10
         "r12": Evidence(0.12, 0.10, "weak"),
-        "r10b": Evidence(0.10, 0.36, "weak"),   # v1 只比 V1_NONE=0.35 高 0.01（见 docstring）
-        "r10e": Evidence(0.10, 0.34, "weak"),   # v1 只比 V1_NONE=0.35 低 0.01（夹住 0.35）
+        "r10b": Evidence(0.10, 0.46, "weak"),   # v1 只比 V1_NONE=0.45 高 0.01（见 docstring）
+        "r10e": Evidence(0.10, 0.44, "weak"),   # v1 只比 V1_NONE=0.45 低 0.01（夹住 0.45）
         "i03": Evidence(0.03, 0.10, "none"),
         "i18": Evidence(0.18, 0.10, "weak"),
     })
@@ -348,7 +353,7 @@ def test_scan_returns_sar_none_sensitivity_grid():
     rel, irr = _sensitivity_rows()
     curves = ev.scan(rel, irr, _sensitivity_judge())
     grid = curves["sar_none"]
-    assert len(grid) == 6, "敏感性表应为 6 行（0.06/0.10/0.15/0.20/0.25/0.30）"
+    assert len(grid) == 7, "敏感性表应为 7 行（0.06/0.075/0.10/0.15/0.20/0.25/0.30；F0b 生产值 0.075 在表内）"
     assert all(len(p) == 3 for p in grid), "每行应为 (sar_n, 负例残留暴露, oa)"
     assert any(abs(s - ev_mod.SAR_NONE) < 1e-9 for s, _, _ in grid), "表里必须含当前 SAR_NONE 点"
     # 单调性（数学必然 —— 写反方向的实现会被抓住）
@@ -359,13 +364,15 @@ def test_scan_returns_sar_none_sensitivity_grid():
     by_sar = {s: (n, o) for s, n, o in grid}
     assert by_sar[0.30] != by_sar[0.06], "表不随 sar_n 变化 —— 恒等摆设"
     assert by_sar[0.06] == pytest.approx((0.5, 0.20)), "当前点数值与期望不符（口径或符号写反）"
+    assert by_sar[0.075] == pytest.approx((0.5, 0.20)), \
+        "F0b 生产值 0.075 这一行与期望不符（扫描点集合或口径漂了）"
     assert by_sar[0.30] == pytest.approx((0.0, 0.80)), "末点数值与期望不符（口径或符号写反）"
     # 边界锁：sar 恰等于 0.10 的样本不得被判 none（严格小于）
     assert by_sar[0.10][1] == pytest.approx(0.20), \
         "边界写成 `<=` 了 —— sar 恰等于阈值时被误判 none（sar_n=0.10 处 oa 应变 0.40）"
-    # v1 阈值锁：v1=0.36（≥ V1_NONE）与 v1=0.34（< V1_NONE）两个贴边样本**夹住 0.35**
+    # v1 阈值锁：v1=0.46（≥ V1_NONE）与 v1=0.44（< V1_NONE）两个贴边样本**夹住 0.45**
     assert by_sar[0.30][1] == pytest.approx(0.80), \
-        "v1 阈值用错 —— 两个贴边样本之一被误判（写死 >0.36 会让 oa 变 1.00、写死 <0.34 会变 0.60）"
+        "v1 阈值用错 —— 两个贴边样本之一被误判（写死 >0.46 会让 oa 变 1.00、写死 <0.44 会变 0.60）"
 
 
 def test_sar_none_grid_matches_none_grid_at_v1_none():
@@ -413,7 +420,7 @@ def test_scan_uses_shared_none_predicate(monkeypatch):
     bad_v1 = {v for _, v in calls} - grid_v1
     assert not bad_v1, \
         "出现了网格取值之外的 v1 门限 %r —— 表侧写死字面量会与判据分叉" % sorted(bad_v1)
-    grid_sar = {0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40}
+    grid_sar = {0.06, 0.075, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40}
     bad_sar = {s for s, _ in calls} - grid_sar
     assert not bad_sar, "出现了网格取值之外的 sar 门限 %r" % sorted(bad_sar)
     # ⚠️ 只断言「calls 非空」不够（第一版就是这么写的，被自己的变异 M4 证伪）：
@@ -501,12 +508,14 @@ def test_main_scan_path_prints_sar_none_table(monkeypatch, capsys):
     assert "SAR_NONE 敏感性表" in out, "`--scan` 没打印敏感性表 —— 打印接线断了"
     assert out.count("<- 当前") == 1, "`<- 当前` 标记应恰好出现一次"
     assert "假想" not in out, "旧的「假想 strong 曲线」仍在打印 —— 残留未清"
-    rows = re.findall(r"^\s+0\.\d\d\s+[01]\.\d\d\d\s+[01]\.\d\d\d", out, re.M)
-    assert len(rows) == 6, "敏感性表应有 6 行数据，实际 %d 行" % len(rows)
+    # ⚠️ F0b：sar 列改用 `%-7s`（`0.075` 必须打全 —— `%.2f` 会打成 `0.07`）⇒ 正则放宽到 `0\.\d+`。
+    rows = re.findall(r"^\s+0\.\d+\s+[01]\.\d\d\d\s+[01]\.\d\d\d", out, re.M)
+    assert len(rows) == 7, "敏感性表应有 7 行数据，实际 %d 行" % len(rows)
     # 列序 + 标记行 + 表头口径（第二轮审计指出：只数行数会漏掉"列交换"/"标记打错行"两种改坏方式）
-    assert re.search(r"^\s+0\.06\s+0\.500\s+0\.200\s*<-\s*当前\s*$", out, re.M), \
-        "当前行应为 `0.06  0.500  0.200  <- 当前`（列序或标记行被改坏了）"
-    assert "v1 固定 0.35" in out, "表头应点名 v1 固定为 `V1_NONE`（口径必须写在输出里）"
+    # ⚠️ 2026-10-03 F0b：`SAR_NONE` 由 0.06 → 0.075 ⇒ 标记行随之改到 0.075（数值仍为 0.500/0.200）。
+    assert re.search(r"^\s+0\.075\s+0\.500\s+0\.200\s*<-\s*当前\s*$", out, re.M), \
+        "当前行应为 `0.075  0.500  0.200  <- 当前`（列序或标记行被改坏了）"
+    assert "v1 固定 0.45" in out, "表头应点名 v1 固定为 `V1_NONE`（口径必须写在输出里）"
 
 
 def test_load_missing_split_returns_empty(tmp_path, monkeypatch):

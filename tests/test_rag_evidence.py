@@ -14,13 +14,12 @@
   **TUNING 组区间是倒挂的** —— 正例上限 **0.1540** < 负例上限 **0.2134**（2026-09-18 复核，
   见 `docs/M1_EVAL_REPORT.md` §4g 与第六轮审计二的独立复核）。
   ⇒ **strong 边界在现有两个池子上都无法无泄漏标定**，别把它当干净分界。
-- `V1 = |{t ∈ q : 0 < df(t) < N/20}| / |{t ∈ q : df(t) < N/20}|` —— 特征词存在率，
-  第二票，对"词表外的查询"给出确定性信号
+- `V1 = |{t ∈ q : 0 < df(t) < N·ρ}| / |{t ∈ q : df(t) < N·ρ}|` —— 特征词存在率，
+  第二票，对"词表外的查询"给出确定性信号（`ρ = FEATURE_DF_FRACTION`，2026-10-03 F0b 由 0.05 收紧到 0.02）
 
-⚠️ **当前阈值 = `0.15 / 0.0 / 0.06 / 0.35`**（以 `utils/rag/evidence.py` 为准，本行曾写旧值 `0.10/0.45`）。
-两个必须记住的性质：
-1. `SAR_STRONG = 0.15` 是**在 holdout 上选出的拟合值**（第五轮两份审计独立判定为违规），
-   **不得当作可复用常数**，也不得据此声明 strong 档可达性；
+⚠️ **当前阈值 = `0.08 / 0.45`**（以 `utils/rag/evidence.py` 为准，本行曾写旧值 `0.06/0.35`）。
+2026-10-03 F0b 的三候选并列实测与取舍理由见 `report-F0b.md`；两条必须记住的性质：
+1. （历史）`SAR_STRONG = 0.15` 曾是**在 holdout 上选出的拟合值** —— 该档已撤下，本行仅作留档；
 2. `V1_STRONG = 0.0` 使 `v1 >= V1_STRONG` **恒真** —— strong 档的活性护栏是 `v1 > 0`
    （第六轮审计一 P1：`feature` 含 `df == 0`，跨界 OOV bigram 可绕过它）。
 """
@@ -187,12 +186,57 @@ def test_only_high_frequency_terms_yield_zero_v1():
     docs = [tokenize("公司董事会决议公告第{}号".format(i)) for i in range(100)]
     j = EvidenceJudge(docs)
     toks = set(tokenize("公司董事"))
-    feature = [t for t in toks if j.index.df.get(t, 0) <= max(1.0, j.N * 0.05)]
+    import utils.rag.evidence as e_mod
+    feature = [t for t in toks if j.index.df.get(t, 0) <= e_mod.feature_band(j.N)]
     assert feature == [], "前提：该查询应无特征词（全高频），实得 %s" % feature
     ev = j.assess("公司董事")
     assert ev.v1 == 0.0, "无特征词 → v1 必须为 0.0"
     # 两档语义下该查询只能是 weak（有字面交集）或 none（无交集）—— **不可能是 strong**
     assert ev.level in ("none", "weak")
+
+
+# ==================== F0b：特征词带的尺度不变性（2026-10-03）====================
+# 背景：A3a 0.922 → 0.725 的定因是**特征词带随语料膨胀**（pre-E1 14.05 → 现语料 84.55）
+# ⇒ 中频词（`数据` df 18→60）落进带内、域外查询的 v1 被抬高到阈值之上 ⇒ 弃权失效。
+# 修法：带宽**只依赖 df/N**（`feature_band = max(1, N·ρ)`，ρ 由 0.05 收紧到 0.02）。
+# 下面两条锁住这个决定的**结构**，防止将来被"固定 df 上限 / df 分位数"等方案静默替换。
+
+
+def test_feature_band_is_scale_invariant_under_pure_duplication():
+    """零新内容对照的**单元级**版本：同一语料原样复制 6 份 → 每条查询 `v1` 逐位不变。
+
+    ⚠️ 为什么必须锁：这条性质是"带宽取 df/N 形式"的**全部理由**。
+    实测（F0b，98 条 tuning 查询）：固定 df 上限会让 **76 条** 在纯复制下改变 `v1`；
+    df 分位数在词表由 df=1 词主导时退化（100 篇语料上带=100 → 全高频查询 v1 由 0.00 变 1.00）。
+    `scripts/e_r1_kb_dup6b.py` 是本性质的**端到端**版本（真实语料 + 真实查询）。
+    """
+    base = [tokenize("公司公告第{}号 贵州茅台 营业收入 同比增长 百分之{}".format(i, i % 7))
+            for i in range(60)]
+    assert 0.02 * 60 > 1.0, "前提：带宽必须高于下限 1.0（否则 max(1,·) 会破坏倍率关系）"
+    j1, j6 = EvidenceJudge(base), EvidenceJudge(base * 6)
+    assert j6.N == j1.N * 6
+    assert j6.feature_df_cap == pytest.approx(j1.feature_df_cap * 6), \
+        "带宽没有随语料同倍放大 —— 纯复制下准入词集合会变"
+    for q in ("茅台上半年营业收入", "量子计算最新进展", "公司公告内容测试", "百分比是多少"):
+        e1, e6 = j1.assess(q), j6.assess(q)
+        assert e1.v1 == pytest.approx(e6.v1), \
+            "纯复制改变了 v1（%r: %.3f -> %.3f）—— 特征词带不再是尺度不变的" % (q, e1.v1, e6.v1)
+
+
+def test_feature_band_value_and_mid_frequency_exclusion():
+    """带宽取值锁 + 定因锚点：现语料尺寸下 `df=60`（`数据`）必须**落在带外**。
+
+    `数据` 是 E 阶段两路审计点名的越界词（df 18→60 ⇒ v1 0.083→0.462）。
+    旧带宽在现语料上是 84.55（`数据` 在带内）；F0b 的 33.82 把它排除。
+    ⚠️ 这里写死 `1691 / 60` 是**故意的**：它把"回归发生时的那个语料尺寸 + 那个词"
+    钉成可复现的锚点；语料换代时应连同 `report-F0b.md` 一起复核。
+    """
+    import utils.rag.evidence as e_mod
+    assert e_mod.FEATURE_DF_FRACTION == 0.02, "ρ 被改动了 —— 需同步重跑三候选并列实测"
+    assert e_mod.feature_band(1691) == pytest.approx(33.82)
+    assert e_mod.feature_band(0) == 1.0, "空语料带宽不得为 0（否则 feature 恒空、v1 恒 0）"
+    assert 60 > e_mod.feature_band(1691), "df=60 的中频词又进带内了 —— v1 会被它抬高"
+    assert 60 < max(1.0, 1691 * 0.05), "对照：旧带宽（0.05N）下它在带内 —— 这正是定因"
 
 
 # ==================== 与旧判据的对照（防回归到 max_sim）====================

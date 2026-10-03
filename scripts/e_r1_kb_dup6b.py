@@ -7,12 +7,16 @@ E1 报告 §6/§9 曾把 A3a 0.922→0.725 归因成「判据对**语料规模**
 把**同一批 20 篇茅台文档原样复制 6 份**（文本逐字节相同、向量逐字节相同 ⇒ **零新内容**，
 N=281→1686，规模 +6×）——
 
-  * A3a **不动**（47/51 = 0.922，与 pre 相同）；
-  * 真实语料的 16 条翻转 **0 条**被复现（10 条 out_of_domain 中也是 **0/10**）；
-  * 对照自身只有 6 条**反向** `weak→none`。
+  * A3a **不动**（E1 口径：47/51 = 0.922，与 pre 相同；F0b 口径：50/51，同样 Δ=0）；
+  * 真实语料的翻转 **0 条**被复现（E1：16 条中 10 条 out_of_domain → 0/10；F0b：18 条中 6 条 → 0/6）；
+  * 对照自身只有**反向** `weak→none` 变化（E1：6 条；F0b：16 条 —— 多出来的部分来自
+    `SAR_NONE` 0.06→0.075 之后 idf 的 0.5 平滑残差**开始跨过阈值**，见 CHK3/CHK5）。
 
 ⇒ 真机制是判据统计量对**语料内容异质性**敏感（`idf(N,df)` 与 `v1` 的相对带宽
-`max(1, N·0.05)` 都**不是尺度不变的**），**不是**"库变大"。
+`max(1, N·ρ)` 都**不是尺度不变的**），**不是**"库变大"。
+⚠️ F0b 只改了 `ρ`（0.05→0.02）与阈值（0.075/0.45）：`v1` 一侧已作到**纯复制逐位不变**，
+但 `SAR` 一侧的 idf 平滑残差**仍在**（它正是 CHK2 的 tol 会被顶到的地方 —— S=0.08 时
+`irr-0354` 的 base/ctrl sar = 0.0891/0.0761 跨阈值 ⇒ Δ(A3a)=0.020 → CHK2 FAIL）。
 
 ## 为什么它是 F 阶段的回归夹具
 
@@ -20,12 +24,26 @@ F 阶段若按「规模敏感」去调阈值（只动 `SAR_NONE`/`V1_NONE`），
 这几条越界靠的是 `v1` 的相对带宽（与内容分布绑定）。本夹具把
 「**纯扩规模 ≠ 翻转**」变成可执行断言 —— 任何人再引用"越大越容易放行"都必须先过它。
 
+## 记录臂（2026-10-03 F0b 起按**判据口径**分档）
+
+strict 模式校验的是「**当前判据口径下的记录值**」——判据改了口径，记录值必然变：
+不是把锁改松，三条**不变量**（结构/零新内容、纯复制 Δ(A3a)=0、真实翻转 0 条被复现）一条没动。
+
+| 记录臂 | 判据 (ρ, SAR_NONE, V1_NONE) | A3a base/ctrl | 真实翻转 (OOD) |
+|---|---|---|---|
+| `E1`（E 阶段自证） | (0.05, 0.06, 0.35) | 47/51 · 47/51 | 16（10） |
+| `F0b`（本阶段修 v1 相对带） | (0.02, 0.075, 0.45) | 50/51 · 50/51 | 18（6） |
+
+`--arm auto`（默认）按当前生产判据三元组选臂；**匹配不上则关闭 strict 并告警**
+（防止将来改了判据却拿旧常数"验"自己）。详见 `report-F0b.md`。
+
 ## 用法
 
 ```
-python scripts/e_r1_kb_dup6b.py                      # 复跑 E1 记录臂（默认 pre-E1 备份 + 现库）
+python scripts/e_r1_kb_dup6b.py                      # 按当前判据自动选记录臂（默认 pre-E1 备份 + 现库）
 python scripts/e_r1_kb_dup6b.py --base X.db --real Y.db --work .e-r1   # F 阶段的任意两库回归
 python scripts/e_r1_kb_dup6b.py --no-strict          # 只打印不校验记录值（换库时用）
+python scripts/e_r1_kb_dup6b.py --arm E1             # 指定记录臂（判据不匹配时自动降级为非 strict）
 ```
 
 **只读**打开源库（`mode=ro&immutable=1`，不写 kb.db、不产生 -wal/-shm）；
@@ -50,26 +68,82 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 from utils.rag.evidence import EvidenceJudge          # noqa: E402
+from utils.rag.evidence import feature_band           # noqa: E402
+from utils.rag import evidence as ev_mod              # noqa: E402
 from utils.rag.tokenize import tokenize               # noqa: E402
 from utils.rag import store as rag_store              # noqa: E402
 
 GOLDEN = os.path.join(ROOT, "tests", "golden", "rag")
 
-# E1 记录臂（2026-10-03）的实测值 —— 仅在 strict 模式下校验
 PRE_E1_SHA1 = "57ccee1906de76f70020992a9997b7d8e2bbec67"
-EXPECT = {
-    "base_chunks": 281,
-    "control_chunks": 1686,
-    "control_a3a": (47, 51),
-    "control_changes": 6,
-    "real_flips": 16,
-    "real_flips_by_kind": {"out_of_domain": 10,
-                           "in_domain_unanswerable": 3,
-                           "near_miss": 3},
-    "reproduced": 0,
-    "ood_reproduced": 0,
+
+# ⚠️ 2026-10-03 F0b：**记录臂按判据口径分档**。
+# 为什么需要它：本夹具的 strict 校验把「当时判据下的实测值」钉成常数；F0b 有意改了
+# 判据（特征词带 ρ 0.05→0.02、`SAR_NONE` 0.06→0.075、`V1_NONE` 0.35→0.45）⇒
+# 旧常数**必然**失效。**不是把锁改松**：三条**不变量**（结构/零新内容、
+# Δ(A3a)=0、真实翻转 0 条被纯复制复现）一条没动；变的只是"这套判据下的记录值"。
+# 旧记录（E1）**保留在案**并随运行打印，便于逐位对账。
+# 选档依据 = **当前生产判据**（`(FEATURE_DF_FRACTION, SAR_NONE, V1_NONE)` 三元组），
+# 匹配不上任何档 ⇒ **关闭 strict 并告警**（防将来改了判据却拿旧常数"验"自己）。
+ARMS = {
+    "E1 (2026-10-03 E 阶段自证)": {
+        "predicate": (0.05, 0.06, 0.35),
+        "expect": {
+            "base_chunks": 281,
+            "control_chunks": 1686,
+            "control_a3a": (47, 51),
+            "control_changes": 6,
+            "real_flips": 16,
+            "real_flips_by_kind": {"out_of_domain": 10,
+                                   "in_domain_unanswerable": 3,
+                                   "near_miss": 3},
+            "reproduced": 0,
+            "ood_reproduced": 0,
+        },
+    },
+    "F0b (2026-10-03 修 v1 相对带)": {
+        "predicate": (0.02, 0.075, 0.45),
+        "expect": {
+            "base_chunks": 281,
+            "control_chunks": 1686,
+            "control_a3a": (50, 51),
+            "control_changes": 16,
+            "real_flips": 18,
+            "real_flips_by_kind": {"out_of_domain": 6,
+                                   "in_domain_unanswerable": 7,
+                                   "near_miss": 5},
+            "reproduced": 0,
+            "ood_reproduced": 0,
+        },
+    },
 }
+EXPECT = ARMS["E1 (2026-10-03 E 阶段自证)"]["expect"]
+# ⚠️ 上行的 `EXPECT` **不再被 main() 使用**（main 按 `pick_arm()` 选臂）——
+# 保留它是为了任何外部/历史引用不至于 `ImportError`；**新增逻辑请走 `pick_arm()`**。
 DEFAULT_BASE = "D:/Vault/Handoff/itt-20261002/e1-scratch/pre_e1_kb.db"
+
+
+def current_predicate():
+    """当前生产判据的三元组 —— 用来选记录臂。"""
+    return (getattr(ev_mod, "FEATURE_DF_FRACTION", 0.05),
+            ev_mod.SAR_NONE, ev_mod.V1_NONE)
+
+
+def pick_arm(name="auto"):
+    """返回 `(arm_name, expect, matched)`。`matched=False` ⇒ strict 必须关闭。"""
+    cur = current_predicate()
+    for arm_name, arm in ARMS.items():
+        if name != "auto" and not arm_name.startswith(name):
+            continue
+        if name == "auto" and arm["predicate"] != cur:
+            continue
+        return arm_name, arm["expect"], True
+    # 显式指定但判据不匹配：仍返回该臂，但标记不匹配（调用方关 strict）
+    for arm_name, arm in ARMS.items():
+        if name != "auto" and arm_name.startswith(name):
+            return arm_name, arm["expect"], (arm["predicate"] == cur)
+    return "（未知判据 %r）" % (cur,), None, False
+
 
 
 def sha1_file(path):
@@ -182,10 +256,14 @@ def main(argv=None):
     ap.add_argument("--tol", type=float, default=0.0,
                     help="A3a 聚合量的允许漂移（0 = 必须完全相同）")
     ap.add_argument("--strict", dest="strict", action="store_true", default=None,
-                    help="校验 E1 记录臂的全部实测值（默认：base 为记录备份时自动开启）")
+                    help="校验当前**判据口径**记录臂的全部实测值（默认：base 为记录备份时自动开启）")
     ap.add_argument("--no-strict", dest="strict", action="store_false")
+    ap.add_argument("--arm", default="auto", choices=["auto", "E1", "F0b"],
+                    help="记录臂口径（auto = 按当前生产判据三元组自动匹配；匹配不上则关 strict）")
     ap.add_argument("--json-out", default=None)
     args = ap.parse_args(argv)
+
+    arm_name, expect, arm_matched = pick_arm(args.arm)
 
     with open(os.path.join(GOLDEN, "queries_holdout_irr.json"), encoding="utf-8") as f:
         irr = json.load(f)
@@ -193,12 +271,23 @@ def main(argv=None):
 
     base_sha = sha1_file(args.base)
     if args.strict is None:
-        args.strict = (base_sha == PRE_E1_SHA1)
+        # 默认：base 是 E1 记录备份 **且**判据口径能匹配上记录臂 → 开 strict
+        args.strict = (base_sha == PRE_E1_SHA1) and arm_matched
+    if args.strict and not arm_matched:
+        print("[WARN] strict 已关闭：当前生产判据 %r 不匹配任何记录臂 %r"
+              % (current_predicate(), [a["predicate"] for a in ARMS.values()]))
+        args.strict = False
     os.makedirs(args.work, exist_ok=True)
     ctrl_path = os.path.join(args.work, "kb_dup6b.db")
 
     print("=== E-R1 · kb_dup6b 零新内容对照夹具 ===")
-    print("copies=%d  strict=%s" % (args.copies, args.strict))
+    print("copies=%d  strict=%s  记录臂=%s" % (args.copies, args.strict, arm_name))
+    print("当前生产判据 (ρ, SAR_NONE, V1_NONE) = %r" % (current_predicate(),))
+    for a_name, a in ARMS.items():
+        tag = "  <== 本次记录臂" if a_name == arm_name else ""
+        print("  记录臂 %-28s 判据=%r  A3a(base,ctrl)=%s  real_flips=%d%s"
+              % (a_name, a["predicate"], a["expect"]["control_a3a"],
+                 a["expect"]["real_flips"], tag))
     print("base  %s  sha1=%s" % (args.base, base_sha))
     print("real  %s  sha1=%s" % (args.real, sha1_file(args.real)))
     build_control(args.base, ctrl_path, args.copies)
@@ -248,9 +337,9 @@ def main(argv=None):
     ok2 = a3a_delta <= args.tol
     print("       纯复制 Δ(A3a) = %.3f <= tol %.3f ....... %s"
           % (a3a_delta, args.tol, "PASS" if ok2 else "FAIL"))
-    if args.strict and (b_a3a, c_a3a) != (EXPECT["control_a3a"], EXPECT["control_a3a"]):
+    if args.strict and (b_a3a, c_a3a) != (expect["control_a3a"], expect["control_a3a"]):
         ok2 = False
-        print("       [!] strict: 期望 base/ctrl A3a = %s" % (EXPECT["control_a3a"],))
+        print("       [!] strict: 期望 base/ctrl A3a = %s" % (expect["control_a3a"],))
 
     # ---- [CHK3] 对照库自身的档位变化（应为反向 weak→none）----
     c_changes = [i for i in lv_b if lv_b[i][0] != lv_c[i][0]]
@@ -258,16 +347,16 @@ def main(argv=None):
     print("[CHK3] 对照库自身档位变化 = %d/113 方向=%s（应全为 weak->none）"
           % (len(c_changes), c_dirs))
     ok3 = all(lv_b[i][0] == "weak" and lv_c[i][0] == "none" for i in c_changes)
-    if args.strict and len(c_changes) != EXPECT["control_changes"]:
+    if args.strict and len(c_changes) != expect["control_changes"]:
         ok3 = False
-        print("       [!] strict: 期望 %d 条" % EXPECT["control_changes"])
+        print("       [!] strict: 期望 %d 条" % expect["control_changes"])
     print("       方向全为反向 weak->none ....... %s" % ("PASS" if ok3 else "FAIL"))
     for i in sorted(c_changes):
         print("         %-9s %-24s %s -> %s" % (
             i, next(r.get("kind") for r in irr if r["id"] == i),
             lv_b[i], lv_c[i]))
 
-    # ---- [CHK4] 真实翻转 16 条、控制组复现 0 条 ----
+    # ---- [CHK4] 真实翻转 vs 控制组复现 0 条 ----
     real_flips = [i for i in lv_b if lv_b[i][0] != lv_r[i][0]]
     by_kind = {}
     for i in real_flips:
@@ -281,14 +370,20 @@ def main(argv=None):
           % (len(reproduced), len(real_flips), len(ood_rep), len(ood_flips)))
     ok4 = (len(reproduced) == 0)
     if args.strict:
-        ok4 = ok4 and len(real_flips) == EXPECT["real_flips"] \
-            and by_kind == EXPECT["real_flips_by_kind"]
+        ok4 = ok4 and len(real_flips) == expect["real_flips"] \
+            and by_kind == expect["real_flips_by_kind"]
     print("       ⇒ 翻转由「异质新内容」而非「规模」造成 ....... %s" % ("PASS" if ok4 else "FAIL"))
 
-    # ---- [CHK5] 机制：v1 相对带宽 max(1, 0.05N) 与逐 token df ----
-    band = lambda n: max(1.0, n * 0.05)
-    print("[CHK5] v1 相对带宽 max(1,0.05N): base=%.2f ctrl=%.2f real=%.2f（**非尺度不变**）"
-          % (band(n_base), band(n_ctrl), band(n_real)))
+    # ---- [CHK5] 机制：v1 特征词带（**生产实现** `feature_band`）与逐 token df ----
+    # ⚠️ 2026-10-03 F0b：这里原先硬编码 `max(1, 0.05N)`（判据的旧带宽）。
+    #    带宽是 F0b 的**被测对象**，硬编码会让"改了生产带宽、夹具还印旧值"——
+    #    故改为调用**同一个** `evidence.feature_band`（与判据共享唯一实现）。
+    band = feature_band
+    print("[CHK5] v1 特征词带 feature_band(N)=max(1, N·ρ), ρ=%s: base=%.2f ctrl=%.2f real=%.2f"
+          % (getattr(ev_mod, "FEATURE_DF_FRACTION", "?"),
+             band(n_base), band(n_ctrl), band(n_real)))
+    print("       纯复制下带宽同倍放大（ctrl/base=%.3f，理想值=%.3f）⇒ 准入词集合不变"
+          % (band(n_ctrl) / band(n_base), n_ctrl / n_base))
     for qid in ("irr-0306", "irr-0331", "irr-0357", "irr-0120"):
         q = next(r["query"] for r in irr if r["id"] == qid)
         toks = sorted(set(tokenize(q)))
@@ -301,21 +396,26 @@ def main(argv=None):
                              % (t, db_, dr_, dc_, "^进带" if entered else ""))
         print("       %s %s" % (qid, q[:22]))
         print("         %s" % ("; ".join(cells) or "（token df 无变化）"))
-    band_ok = band(n_base) < band(n_real)
-    print("       带宽随真实语料变宽（纯复制亦然）....... %s" % ("PASS" if band_ok else "FAIL"))
+    band_ok = abs(band(n_ctrl) / band(n_base) - n_ctrl / n_base) < 1e-9
+    print("       带宽随块数同倍放大（尺度不变）....... %s" % ("PASS" if band_ok else "FAIL"))
     print("       ^进带 = df 从 band_base(%.2f) 之外进入 band_real(%.2f) 之内 —— v1 的分母变大、比值跳变"
           % (band(n_base), band(n_real)))
 
     all_ok = ok1 and bool(dup_ok) and ok2 and ok3 and ok4 and band_ok
     print("")
     print("kb_dup6b RESULT: %s" % ("OK" if all_ok else "FAIL"))
-    print("  判读：A3a 在**纯复制**下不动（%d/%d）；真实语料 16 条翻转 0 条被复现"
-          % (c_a3a[0], c_a3a[1]))
+    print("  判读：A3a 在**纯复制**下不动（%d/%d）；真实语料 %d 条翻转 %d 条被复现"
+          % (c_a3a[0], c_a3a[1], len(real_flips), len(reproduced)))
     print("        ⇒ 归因是「语料内容异质性」下的 idf/带宽非尺度不变，**不是「库变大」**")
-    print("        ⇒ F 阶段：纯调 SAR_NONE 修不了 v1 越界的条目（见报告 §E-F2）")
+    if expect:
+        print("        记录臂 %s：真实翻转记录值 %d（OOD %d）｜本次实测 %d（OOD %d）"
+              % (arm_name, expect["real_flips"],
+                 expect["real_flips_by_kind"].get("out_of_domain", 0),
+                 len(real_flips), by_kind.get("out_of_domain", 0)))
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
             json.dump({"base": args.base, "real": args.real, "control": ctrl_path,
+                       "arm": arm_name, "predicate": current_predicate(),
                        "n_base": n_base, "n_ctrl": n_ctrl, "n_real": n_real,
                        "a3a": {"base": b_a3a, "ctrl": c_a3a, "real": r_a3a},
                        "control_changes": c_changes, "real_flips": real_flips,

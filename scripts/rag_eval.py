@@ -344,9 +344,20 @@ def evaluate_prod(rows_rel, meta, qvecs, db_path=None, queries=None, k=TOP_K):
     }
 
 
-# `SAR_NONE` 敏感性表的扫描点（2026-10-01 F1）。**含当前值 0.06**，其上界到 0.30 ——
+# `SAR_NONE` 敏感性表的扫描点（2026-10-01 F1；**2026-10-03 F0b 用生产值 0.075 替换 0.06**）。**含当前值**，
+# 其上界到 0.30 ——
 # 再往上（0.40）**风险面已进入平台期**（tuning 0.141 / holdout 0.080，不再下降）而 oa 已 0.86~0.92
 # —— 对决策无增量信息（见 --scan 的两组实测）。
+# ⚠️ 扫描点集合必须**包含** `ev_mod.SAR_NONE`（`test_scan_returns_sar_none_sensitivity_grid` 锁）——
+#     F0b 把生产值从 0.06 改到 0.08 时同步补入，否则 CLI 的 `<- 当前` 标记会永远打不出来。
+def _fmt_thr(x):
+    """阈值打印（**不能用 `%.2f`**）—— `SAR_NONE=0.075` 打成 `0.07` 会与真实值差 7%，
+    且同屏的「当前」标记会指着一个不存在的扫描点（2026-10-03 F0b 实测踩到）。
+    规则：最多 3 位小数、去掉尾随 0。"""
+    s = "%.3f" % x
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
 def _pct(values, p):
     """百分位（最近秩法；空集返回 0）。n 很小时 p50/p90 只是量级参考 —— 报告须带 n。"""
     vals = sorted(v for v in values if isinstance(v, (int, float)))
@@ -444,7 +455,7 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
     }
 
 
-SAR_NONE_SWEEP = (0.06, 0.10, 0.15, 0.20, 0.25, 0.30)
+SAR_NONE_SWEEP = (0.06, 0.075, 0.10, 0.15, 0.20, 0.25, 0.30)
 
 
 def scan(rows_rel, rows_irr, judge):
@@ -457,11 +468,12 @@ def scan(rows_rel, rows_irr, judge):
     与 `evaluate()` 的 `over_abstain`（只算 none）**不是同一个量** —— 两处口径必须一致。
 
     返回 `{"none": [...], "sar_none": [...]}`：
-    - `none`：5×7 稠密网格 `(sar_none, v1_none, weak_fp, over_abstain)`
+    - `none`：8×5 稠密网格 `(sar_none, v1_none, weak_fp, over_abstain)`
+      （2026-10-03 F0b：sar 维加入生产值 0.08）
       `weak_fp` = 应弃权却**未判 none** 的比例（= 会进入生成上下文的暴露面）
       `over_abstain` = 域内可答却被判 none 的比例（召回护栏）
     - `sar_none`（**2026-10-01 F1 新增**）：把 `v1` 固定为 `V1_NONE`（实测 none 侧几乎由 SAR
-      承担）后的 **6 行干净表** `(sar_none, 负例残留暴露, over_abstain)` ——
+      承担）后的 **7 行干净表** `(sar_none, 负例残留暴露, over_abstain)` ——
       **直接服务「要不要调高 `SAR_NONE`」**：调高会同时**压低**残留暴露、**抬高** oa
       （可答查询被剥夺引用凭据的比例）。**纪律：先定"可接受的引用丢失率"，再动 `SAR_NONE`。**
       ⚠️ 与 `none` 网格在共同点 `(sar_n, V1_NONE)` 上数值必须一致
@@ -475,7 +487,7 @@ def scan(rows_rel, rows_irr, judge):
     n_rel, n_irr = max(len(a_rel), 1), max(len(a_irr), 1)
 
     none_out = []
-    for sar_n in (0.06, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40):
+    for sar_n in (0.06, 0.075, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40):
         for v1_n in (0.35, 0.45, 0.55, 0.65, 0.75):
             irr_none = sum(1 for e in a_irr if ev_mod.is_none(e.sar, e.v1, sar_n, v1_n))
             oa = sum(1 for e in a_rel if ev_mod.is_none(e.sar, e.v1, sar_n, v1_n))
@@ -569,8 +581,8 @@ def main(argv=None):
         # 诚实边界：**原样**椭圆查询走同一条产线路径 —— 识别不到标的 ⇒ 退化成全库口径。
         raw_pm = evaluate_prod(rel, meta, qvecs[:len(rel)], db_path=args.db,
                                queries=[r["query"] for r in rel])
-    print("[eval] chunks=%d 阈值：none 档 sar<%.2f v1<%.2f（**strong 档已撤下**：非 none 一律 weak）"
-          % (len(meta), ev_mod.SAR_NONE, ev_mod.V1_NONE))
+    print("[eval] chunks=%d 阈值：none 档 sar<%s v1<%s（**strong 档已撤下**：非 none 一律 weak）"
+          % (len(meta), _fmt_thr(ev_mod.SAR_NONE), _fmt_thr(ev_mod.V1_NONE)))
     print("[eval] n_rel=%d n_irr=%d" % (m["n_rel"], m["n_irr"]))
     ood = m["by_kind"].get("out_of_domain") or {}
     if ood.get("n"):
@@ -679,15 +691,16 @@ def main(argv=None):
         for sar_n, v1_n, wfp, oa in curves["none"]:
             flag = "  ← 当前" if (abs(sar_n - ev_mod.SAR_NONE) < 1e-9
                                   and abs(v1_n - ev_mod.V1_NONE) < 1e-9) else ""
-            print("  sar<%.2f v1<%.2f -> weak_fp=%.3f oa=%.3f%s" % (sar_n, v1_n, wfp, oa, flag))
+            print("  sar<%s v1<%s -> weak_fp=%.3f oa=%.3f%s"
+                  % (_fmt_thr(sar_n), _fmt_thr(v1_n), wfp, oa, flag))
         # ⚠️ 2026-10-01（F1）：此处原印「假想 strong 档曲线」—— 该档已于 2026-09-18 撤档，
         # 曲线描述的对象**不存在**（语义残留）⇒ 删除，位置让给**服务真实决策**的敏感性表。
-        print("[eval] --- SAR_NONE 敏感性表（v1 固定 %.2f）—— 服务「要不要调高 SAR_NONE」 ---"
-              % ev_mod.V1_NONE)
+        print("[eval] --- SAR_NONE 敏感性表（v1 固定 %s）—— 服务「要不要调高 SAR_NONE」 ---"
+              % _fmt_thr(ev_mod.V1_NONE))
         print("  sar_none   负例残留暴露   oa(可答查询被剥夺引用凭据)")
         for sar_n, neg, oa in curves["sar_none"]:
             flag = "  <- 当前" if abs(sar_n - ev_mod.SAR_NONE) < 1e-9 else ""
-            print("  %.2f       %.3f          %.3f%s" % (sar_n, neg, oa, flag))
+            print("  %-7s    %.3f          %.3f%s" % (_fmt_thr(sar_n), neg, oa, flag))
         print("  -> 决策提示：先定「可接受的引用丢失率(oa)」，再动 SAR_NONE ——"
               " 两个方向都有真实代价，没有免费选项")
         print("  !  平台期：tuning 0.25 / holdout 0.15 之后风险面不再下降，继续调高只涨 oa")
