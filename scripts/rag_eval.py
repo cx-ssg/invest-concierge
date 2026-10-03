@@ -367,6 +367,14 @@ def _pct(values, p):
     return int(vals[min(len(vals) - 1, max(0, idx))])
 
 
+def _gold_in_candidates(o):
+    """该行的 gold 块是否在本轮 top-k 里（`judge_fn` 的归因分母）。缺标注 ⇒ 视为不可归因。"""
+    gold = o["row"].get("answer_chunk_ids") or []
+    if not gold:
+        return False
+    return bool({str(g) for g in gold} & (o.get("got_ids") or set()))
+
+
 def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
                   llm_fn=None, timeout_s=None, max_judge=0):
     """B1 · LLM 判官的评测口径（判据落 **`judge_fp`**，不在 `weak_fp`）。
@@ -402,7 +410,15 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
             trace = [{"name": "retrieve_docs", "arguments": {"query": r["query"]},
                       "output": json.dumps(raw)}]
             reqs = judge_service.collect_from_tool_trace(trace)
-            observed.append({"tag": tag, "row": r, "req": reqs[0] if reqs else None})
+            # F1：记下本次 top-k 的 chunk_id —— `judge_fn` 的**归因**要用它区分
+            # 「判官误杀」与「gold 压根没被检索到」（两种原因的处置完全不同）。
+            try:
+                got_ids = {str(x.get("chunk_id"))
+                           for x in (json.loads(raw) or {}).get("results") or []}
+            except Exception:  # noqa: BLE001 - 记不到就退化为"不可归因"
+                got_ids = set()
+            observed.append({"tag": tag, "row": r, "req": reqs[0] if reqs else None,
+                             "got_ids": got_ids})
 
     triggered = [o for o in observed if o["req"]]
     if max_judge > 0:
@@ -419,6 +435,23 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
     weak_rel = [o for o in triggered if o["tag"] == "rel"]
     passed = [o for o in weak_irr if (o["event"] or {}).get("level") == "relevant"]
     killed = [o for o in weak_rel if (o["event"] or {}).get("level") == "irrelevant"]
+    # ⚠️ 2026-10-03 F1：`judge_fn` / `span_valid` 是 A3b 判据（`docs/M1_EVAL_REPORT.md` L147）的
+    #   另两个量，此前**本工具压根没实现** ⇒ 判据只被报出 1/3。口径（逐条可复算）：
+    #   · `judge_fn`    = weak 档正例里**未被确认相关**的比例（`level != relevant`，含 `uncertain`）
+    #     ⚠️ 它把「判官误杀」与「gold 根本没被检索到」**混在一起** —— 报告须同时给
+    #        `judge_fn_gold_recalled`（分母只算 gold 在 top-k 内的那部分）用于归因。
+    #   · `span_valid`  = 判官**提出** relevant 的条目里，引文通过逐字校验的比例。
+    #     提出 = `verdict == relevant`（通过）**或** `quote_rejected == True`（被拒后已降级）；
+    #     主体边界闸门降级的那批**不置** `quote_rejected` ⇒ 不计入跨度分母（它们不是跨度问题）。
+    fn = [o for o in weak_rel if (o["event"] or {}).get("level") != "relevant"]
+    fn_gold = [o for o in fn if _gold_in_candidates(o)]
+    span_ok = span_bad = 0
+    for o in triggered:
+        for it in ((o["event"] or {}).get("items") or []):
+            if it.get("verdict") == "relevant":
+                span_ok += 1
+            elif it.get("quote_rejected"):
+                span_bad += 1
     grades = [o for o in triggered if (o["event"] or {}).get("checked")]
     latencies = [(o["event"] or {}).get("latency_ms") or 0 for o in grades]
 
@@ -439,6 +472,13 @@ def judge_metrics(rows_rel, rows_irr, qvecs, k=TOP_K, db_path=None,
         "judge_fp": len(passed) / n_weak_irr,
         "judge_fp_all_irr": len(passed) / max(len(rows_irr), 1),
         "judge_kill_rate": len(killed) / n_weak_rel,
+        "judge_fn": len(fn) / n_weak_rel,
+        "judge_fn_n": len(fn),
+        "judge_fn_gold_recalled_n": len(fn_gold),
+        "judge_fn_gold_recalled": len(fn_gold) / n_weak_rel,
+        "span_valid": (span_ok / (span_ok + span_bad)) if (span_ok + span_bad) else 1.0,
+        "span_proposed": span_ok + span_bad,
+        "span_rejected": span_bad,
         "judge_uncertain": sum(1 for o in triggered
                                if (o["event"] or {}).get("checked") is False),
         "judge_fp_by_kind": by_kind,
@@ -676,6 +716,14 @@ def main(argv=None):
               % jm["judge_fp_all_irr"])
         print("  judge_kill_rate    = %.3f   (%d 条 weak 档正例被判 irrelevant —— 相关查询误杀)"
               % (jm["judge_kill_rate"], round(jm["judge_kill_rate"] * jm["n_weak_rel"])))
+        # F1：A3b 判据的另外两个量（此前本工具未实现 ⇒ 判据只被报出 1/3）
+        print("  judge_fn           = %.3f   (%d/%d weak 档正例**未被确认相关** —— A3b 判据之一；"
+              "含 uncertain)" % (jm["judge_fn"], jm["judge_fn_n"], jm["n_weak_rel"]))
+        print("      └ 归因：其中 gold **确实在 top-k 内**的只有 %d 条（= %.3f）—— 其余是检索没召回到，"
+              "不是判官误杀" % (jm["judge_fn_gold_recalled_n"], jm["judge_fn_gold_recalled"]))
+        print("  span_valid         = %.3f   (判官**提出**的 relevant 里引文逐字通过的占比；"
+              "%d 条被拒 / 共 %d 条 —— A3b 判据之一)"
+              % (jm["span_valid"], jm["span_rejected"], jm["span_proposed"]))
         print("  未判出（超时/解析失败）= %d 条；延迟 p50 = %dms  p90 = %dms（n=%d，仅计已判出）"
               % (jm["judge_uncertain"], jm["latency_p50"], jm["latency_p90"], jm["n_latency"]))
         for kind, d in sorted(jm["judge_fp_by_kind"].items()):

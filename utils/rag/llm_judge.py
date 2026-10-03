@@ -15,15 +15,32 @@
 ## 三条硬规则（任务书 §1.1）
 
 1. **引文确定性校验（本任务的核心防线）**：判 `relevant` 必须附 **≥12 字逐字引文**；
-   代码把引文与候选 `text` 都做**空白折叠**（连续空白 → 单空格，见 `normalize_ws`）
-   后做 substring 校验 —— **引用不存在 ⇒ 该条降级为 `uncertain` 并置
-   `quote_rejected=True`**（不允许"看起来像"）。
+   代码把引文与候选 `text` 都做**跨度归一化**（`normalize_span`：CJK 之间的空白是排版伪影、
+   直接删；其余连续空白 → 单空格）后做 substring 校验 —— **引用不存在 ⇒ 该条降级为
+   `uncertain` 并置 `quote_rejected=True`**（不允许"看起来像"）。
    ⚠️ 这条校验**只能证明"非凭空编造"，不能证明"足以回答"**（B-F10：≥12 字阈值几乎
    没有鉴别力；B-F6：难例实测放行且引文全部通过校验）—— 详见 `quote_verified` docstring。
 2. **输入裁剪**：每块只喂 `title + text[:per_chunk_chars]`；总 prompt 有上限。
    原型 43.7s 里 **90% 是 prefill** ⇒ 裁剪是主杠杆（实测裁剪后 2.9s，`probe-judge.json`）。
 3. **诚实降级**：无 LLM / 超时 / JSON 解析失败 / 模型乱答 ⇒ `level="uncertain"`,
    `checked=False`，**绝不抛异常**。判官**永远不能**把不可信结果伪装成 `relevant`。
+
+## F1（2026-10-03 · A3b 攻坚）改了什么
+
+A3b 判据（`docs/M1_EVAL_REPORT.md` L147：`judge_fp ≤0.10` / `judge_fn ≤0.15` /
+`span_valid ≥0.95`）在 B1 之后**未达成**（`judge_fp` 中位 0.308）。本轮逐条实测三种手段后：
+
+| 手段 | 实测（tuning，weak 负 58 / weak 正 13，12–24 采样） | 处置 |
+|---|---|---|
+| ① 抽取式作答（**证明**能回答，而非**声称**） | `judge_fp` 0.293 → **0.086**，`judge_fn` 0.000 → 0.077 | ✅ **采用**（`PROMPT_TMPL`） |
+| ② 要素覆盖（引文必须覆盖被问要素） | `judge_fp` → 0.034 **但** `judge_fn` → **0.308**（"分红总额" vs "派发现金红利…元" 这类同义改写被误杀） | ❌ **否决**（净负作用） |
+| ②' 只留"形状"子检查（数值/因果/时间） | 对 `judge_fp` **零效果** | ❌ 否决 |
+| ③ 实体边界（主体必须同一） | 提示词内指令：`judge_fp` 0.086 → 0.069；**确定性闸门** `subject_mismatch`：在①之上 0.0776 → 0.0690（配对 更好 1 / 更差 0 / 相同 23） | ✅ 采用（**边际**，理由是它唯一确定性） |
+
+另修一处**判罚质量缺陷**：`quote_verified` 原用 `normalize_ws`（空白→单空格），把
+"PDF 换行落在词中"的正确引文误判为不存在（实测 111 条失败引文里 110 条属此类）
+⇒ 13% 的正确判罚被降级成 `uncertain`，直接抬高 `judge_fn`、压低 `span_valid`。
+现改用 `normalize_span`（见其 docstring；B-F10 的**拉丁文**跨空白反例仍被拒）。
 
 ## 实测边界（`probe-judge-batch.json`，n 小，勿过度推断）
 
@@ -32,6 +49,10 @@
 **全部通过逐字校验** ⇒ **引文校验挡不住"断章取义"**：模型能引用真实存在、
 但**不足以回答问题**的片段。相关查询误杀 1/5。**判官是增益，不是保证** ——
 任何对外表述不得写成"判官能保证不误用"。
+
+⚠️ 上面这组是 **B1 旧提示词**下的数字，保留作对照；F1 换提示词 + 修跨度归一化后的
+**实测值见本文件 `PROMPT_TMPL` 上方的表**（tuning，12–24 采样，中位/区间）。
+`in_domain_unanswerable` 仍是**最难**的一类（tuning 上 3/30 漏网、`near_miss` 1/25）。
 
 ## 与产线的边界（硬约束，任务书 §3）
 
@@ -48,7 +69,7 @@ import time
 __all__ = [
     "LEVEL_RELEVANT", "LEVEL_IRRELEVANT", "LEVEL_UNCERTAIN",
     "MIN_QUOTE_CHARS", "DEFAULT_PER_CHUNK_CHARS", "DEFAULT_MAX_TOTAL_CHARS",
-    "normalize_ws", "quote_verified", "build_prompt", "judge_candidates",
+    "normalize_ws", "normalize_span", "quote_verified", "build_prompt", "judge_candidates",
 ]
 
 LEVEL_RELEVANT = "relevant"
@@ -65,22 +86,46 @@ DEFAULT_MAX_TOTAL_CHARS = 12000
 DEFAULT_TIMEOUT_S = 20.0
 
 #: 判官提示词。**只输出 JSON**（实测模型能稳定遵守，无需 function calling / JSON mode）。
-PROMPT_TMPL = """你是检索质量判官。给定一个问题与若干候选文档片段，判断**这些片段能否回答该问题**。
+#:
+#: ⚠️⚠️ 2026-10-03 **F1 · A3b 攻坚（approach 1 + 3，实测选型）**：
+#: 旧版只问「这些片段**能否**回答该问题」并要求一段"12 字以上逐字引文" —— 实测该问法
+#: 允许模型走"话题相关"这条捷径：tuning（58 条 weak 负例 / 13 条 weak 正例，12 采样）
+#: `judge_fp` 中位 **0.293 [0.276, 0.362]**，超 A3b 门槛（≤0.10）约 3 倍。
+#: 新版把"声称能回答"改成"**证明能回答**"：
+#: ① 要求模型先确定**答案形态**，再在片段里**逐字找出那一句答案句**（找不出 ⇒ irrelevant）
+#:    —— 这直接堵「断章取义」（问原因、片段只有下降幅度）；
+#: ② 要求先核对**主体是否同一个**（母公司的子公司 / 同名机构 / 行业协会都不算同一主体）
+#:    —— 这堵「指代混淆」（`贵州茅台集团` / `茅台学院` / `茅台机场` ≠ `贵州茅台`）。
+#: 实测（12 采样，tuning）：`judge_fp` 中位 **0.293 → 0.086**（区间 [0.052, 0.103]），
+#: 代价 `judge_fn` 0.000 → **0.077**（1/13 条可答查询，上限 0.154 ≤ 0.15）。
+#: ⚠️ **要素覆盖检查（approach 2）实测被否**（见 `docs/` 外的 `.f1/` 证据与报告 §对照实验）：
+#: 它能把 fp 压到 0.034，但同类同义改写（问"分红总额"、答"共计派发现金红利…元"）会被误杀，
+#: `judge_fn` 暴涨到 **0.308** ⇒ 净负作用，**不采用**。
+PROMPT_TMPL = """你是检索质量判官。给定一个问题与若干候选文档片段，请逐条回答：**这个片段里是否有一句话，单独拿出来就能直接回答该问题？**
 
 问题：{question}
 
 候选片段：
 {candidates}
 
-要求（严格遵守）：
-1. 对每条候选给出 verdict：`relevant`（该片段直接包含能回答问题的信息）或 `irrelevant`。
-2. 若判 `relevant`，**必须**附一段 **12 字以上的逐字引文** `quote`，且该引文必须**原样出现在该片段中**
-   （不得改写、不得拼接、不得跨段取）。
-3. 只输出 JSON，不要任何解释文字。格式：
-{{"items":[{{"chunk_id":<int>,"verdict":"relevant|irrelevant","quote":"<逐字引文或空串>"}}]}}
+判定方法（必须逐条执行，不得凭"话题相关"或"看起来像"就下结论）：
+1. 先确定该问题的答案**应该长什么样**（一个金额 / 一个比例 / 一个日期 / 一个人名 / 一句原因 / 一项事实）。
+2. 再确认**主体是否同一个**：问题点名的对象（例如"贵州茅台集团""茅台学院""茅台机场""贵州茅台医院"）
+   与片段里那句话的主语必须是**同一个主体**。母公司的子公司、同名机构、行业协会都**不算**同一主体。
+3. 在该片段中**逐字找出**能满足要求的那句话（答案句）：
+   - 必须是片段中**原样存在**的连续文本，不得改写、不得拼接、不得跨段；
+   - 该句**本身必须包含答案**，而不是只提供相关背景（例如问"原因"，片段只写了下降幅度 ⇒ 找不到答案句）。
+4. 找得到且主体一致 ⇒ `verdict="relevant"`，把那句话原样放进 `quote`（≥12 字）。
+   找不到、或主体不是同一个 ⇒ `verdict="irrelevant"`，`quote` 留空。
+5. 只输出 JSON，不要任何解释文字。格式：
+{{"items":[{{"chunk_id":<int>,"verdict":"relevant|irrelevant","quote":"<逐字答案句或空串>"}}]}}
 """
 
 _WS_RE = re.compile(r"\s+")
+#: 「表意文字 / 全角标点」类字符（CJK 统一表意文字 + 假名 + 全角标点 + CJK 符号）
+_CJK_CLASS = (r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]")
+#: 夹在两个 CJK 字符之间的空白（PDF/公告落库时的换行伪影，如 `薪酬分\n案`、`任\n期激励`）
+_CJK_WS_RE = re.compile(r"(?<=%s)\s+(?=%s)" % (_CJK_CLASS, _CJK_CLASS))
 
 
 class _LLMTimeout(Exception):
@@ -104,12 +149,45 @@ def normalize_ws(s):
     return _WS_RE.sub(" ", s or "").strip()
 
 
+def normalize_span(s):
+    """**跨度归一化**（引文校验专用，2026-10-03 F1 新增）：CJK 感知的空白处理。
+
+    与 `normalize_ws` 的差别只有一条：**夹在两个表意文字/全角标点之间的空白直接删掉**，
+    其余空白仍折叠成单个空格。
+
+    ## 为什么必须这样（实测，不是推理）
+
+    语料是 PDF 提取的公告/财报，**换行落在词中是常态**：`薪酬分\n案。` / `任\n期激励` /
+    `第\n三次会议`。模型逐字抄回那句话时会自然地把词内换行去掉（人也不会写"薪酬分 案"），
+    于是旧的 `normalize_ws`（空白 → 单空格）把**真实存在、逐字一致**的引文判成"不存在"。
+
+    `.f1/span_diag.py` 在 tuning 的 5 个提示词臂 × 采样上取 **700 条模型提出的 relevant**：
+    旧口径失败 **111** 条，其中 **110 条**是这种空白形态差异（另 1 条是**真·张冠李戴**：
+    模型把 chunk 109 的句子挂到 chunk 63 上）；换成 `normalize_span` 后失败降到 **7 条**
+    （5 条是引文短于 `MIN_QUOTE_CHARS`，1 条张冠李戴，1 条同为过短）。
+    ⇒ 旧口径把 13% 的正确判罚**误降级成 uncertain**，直接抬高 `judge_fn`、压低 `span_valid`。
+
+    ## 与 B-F10（审计 · `normalize_ws` 的收窄）的关系
+
+    B-F10 关掉的是「**删光全部空白**」，理由是跨空白拼接（`quote_verified("aabbccddeeff",
+    "aa bb cc dd ee ff")` 会命中）。本条**不恢复**那条路：
+    **拉丁文/数字之间的空白仍然有意义** —— 上例里两串归一化后仍不相等（前者原样、
+    后者折叠成 `aa bb cc dd ee ff`），B-F10 的锁（`tests/test_rag_llm_judge.py::
+    test_cross_whitespace_concat_quote_is_rejected`）**保持绿灯**。
+    被放宽的只有一种形态：**CJK 之间多一个/少一个空白**（排版伪影，不携带语义）。
+    代价如实记录：CJK 文本里**确实**被空白分开的两段（如两栏排版）现在也能拼成一条引文；
+    但字符本身仍必须**原序、连续**（空白之外的字符一个都不能少），伪造内容依旧过不了。
+    """
+    s = s or ""
+    return _WS_RE.sub(" ", _CJK_WS_RE.sub("", s)).strip()
+
+
 def quote_verified(quote, text, min_chars=None):
-    """引文是否**空白折叠后逐字**出现在候选正文里（substring）。
+    """引文是否**跨度归一化后逐字**出现在候选正文里（substring）。
 
     ## 这条校验**能证明**什么
 
-    - 引文（≥ `min_chars` 字）确实是候选正文里的**一段连续文本**（空白折叠后逐字命中）；
+    - 引文（≥ `min_chars` 字）确实是候选正文里的**一段连续文本**（`normalize_span` 后逐字命中）；
     - ⇒ 判 `relevant` 的那条**不是凭空编造**的：模型没有虚构一段原文里不存在的话。
 
     ## **不能**证明什么（对外表述必读，审计 B-F6/B-F10）
@@ -117,19 +195,105 @@ def quote_verified(quote, text, min_chars=None):
     - **不证明引文足以回答问题**：模型可以引一段真实存在、但**断章取义**的片段
       （实测 4/14 难例被放行且引文全部通过校验，`probe-judge-batch.json`）；
     - **不证明结论正确**：`MIN_QUOTE_CHARS=12` 几乎不构成鉴别力 —— 任何 ≥12 字的原文
-      子串都能过（它是"非编造"闸门，**不是"质量"判据**）；
+      子串都能过（它是"非编造"闸门，**不是"质量"判据**）
+      ⚠️ F1 实测：过短的引文确实会**误伤**（`.f1/` 里 7 条失败引文有 5 条是 <12 字，
+      例如 `二、董事会会议审议情况`（11 字）本身是对的答案句）—— 但该阈值是审计过的
+      反伪造下限，本轮**不动**，如实记为已知代价；
     - **不覆盖改写**：同义改写会被拒（拒绝方向，不影响安全性质）；
-    - **不覆盖跨空白拼接**（B-F10 加固后）：拼接处只要原文没有空白就会被拒。
+    - **CJK 之间的空白形态不再影响判定**（2026-10-03 F1，见 `normalize_span`）。
 
     参数：`min_chars` 缺省 = `MIN_QUOTE_CHARS`（12）——太短的引文没有鉴别力，且"拼一个字"
     会绕过校验。**绝不抛异常**；非字符串按空串处理。
     """
     if min_chars is None:
         min_chars = MIN_QUOTE_CHARS
-    q = normalize_ws(quote if isinstance(quote, str) else "")
+    q = normalize_span(quote if isinstance(quote, str) else "")
     if len(q) < max(1, int(min_chars or 0)):
         return False
-    return q in normalize_ws(text if isinstance(text, str) else "")
+    return q in normalize_span(text if isinstance(text, str) else "")
+
+
+# ==================== 主体边界检查（F1 · approach 3，机器可校验） ====================
+#: 组织机构后缀 —— 问题主体串以它结尾，才可能"点的是**另一个**主体"。
+_ORG_SUFFIXES = ("集团", "公司", "学院", "机场", "医院", "酒业", "银行", "酒店",
+                 "旅行社", "基地", "中心", "厂", "学校", "协会", "专卖店", "门店")
+#: 候选块标题的「公司名:…」前缀（与 `utils/rag/query_scope.lead_name` 同一形态）
+_TITLE_NAME_RE = re.compile(r"^\s*([\u4e00-\u9fa5A-Za-z]{2,10}?)[：:]")
+#: 主体串的右边界：第一个「的」或疑问词
+_SUBJECT_CUT_RE = re.compile(r"的|是多少|有多少|有多大|有多高|有多长|有多久|多少|如何|怎么样|是否|吗")
+#: 主体串尾部要去掉的时间/指示词
+_SUBJECT_TAIL_RE = re.compile(
+    r"(去年|今年|明年|上年|本年|本年度|前年|最近|现在|目前|一年|[0-9]{4}\s*年)+$")
+#: 主体串头部要去掉的虚词
+_SUBJECT_HEAD_RE = re.compile(r"^(请问|那么|这次|这批|该|本|这个|那个|上述|公司)+")
+
+
+def chunk_company(title):
+    """候选块所属的公司名（`公司名:标题` 前缀）；取不到返回 `""`（保守：不干预）。"""
+    m = _TITLE_NAME_RE.match((title or "").strip())
+    return m.group(1) if m else ""
+
+
+def query_subject(query):
+    """问题点名的**主体串**（第一个「的」/疑问词之前那一段，去掉首尾时间与虚词）。"""
+    q = re.sub(r"[^\u4e00-\u9fff0-9（）()]", "", query or "")
+    cut = len(q)
+    for m in _SUBJECT_CUT_RE.finditer(q):
+        cut = min(cut, m.start())
+    return _SUBJECT_HEAD_RE.sub("", _SUBJECT_TAIL_RE.sub("", q[:cut]))
+
+
+def subject_mismatch(query, title, quote):
+    """**主体边界检查**：问题点名的对象是否**不是**本块的主体（机器可校验，绝不抛）。
+
+    判定「不一致」需三条同时成立：
+    1. 主体串以**组织机构后缀**结尾（`…集团` / `…学院` / `…公司` / `…机场` / `…医院`）；
+    2. 主体串**含本块公司名或其 2 字别名** —— 否则问题问的是别的标的（检索侧已按标的收窄池），
+       本块无责任，不干预；
+    3. 主体串 **≠ 公司名**，且**没有逐字出现在引文里**。
+
+    只在**判 `relevant` 之后**调用；命中 ⇒ 降 `uncertain`（**不**置 `quote_rejected`：
+    引文本身逐字命中，被否的是"主体不是同一个"）。
+
+    ⚠️ **实测效果（tuning，24 次采样，CJK 口径）**：在**新版提示词之上**它只让
+    `judge_fp` 中位 0.0776 → **0.0690**，配对「更好 1 / 更差 0 / 相同 23」——**边际量级**。
+    保留它的理由不是分数，而是它是这套判罚里**唯一确定性的**一环（不依赖模型是否听话）；
+    在旧提示词上配对「更好 7 / 更差 0 / 相同 5」（n=12）。如实记录，不夸大。
+    """
+    try:
+        subj = query_subject(query)
+        if len(subj) < 4 or not subj.endswith(_ORG_SUFFIXES):
+            return False
+        name = chunk_company(title)
+        if not name:
+            return False
+        if name not in subj and name[-2:] not in subj:
+            return False
+        if subj == name:
+            return False
+        qq = normalize_span(quote)
+        if subj in qq or re.sub(r"[^\u4e00-\u9fff]", "", subj) in re.sub(r"[^\u4e00-\u9fff]", "", qq):
+            return False
+        # 引文没用**逐字全名**、但点名了同一个主体（如全称"中国贵州茅台酒厂（集团）有限责任公司"
+        # 内含别名"茅台" + 判别后缀"集团"）⇒ 也算同一主体，不干预。
+        alias, suffix = name[-2:], _distinctive_suffix(subj)
+        if suffix and alias in qq and suffix in qq:
+            return False
+        return True
+    except Exception:  # noqa: BLE001 - 判官是旁路：任何异常都不得影响判定
+        return False
+
+
+def _distinctive_suffix(subj):
+    """主体串里**最有判别力**的组织后缀（`贵州茅台集团财务有限公司` → `集团` 而非 `公司`）。"""
+    for s in ("集团", "学院", "机场", "医院", "酒业", "银行", "酒店", "旅行社",
+              "基地", "中心", "专卖店", "门店", "厂", "学校", "协会"):
+        if s in subj:
+            return s
+    for s in _ORG_SUFFIXES:
+        if subj.endswith(s):
+            return s
+    return ""
 
 
 def _extract_json_object(text):
@@ -337,6 +501,10 @@ def judge_candidates(question, candidates, *, llm_fn=None,
             # ★ 核心防线：引文不存在 ⇒ 降级 + 留痕，不允许"看起来像"
             verdict = LEVEL_UNCERTAIN
             rejected = True
+        elif verdict == LEVEL_RELEVANT and subject_mismatch(question, c.get("title"), quote):
+            # ★ F1 · approach 3：引文逐字命中，但**主体不是同一个**（母公司/子公司/同名机构）
+            #   ⇒ 降级为 uncertain。不置 `quote_rejected`（引文本身没问题，被否的是主体）。
+            verdict = LEVEL_UNCERTAIN
         items.append({"chunk_id": cid, "verdict": verdict,
                       "quote": quote, "quote_rejected": rejected})
 

@@ -165,17 +165,57 @@ def test_cross_whitespace_concat_quote_is_rejected():
     assert legacy in text, "前置：这条引文只在'删光空白'的旧口径下命中"
 
 
-def test_cross_whitespace_concat_quote_downgraded_by_judge():
-    """B-F10：判官层面同样生效 —— 跨空白拼接的 relevant 被降级为 uncertain 并留痕。"""
-    text = "贵州茅台上半年营业收入 同比增长百分之十五，净利润略降。"
+def test_cjk_linebreak_quote_is_accepted_and_keeps_verdict():
+    """F1（2026-10-03）：**CJK 之间的空白是排版伪影**（PDF 换行落在词中）⇒ 不该否掉引文。
+
+    语料是 PDF 提取的公告，`薪酬分\\n案。` / `任\\n期激励` 是常态；模型逐字抄回那句话时
+    会自然地把词内换行去掉。旧的 `normalize_ws`（空白 → 单空格）把这类**真实存在、
+    逐字一致**的引文判成"不存在"。
+
+    **红/绿留证**：把 `quote_verified` 换回 `normalize_ws` 口径 ⇒ 本用例必红
+    （实测 tuning 上 111 条被拒引文里 **110 条**属此类，直接抬高 `judge_fn`、压低 `span_valid`）。
+    """
+    text = "贵州茅台上半年营业收入\n同比增长百分之十五，净利润略降。"
 
     def fake(prompt):
-        # 模型把原文里那个空格抹掉（跨空白拼接的镜像形态）
+        # 模型把原文里那个**词内换行**去掉（人也不会写"营业收入 同比增长"）
         return _llm_text({"items": [{"chunk_id": 1, "verdict": "relevant",
                                      "quote": "贵州茅台上半年营业收入同比增长百分之十五"}]})
 
     out = llm_judge.judge_candidates(
         "营收", [{"chunk_id": 1, "title": "T", "text": text}], llm_fn=fake)
+    item = out["items"][0]
+    assert item["quote_rejected"] is False
+    assert item["verdict"] == llm_judge.LEVEL_RELEVANT
+    assert out["level"] == llm_judge.LEVEL_RELEVANT
+
+
+def test_normalize_span_drops_cjk_inner_whitespace_only():
+    """`normalize_span` 的**边界**：只吃 CJK 之间的空白，拉丁文词间空白保留（B-F10 性质）。"""
+    assert llm_judge.normalize_span("薪酬分\n案。") == "薪酬分案。"
+    assert llm_judge.normalize_span("净利润 15% 增长") == "净利润 15% 增长"  # 拉丁/数字侧不删
+    assert llm_judge.normalize_span(" aa\t\tbb ") == "aa bb"
+    # B-F10 的原始反例：拉丁字母之间的空白**有语义** ⇒ 两串仍不相等
+    assert llm_judge.normalize_span("aa bb cc dd ee ff") != llm_judge.normalize_span("aabbccddeeff")
+    # `normalize_ws` 本体**未被改动**（B-F10 的锁仍锁在它身上）
+    assert llm_judge.normalize_ws("薪酬分\n案。") == "薪酬分 案。"
+
+
+def test_latin_cross_whitespace_concat_quote_is_still_downgraded():
+    """B-F10 的性质在**拉丁文**上原样保留：删掉词间空白 = 跨空白拼接 ⇒ 降级 + 留痕。
+
+    与 `test_cjk_linebreak_quote_is_accepted_and_keeps_verdict` 是同一条规则的两侧：
+    F1 放宽的**只有** CJK 排版伪影，拉丁文那侧的锁**没有**被放宽。
+    """
+    text = "revenue aa bb cc dd ee ff growth reported here"
+    assert llm_judge.quote_verified("revenue aabbccddeeff growth", text) is False
+
+    def fake(prompt):
+        return _llm_text({"items": [{"chunk_id": 1, "verdict": "relevant",
+                                     "quote": "revenue aabbccddeeff growth"}]})
+
+    out = llm_judge.judge_candidates(
+        "revenue", [{"chunk_id": 1, "title": "T", "text": text}], llm_fn=fake)
     item = out["items"][0]
     assert item["quote_rejected"] is True
     assert item["verdict"] == llm_judge.LEVEL_UNCERTAIN
@@ -205,6 +245,82 @@ def test_short_quote_is_rejected():
     out = llm_judge.judge_candidates("营收", _cands(), llm_fn=fake)
     assert out["items"][0]["quote_rejected"] is True
     assert out["items"][0]["verdict"] != "relevant"
+
+
+# ==================== F1 · approach 3：主体边界检查（可机器校验） ====================
+#: 母公司/子公司语境：问题问"集团"，候选块属于上市公司
+GROUP_TEXT = "贵州茅台酒股份有限公司2026年上半年实现营业收入八百亿元，同比增长百分之十五。"
+
+
+def test_query_subject_extracts_org_chain():
+    """主体串抽取：第一个「的」/疑问词之前那一段，去掉尾部时间词与头部虚词。"""
+    q = llm_judge.query_subject
+    assert q("贵州茅台集团2025年的营业收入是多少") == "贵州茅台集团"
+    assert q("贵州遵义茅台机场去年的旅客吞吐量是多少") == "贵州遵义茅台机场"
+    assert q("贵州茅台（集团）生态农业产业发展有限公司的销售额是多少") == \
+        "贵州茅台（集团）生态农业产业发展有限公司"
+    assert q("贵州茅台的长期战略是否清晰") == "贵州茅台"
+    assert q("公司净利润下降的原因是什么？") == "净利润下降"
+    assert llm_judge._distinctive_suffix("贵州茅台集团财务有限公司") == "集团"
+    assert llm_judge._distinctive_suffix("贵州遵义茅台机场") == "机场"
+
+
+def test_subject_mismatch_flags_group_vs_listed_company():
+    """问题问"贵州茅台**集团**"，引文讲的是上市公司 ⇒ **不一致**（母公司的子公司 ≠ 同一主体）。"""
+    assert llm_judge.chunk_company("贵州茅台:贵州茅台2026年半年度报告") == "贵州茅台"
+    assert llm_judge.subject_mismatch("贵州茅台集团2025年的营业收入是多少",
+                                      "贵州茅台:贵州茅台2026年半年度报告", GROUP_TEXT) is True
+    # 引文**点名**了那个主体 ⇒ 不算不一致
+    assert llm_judge.subject_mismatch(
+        "贵州茅台集团2025年的营业收入是多少",
+        "贵州茅台:贵州茅台2026年半年度报告",
+        "中国贵州茅台酒厂（集团）有限责任公司2025年营业收入为一千亿元。") is False
+
+
+def test_subject_mismatch_does_not_fire_on_same_or_unrelated_subject():
+    """**不该触发**的三种情形（防误杀）：主体同一 / 主体是产品词 / 问题没点名别的标的。"""
+    title = "贵州茅台:贵州茅台2026年半年度报告"
+    # ① 主体 == 公司名
+    assert llm_judge.subject_mismatch("贵州茅台的营业收入是多少", title, GROUP_TEXT) is False
+    # ② 产品名（茅台酒）没有组织机构后缀 ⇒ 不是"另一个主体"
+    assert llm_judge.subject_mismatch("这次茅台酒的价格上调了多少", title, GROUP_TEXT) is False
+    # ③ 问题点名的是**别的标的**（本块无责任，检索侧已按标的收窄池）⇒ 不干预
+    assert llm_judge.subject_mismatch("五粮液的营业收入是多少", title, GROUP_TEXT) is False
+    # ④ 标题取不到公司名（非 `公司名:标题` 形态）⇒ 保守不干预
+    assert llm_judge.subject_mismatch("贵州茅台集团2025年的营业收入是多少", "无名标题", GROUP_TEXT) is False
+
+
+def test_subject_mismatch_downgrades_judge_verdict_without_quote_reject():
+    """判官层面：引文逐字命中但主体不一致 ⇒ 降 `uncertain`；**不**置 `quote_rejected`。"""
+    def fake(prompt):
+        return _llm_text({"items": [{"chunk_id": 1, "verdict": "relevant",
+                                     "quote": "2026年上半年实现营业收入八百亿元"}]})
+
+    out = llm_judge.judge_candidates(
+        "贵州茅台集团2025年的营业收入是多少",
+        [{"chunk_id": 1, "title": "贵州茅台:贵州茅台2026年半年度报告", "text": GROUP_TEXT}],
+        llm_fn=fake)
+    item = out["items"][0]
+    assert item["quote_rejected"] is False, "引文本身逐字命中，被否的是主体"
+    assert item["verdict"] == llm_judge.LEVEL_UNCERTAIN
+    assert out["level"] == llm_judge.LEVEL_UNCERTAIN
+
+
+def test_subject_mismatch_reverse_control_turns_red_when_neutered(monkeypatch):
+    """**反向对照**：把 `subject_mismatch` 打成恒假 ⇒ 上面那条判官用例**必须红**（证明它有牙）。"""
+    monkeypatch.setattr(llm_judge, "subject_mismatch", lambda q, t, c: False)
+
+    def fake(prompt):
+        return _llm_text({"items": [{"chunk_id": 1, "verdict": "relevant",
+                                     "quote": "2026年上半年实现营业收入八百亿元"}]})
+
+    out = llm_judge.judge_candidates(
+        "贵州茅台集团2025年的营业收入是多少",
+        [{"chunk_id": 1, "title": "贵州茅台:贵州茅台2026年半年度报告", "text": GROUP_TEXT}],
+        llm_fn=fake)
+    assert out["level"] == llm_judge.LEVEL_RELEVANT, (
+        "闸门被打桩成恒假后仍判 none/uncertain ⇒ 说明判官根本没调用 subject_mismatch")
+
 
 
 def test_missing_quote_is_rejected():
@@ -838,6 +954,62 @@ def test_judge_metrics_trigger_rate_excludes_none_level(kb):
     assert m["n_weak_irr"] == 0
     assert m["judge_fp"] == 0.0
     assert m["judge_fp_all_irr"] == 0.0
+
+
+def test_judge_metrics_reports_fn_and_span_valid(kb):
+    """F1：A3b 判据的另外两个量（`judge_fn` / `span_valid`）**此前本工具压根没实现**。
+
+    口径：`judge_fn` = weak 档正例里未被确认相关的比例（含 `uncertain`）；
+    `span_valid` = 判官**提出**的 relevant 里引文逐字通过的占比（被拒的那批要进分母，
+    否则"拒得多"反而让 span_valid 虚高）。
+    """
+    import numpy as np
+
+    from scripts.rag_eval import judge_metrics
+
+    rows_rel = [{"id": "rel-1", "query": WEAK_QUERY, "answer_chunk_ids": []}]
+    rows_irr = [{"id": "irr-forged", "kind": "near_miss", "query": WEAK_QUERY}]
+    qvecs = np.asarray([WEAK_VEC, WEAK_VEC], dtype="float32")
+
+    calls = {"n": 0}
+
+    def fake(prompt):
+        calls["n"] += 1
+        if calls["n"] == 1:                       # 正例：伪造引文 ⇒ 被判官降级 ⇒ 计入 judge_fn
+            return _judge_reply(prompt, forged=True)
+        return _judge_reply(prompt, forged=True)  # 负例：同样被拒 ⇒ 不计放行
+
+    m = judge_metrics(rows_rel, rows_irr, qvecs, db_path=kb, llm_fn=fake, timeout_s=5)
+    assert m["judge_fn"] == 1.0, "正例未被确认相关 ⇒ judge_fn 必须是 1.0"
+    assert m["judge_fn_n"] == 1
+    assert m["judge_fp"] == 0.0, "伪造引文不得计放行"
+    assert m["span_proposed"] == 2 and m["span_rejected"] == 2
+    assert m["span_valid"] == 0.0, "两条提出的引文都被拒 ⇒ span_valid = 0"
+
+
+def test_judge_metrics_span_valid_counts_rejected_quotes(monkeypatch, kb):
+    """`span_valid` 的**判别力**：把引文校验打桩成恒真 ⇒ 被拒条目消失 ⇒ span_valid 变 1.0。
+
+    这条是反向对照：若实现改成"只数通过的"，两种情形都会是 1.0，本用例就抓不到差异。
+    """
+    import numpy as np
+
+    from scripts.rag_eval import judge_metrics
+
+    rows_rel = [{"id": "rel-1", "query": WEAK_QUERY, "answer_chunk_ids": []}]
+    rows_irr = []
+    qvecs = np.asarray([WEAK_VEC], dtype="float32")
+
+    def fake(prompt):
+        return _judge_reply(prompt, forged=True)
+
+    m = judge_metrics(rows_rel, rows_irr, qvecs, db_path=kb, llm_fn=fake, timeout_s=5)
+    assert m["span_valid"] == 0.0 and m["span_rejected"] == 1
+
+    monkeypatch.setattr(llm_judge, "quote_verified", lambda q, t, min_chars=None: True)
+    m2 = judge_metrics(rows_rel, rows_irr, qvecs, db_path=kb, llm_fn=fake, timeout_s=5)
+    assert m2["span_valid"] == 1.0 and m2["span_rejected"] == 0, (
+        "校验恒真后仍报 span_valid < 1 ⇒ 说明 span_valid 的分母没算被拒条目")
 
 
 # ==================== 第 7 层：总预算 / 兜底降级 / 超时取消（B-R1 审计 B-F1/B-F2/B-F3） ====================
