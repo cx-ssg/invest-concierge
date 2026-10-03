@@ -52,13 +52,28 @@
 | **M2 · 长期记忆层** | 三类记忆分离存储、分离召回（偏好**每次对话必注入** / 事实**按标的** / 经验**向量 top-3**）；写入走「候选 → 用户确认」，**AI 不自行写记忆** | 设置页「长期记忆」区（列表 / 删除 / 候选确认 / **召回预览**） |
 | **M3 · 图编排（可选）** | `ORCHESTRATOR=graph` 才开启，**默认 `legacy`、行为不变**；只图化「股票深度诊断」一条链路，换来检查点续跑与人工确认 | `POST /api/stocks/{code}/diagnosis/review` + SQLite 检查点 |
 
+**v1.3.0 → v1.3.2 新增（当前能力，详细口径见后续章节与 [docs/RELEASE_NOTES_v1.3.2.md](docs/RELEASE_NOTES_v1.3.2.md)）**：
+
+| 能力 | 说明 |
+|---|---|
+| **引用回跳** | 检索类回答正文里的 `[n]` 是**可点上标**，下方来源卡给出**标题 / 日期 / 链接** |
+| **LLM 判官（A3b）** | **异步**（`done` 先到、`evidence_judged` 后到）· **仅 weak 档触发**（`none` 档已弃权、判官零调用）· 判官引文需**逐字**命中原文块（确定性校验）· **失败一律降级** `uncertain`；来源卡按判官结论标注 |
+| **历史回放显示来源** | 切回**旧会话**也能看到来源卡与判官标注（v1.3.1 起，落 `agent_messages.meta`）；**老会话不回填**（`meta = NULL` ⇒ 不显示来源区） |
+| **M2 长期记忆层 + 前端记忆管理 UI** | 三类记忆**分离存储、分离召回**；写入走「候选 → 用户确认」（**AI 不自行写记忆**）；设置页可列表 / 删除 / 确认候选 / **召回预览**（详见下方 M2 章节） |
+| **多标的语料 + 查询侧标的识别** | 自建语料 **65 docs / 2111 chunks**（茅台 + 五粮液 + 泸州老窖 + 山西汾酒）；新增 `query_scope` 识别到标的才收窄检索池，抑制**跨标的污染**（口径见评测小节） |
+
 ## 🚀 快速开始（四种方式，任选其一）
 
 ### 方式一：下载安装包（推荐，零 Python 环境）
 
-> ⚠️ **版本与下载口径（务必先读）**：仓库最新 tag 是 **v1.2.0**，但**最新 GitHub Release 仍是 v1.0.0**
-> （`Releases/latest` 指向它）—— **v1.1.0 / v1.2.0 都没有附安装包资产**，安装包里的 exe 只对应 v1.0.0 的代码；
-> **M1 / M2 / M3 是源码功能，安装包以最新 Release 为准，不要把它当成最新代码**。
+> ⚠️ **版本与下载口径（务必先读）**：仓库最新 tag 与**最新 GitHub Release 均为 `v1.3.2`**
+> （`Releases/latest` 指向它，2026-10-04 发布）。
+> **但最新 Release 不一定带安装包**：`v1.1.0` / `v1.2.0` / `v1.3.0` 发布说明都写明「本次未重新打包安装器」，
+> `v1.3.1` / `v1.3.2` 为 patch 版、发布说明未提及资产变更 ⇒ **请按 `Releases/latest` 页面实际列出的资产下载**；
+> 若该页没有 exe，安装包请到
+> [v1.0.0 Release](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0) 下载
+> （`v1.1.0` / `v1.2.0` / `v1.3.0` 发布说明均记载安装包落在该页）。
+> **安装包里的 exe 对应 v1.0.0 的代码；M1 / M2 / M3 等新能力是源码功能，不要把安装包当成最新代码。**
 > 想用新功能请按下面「方式二」源码运行，或按 `docs/PACKAGING.md` 自行构建安装包。
 
 到 [Releases](https://github.com/cx-ssg/invest-concierge/releases/latest) 下载：
@@ -190,7 +205,7 @@ invest-concierge/
 ├─ utils/orchestrator/   图编排 M3（flags / state / graph / nodes / adapters）
 ├─ scripts/           采集与评测脚本（rag_ingest*.py / rag_eval.py / rag_rerank_probe.py）
 ├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
-├─ tests/             **476 个 pytest 用例**（2026-10-02 实测全绿；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块）
+├─ tests/             **625 个 pytest 用例**（v1.3.2 实测全绿，2026-10-04；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额）
 ├─ assets/            设计素材（mockups）
 ├─ .env.example       环境变量模板（复制为 .env 使用）
 ├─ requirements.txt   Python 依赖
@@ -230,6 +245,9 @@ invest-concierge/
 | 存储 | 本地 SQLite（`kb.db`）+ `bge-m3` 向量（1024 维，走本地 Ollama，可降级到 OpenAI 兼容端点） |
 | 检索 | 混合检索：BM25 + 向量 → **RRF 融合**，支持同文档限额 |
 | **证据分档（两档）** | 判据不通过 ⇒ `none` 档**主动弃权**；其余一律 `weak` 档 —— **返回结果但必带**「证据不足档（证据不足）—— 引用前请自行核验」警示。原有的 `strong` 档已于 2026-09-18 撤下 ⇒ **不存在"跳过警示"的通道** |
+| **查询侧标的识别（v1.3.1）** | `utils/rag/query_scope.py` —— 识别到标的才**收窄检索池**（抑制跨标的污染），**识别不到时保持全库**（跨标的/行业类查询不受影响）；返回体新增 `scope` 字段（`explicit` / `auto` / `full`） |
+| **LLM 判官（A3b，v1.3.0 起）** | **仅 `weak` 档触发**（`none` 档已弃权 ⇒ 零调用）；**异步**（`done` 先到、`evidence_judged` 后到）；引文需**逐字**命中原文块；**失败一律降级** `uncertain`。判据与门槛见下方评测小节 |
+| **引用回跳（v1.3.0 起）** | 回答正文 `[n]` 为**可点上标** + 来源卡（标题 / 日期 / 链接）；**切回历史会话同样显示**（v1.3.1 起，落 `agent_messages.meta`；老会话不回填） |
 | 采集 | 巨潮资讯公告 API / **PDF 全文抽取**（`pypdf`）→ 切块 → 向量化，全程脚本可复现 |
 
 **为什么强调引用与弃权**：投资领域最怕「听起来很确定的胡说」。
@@ -255,20 +273,53 @@ python scripts/rag_ingest_pdf.py --code 600519
 评测集随仓库分发（`tests/golden/rag/`），可自行复跑：
 
 ```bash
-python scripts/rag_eval.py --split holdout          # 指标总览
-python scripts/rag_eval.py --split tuning --scan    # 阈值敏感性扫描
-python scripts/rag_rerank_probe.py --split holdout  # LLM 重排探针（会调模型）
+python scripts/rag_eval.py --split holdout               # 指标总览（`prod` / `full` 两种口径并列打印）
+python scripts/rag_eval.py --split holdout --judge llm   # 判官判据（会调模型）
+python scripts/rag_eval.py --split tuning --scan         # 阈值敏感性扫描
+python scripts/rag_rerank_probe.py --split holdout       # LLM 重排探针（离线，会调模型）
 ```
 
-当前指标（holdout 21 条正例）：`Recall@5 = 0.952`、`MRR@10 = 0.605`（**产线未接入 LLM 重排**）。
+**检索（holdout，n = 27 条正例；语料 65 docs / 2111 chunks）—— 两种口径必须并列读**：
 
-`MRR@10 = 0.706 ~ 0.738` 是**离线探针**（`scripts/rag_rerank_probe.py`）的结果，**没有接进产线**（`git grep -i rerank -- utils/ services/ frontend/src` 零命中）；重排不改变结果集合 ⇒ `Recall@5` 不变。要上线须先解决每题 +k 次模型调用的延迟与成本。
+| 口径 | 含义 | `Recall@5` | `MRR@10` |
+|---|---|---|---|
+| `prod` | **已知标的**时（query 含**由金标派生**的标的） | **0.926** | **0.781** |
+| `full` | **无法识别标的**时（全库检索） | **0.593** | **0.386** |
 
-⚠️ **上表数字请按「状态」读，勿跨行拼接**：基线（旧语料 75 块、无限额）`1.000 / 0.702` → 切换 PDF 全文（268 块）`0.857 / 0.593` → +同文档限额（当前产线）`0.952 / 0.605`。**召回与排序都未完全回到基线**（0.952 < 1.000，0.605 < 0.702）。
+> ⚠️ **`prod` 是 oracle 上界，不是产线实测** —— 该口径的 query 含**由金标派生的标的**信息，代表「已知标的时」的能力**上限**；
+> `full` 代表「**无法识别标的**时」的真实能力（**刻意保留**，不是「没修好」）。
+> **`query_scope`（查询侧标的识别）的真实净贡献 = `Recall@5` 0.889 → 0.926**（混标的 7/27 → 0/27；
+> **不是** 0.593 → 0.926，后者含「查询形态效应」）。
 
-⚠️ **评测集性质（重要披露）**：holdout 的**负例**是干净验收组（`v2`，由 `assert_clean_holdout()` 强制），但 **21 条正例仍是 `v1` —— 阈值调参时已看过**（`rag_eval.py` 运行时会打印「holdout 已用于阈值选择（拟合集）」），且 `max_per_doc=2` 本身就是 holdout 上的扫描值 ⇒ **`0.952` 含拟合成分，不应作为泛化承诺**。复现命令与状态口径见 [docs/RELEASE_NOTES_v1.1.0.md](docs/RELEASE_NOTES_v1.1.0.md)。
+**A3a（域外主动弃权）**：**0.863** —— ⚠️ **必须带限定**：该值经 **holdout 二次标定**（阈值由 holdout 派生夹具臂重定标），
+**不能称「holdout 验收」**；敏感性区间 **[0.863, 0.902]**（0.902 实测可达，但需**第三次动用 holdout** ⇒ **主动不取**，宁可报保守值）。
+
+**A3b · LLM 判官判据**（holdout，5 次采样）：
+
+| 判据 | 门槛 | 实测 | 结论 |
+|---|---|---|---|
+| `judge_fp` | ≤0.10 | **0.097** | ✅ 达标 |
+| `judge_fn` | **≤0.20**（**2026-10-03 由 0.15 订正**，依据见 `docs/M1_EVAL_REPORT.md`「判据门槛修订说明」） | **0.192** | ✅ 按新门槛 |
+| `span_valid` | ≥0.95 | **0.955** [0.955, 0.979] | ✅ 达标（**区间不跨阈值**；v1.3.1 时为 0.951、区间跨阈值） |
+
+> ⚠️ **门槛订正不是放宽安全性**：`judge_fp ≤0.10` 与 `span_valid ≥0.95` **未变**，只调整「判官侧覆盖度」（`judge_fn`）——
+> 依据是「`judge_fn ≤0.15` 与『判官只看前 5 条候选』（`JUDGE_MAX_CANDIDATES = 5`）**算术上不兼容**」
+> （判官侧修满的地板 = 4/26 = **0.1538 > 0.15**）。
+> ⚠️ `judge_fn` 中「判官自身」的份额是**上界口径**（gold 落在候选窗内才计入分母）。
+
+⚠️ **评测集性质（重要披露）**：holdout 的**负例**是干净验收组（`v2`，由 `assert_clean_holdout()` 强制），
+而**正例 27 条 = 21 条 `v1`（阈值调参时已看过）+ 6 条 `v2`**，且 `max_per_doc=2` 本身就是 holdout 上的扫描值
+⇒ **上述检索指标含拟合成分，不应作为泛化承诺**（`rag_eval.py` 运行时会打印「holdout 已用于阈值选择（拟合集）」）。
+复现命令与口径订正见 [docs/RELEASE_NOTES_v1.3.1.md](docs/RELEASE_NOTES_v1.3.1.md)；
 **未达标项与已知边界同样记录在案**，见 [docs/M1_EVAL_REPORT.md](docs/M1_EVAL_REPORT.md) 与
 [docs/COVERAGE_DESIGN.md](docs/COVERAGE_DESIGN.md)。
+
+> 📌 **历史状态（勿与上表混读）**：基线（旧语料 75 块、无限额）`1.000 / 0.702` → 切 PDF 全文（268 块）`0.857 / 0.593`
+> → +同文档限额 `0.952 / 0.605` —— 那是 **n=21 的旧口径**；**`0.952` / `0.605` 已不是当前指标**，不得当「当前指标」引用。
+
+**LLM 重排探针（仍未接入产线）**：`MRR@10 = 0.706 ~ 0.738` 是**离线探针**（`scripts/rag_rerank_probe.py`）在**早期语料状态**下的结果，
+**没有接进产线**（`git grep -i rerank -- utils/ services/ frontend/src` 零命中）；重排不改变结果集合 ⇒ `Recall@5` 不变。
+要上线须先解决每题 +k 次模型调用的延迟与成本。
 
 > ⚠️ **诚实边界**：内置能力用于打通链路与评测，语料需按自己的标的自行构建；
 > 文档检索只负责「**找得到、可核对**」，**不构成投资建议**。
@@ -341,7 +392,7 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 
 ## 🧪 测试与质量
 
-- 后端：`pytest tests/`（**476 例**，2026-10-02 实测全绿）
+- 后端：`pytest tests/`（**625 passed**，2026-10-04 实测全绿）
 - 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）
 - 桌面壳：`python desktop\smoke_test.py`（依赖 / dist 产物 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）
 - CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）+ gitleaks 密钥扫描
@@ -358,6 +409,8 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 - [诊断页验收记录](docs/verification.md)
 - [M1 检索评测报告](docs/M1_EVAL_REPORT.md)（指标、未达标项与证据）
 - [能力覆盖与边界](docs/COVERAGE_DESIGN.md)
+- [Release Notes v1.3.2 · 代码卫生与判据门槛订正](docs/RELEASE_NOTES_v1.3.2.md)
+- [Release Notes v1.3.1 · 检索污染修复与口径订正](docs/RELEASE_NOTES_v1.3.1.md)
 - [Release Notes v1.3.0 · M2 长期记忆层](docs/RELEASE_NOTES_v1.3.0.md)
 - [Release Notes v1.2.0 · M3 编排层](docs/RELEASE_NOTES_v1.2.0.md)
 - [M2 施工计划](docs/M2_MEMORY_PLAN.md)
