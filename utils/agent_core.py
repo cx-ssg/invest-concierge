@@ -2,7 +2,7 @@
 """
 Agent Core（UI 无关可测） - 声明式 Tool Registry + 带规划的 Agent 循环。
 
-- TOOL_REGISTRY：24 个工具的声明式注册表（真名核对过），**晚绑定**
+- TOOL_REGISTRY：31 个工具的声明式注册表（真名核对过），**晚绑定**
   （fn 存 "模块.函数名"，调用时 import 解析 → 存量 test_ai_tools 的 mock.patch 可见）。
 - execute_ai_tool_v2：注册表分派 + _truncate 截断（长列表 top-20 / 超长 8000）。
 - execute_ai_tool：兼容别名（旧名 + 3 旧工具错误文案不变，"未找到基金"被测试断言）。
@@ -70,7 +70,7 @@ def _stock_code_param(desc="6 位数字股票代码，如 600519"):
     return {"stock_code": {"type": "string", "description": desc}}
 
 
-# ==================== Tool Registry（24 个，真名核对过） ====================
+# ==================== Tool Registry（31 个，真名核对过） ====================
 
 TOOL_REGISTRY = {
     # --- 已有 3 工具（迁移 + 晚绑定；schema 与旧 AI_TOOLS 完全一致）---
@@ -330,6 +330,106 @@ TOOL_REGISTRY = {
         description="查询主要宽基指数（沪深300/上证50/创业板指/中证500）的估值：PE/PB 及历史分位与估值状态（低估/合理/高估）。回答“某指数现在贵不贵、能不能定投”时用。",
         params={},
         none_error="指数估值数据不可得",
+    ),
+    # --- P4 龙虎/打板工具族（H6，2026-10-04；依据 docs/AGENT_TOOLS_PLAN.md §3.2）---
+    # 设计意图（原文）：「dragon_api 12 个函数全部工具化……这类"游资向"功能做成独立页面反而
+    # 敏感（荐股观感），藏在 agent 工具里由用户主动问，边界更干净」。
+    # ⚠️ 边界：**只做工具、不做页面、不在 UI 主动推荐**；只加数据、**零改动 agent_core 结构**。
+    # ⚠️ 合规：游资向短线数据，描述与返回体（source/risk_note）都写明来源与「不构成投资建议」。
+    "get_limit_up_pool": ToolDef(
+        name="get_limit_up_pool",
+        module="data.dragon_api",
+        fn="agent_limit_up_pool",
+        description=(
+            "查询今日涨停股池的**逐股明细**（代码/名称/现价/涨跌幅/换手率/成交额/流通市值/连板数），"
+            "用于打板视角的个股筛选。回答“今天有哪些涨停股/几连板”时用；"
+            "市场级复盘（涨停家数、连板天梯、涨停原因）请用 get_limit_up_review。"
+            "数据来源：东方财富涨停池（akshare stock_zt_pool_em）；游资向短线数据、时效极短，"
+            "仅供研究参考，不构成投资建议。返回空表示数据源当前不可得，请如实说明。"
+        ),
+        params={},
+        none_error="涨停股池数据不可得（数据源未返回数据）",
+    ),
+    "get_limit_up_detail": ToolDef(
+        name="get_limit_up_detail",
+        module="data.dragon_api",
+        fn="agent_limit_up_detail",
+        description=(
+            "查询单只股票的盘口快照（涨停/打板视角）：现价、今开/最高/最低、成交量额、换手率、"
+            "涨跌额与涨跌幅、振幅、流通市值与总市值。"
+            "数据来源：东方财富个股行情接口；短线行情盘中有延迟，仅供研究参考，不构成投资建议。"
+        ),
+        params=_stock_code_param(),
+        required=["stock_code"],
+        none_error="未查询到 {stock_code} 的个股详情（可能停牌或代码有误）",
+    ),
+    "get_lhb_stats": ToolDef(
+        name="get_lhb_stats",
+        module="data.dragon_api",
+        fn="agent_lhb_stats",
+        description=(
+            "查询龙虎榜（榜单）个股统计：最近上榜日、上榜次数、龙虎榜净买额/买入额/卖出额、"
+            "机构买卖次数与机构净买额、近 1/3/6/1 个月涨跌幅。回答“最近谁上了龙虎榜/机构在买什么”时用。"
+            "数据来源：东方财富龙虎榜统计（akshare stock_lhb_stock_statistic_em）；"
+            "游资向短线数据，不构成投资建议，请勿据此荐股。"
+        ),
+        params={},
+        none_error="龙虎榜统计数据不可得（数据源未返回数据）",
+    ),
+    "get_dragon_stocks": ToolDef(
+        name="get_dragon_stocks",
+        module="data.dragon_api",
+        fn="agent_dragon_stocks",
+        description=(
+            "识别当日**龙头股**（龙头战法）：全部涨停股按所属板块分组，逐只做 6 维龙头评分"
+            "（涨幅/封板时间/封单强度/板块效应/换手健康度/市场辨识度，满分 100）并判定所处阶段"
+            "（启动期/主升期/分歧期/见顶期），同时给出热门板块榜（板块涨停数与板块内最高分个股）。"
+            "回答“今天谁是龙头/哪个板块在领涨/打板情绪处于什么阶段”时用。"
+            "首次调用需逐股查板块，约 10-40 秒（结果缓存 1 小时）；若超时请稍后重试，不要编造名单。"
+            "数据来源：东方财富（akshare 涨停池 + 板块归属接口）；游资向短线数据、时效极短，"
+            "阶段判定是**量化规则**而非预测，仅供研究参考，不构成投资建议、不荐股。"
+        ),
+        params={},
+        none_error="龙头股识别数据不可得（今日无涨停股或数据源不可用）",
+    ),
+    "get_board_list": ToolDef(
+        name="get_board_list",
+        module="data.dragon_api",
+        fn="agent_board_list",
+        description=(
+            "查询板块清单（板块代码 + 名称，概念板块另带涨跌幅与成交额），拿到板块代码后可配合 "
+            "get_board_members 查成分股。board_type=industry 取行业板块、concept 取概念板块（默认 industry）。"
+            "数据来源：东方财富板块接口；仅供研究参考，不构成投资建议。"
+        ),
+        params={
+            "board_type": {"type": "string", "description": "板块类型：industry=行业板块（默认）/ concept=概念板块"},
+        },
+        none_error="板块清单数据不可得（数据源未返回数据）",
+    ),
+    "get_board_members": ToolDef(
+        name="get_board_members",
+        module="data.dragon_api",
+        fn="agent_board_members",
+        description=(
+            "查询某个板块的成分股**代码列表**（该接口只返回代码，不含名称）。"
+            "board_code 取自 get_board_list（形如 BK0475）。"
+            "数据来源：东方财富板块成分股接口；仅供研究参考，不构成投资建议。"
+        ),
+        params={"board_code": {"type": "string", "description": "板块代码，如 BK0475（可用 get_board_list 查询）"}},
+        required=["board_code"],
+        none_error="未获取到板块 {board_code} 的成分股（请先用 get_board_list 核对板块代码）",
+    ),
+    "get_stock_boards": ToolDef(
+        name="get_stock_boards",
+        module="data.dragon_api",
+        fn="agent_stock_boards",
+        description=(
+            "查询某只股票所属的板块/概念名称列表。回答“这只股票属于哪些板块/概念”时用。"
+            "数据来源：东方财富概念板块接口；仅供研究参考，不构成投资建议。"
+        ),
+        params=_stock_code_param(),
+        required=["stock_code"],
+        none_error="未查询到 {stock_code} 所属板块（数据源不可得或代码有误）",
     ),
 }
 

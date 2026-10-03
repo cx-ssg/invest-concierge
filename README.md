@@ -34,7 +34,7 @@
 
 | 页面 | 说明 |
 |---|---|
-| 💬 AI 对话（首页） | 投资问答助手：SSE 流式输出 + 模型原生思考流 + 工具调用时间线（**24 个工具**：行情/财报/估值/资金流/搜索/回测/文档检索…） |
+| 💬 AI 对话（首页） | 投资问答助手：SSE 流式输出 + 模型原生思考流 + 工具调用时间线（**31 个工具**：行情/财报/估值/资金流/搜索/回测/文档检索/龙虎打板…） |
 | 📊 基金 · 资产总览 | 总资产与持仓收益一览（含一键生成持仓周报） |
 | 💼 基金 · 持仓管理 | 录入持仓，自动追踪收益与当日实时估值 |
 | 📔 基金 · 投资日记 | 记录每笔操作的理由，与未来的自己对话 |
@@ -50,7 +50,7 @@
 
 | 层 | 一句话 | 入口 |
 |---|---|---|
-| **M1 · 私域知识层** | 本地公告 / 研报语料 → BM25 + `bge-m3` 向量混合检索（RRF 融合），返回原文片段 + 来源 + 日期 | 工具 `retrieve_docs`（24 个 Agent 工具之一） |
+| **M1 · 私域知识层** | 本地公告 / 研报语料 → BM25 + `bge-m3` 向量混合检索（RRF 融合），返回原文片段 + 来源 + 日期 | 工具 `retrieve_docs`（31 个 Agent 工具之一） |
 | **M2 · 长期记忆层** | 三类记忆分离存储、分离召回（偏好**每次对话必注入** / 事实**按标的** / 经验**向量 top-3**）；写入走「候选 → 用户确认」，**AI 不自行写记忆** | 设置页「长期记忆」区（列表 / 删除 / 候选确认 / **召回预览**） |
 | **M3 · 图编排（可选）** | `ORCHESTRATOR=graph` 才开启，**默认 `legacy`、行为不变**；只图化「股票深度诊断」一条链路，换来检查点续跑与人工确认 | `POST /api/stocks/{code}/diagnosis/review` + SQLite 检查点 |
 
@@ -187,7 +187,7 @@ flowchart LR
 - **前端**：React 19 单页应用（三区壳：标题栏 / 侧边栏 / 状态栏），通过 HTTP + SSE 与后端通信。
 - **后端**：FastAPI 提供 REST（持仓/日记/诊断/设置/记忆/预警/行情/自选）+ SSE（AI 对话流式事件：`status → reasoning → tool_start/tool_end → done`）。
 - **数据层**：`data/` 模块统一走缓存 + fallback 降级（弱网自动切备用源，失败显示「--」不崩溃）。
-- **Agent 引擎**：`utils/agent_core.py` 工具注册表（**24 个工具**，晚绑定 importlib）+ 8 轮规划循环，`utils/agent_memory.py` 会话摘要注入。
+- **Agent 引擎**：`utils/agent_core.py` 工具注册表（**31 个工具**，晚绑定 importlib）+ 8 轮规划循环，`utils/agent_memory.py` 会话摘要注入。
 - **知识层（M1）**：`utils/rag/` 私域文档检索（切块 / `bge-m3` 向量 + BM25 → **RRF 融合** / 两档证据判定），采集与评测脚本在 `scripts/rag_*.py`。
 - **长期记忆层（M2）**：`utils/long_memory.py` —— 三类记忆**分离存储、分离召回**；**AI 不自行写记忆**（隐式抽取 → 候选 → 用户确认）；注入走 `agent_run` 的 `## 长期记忆` 段 + `memory_used` 事件；设置页有**召回预览**审计入口与隐私开关。详见 [长期记忆层（M2）](#-长期记忆层m2)。
 - **编排层（M3，可选）**：`utils/orchestrator/` —— `ORCHESTRATOR=graph` 才生效，**默认 `legacy` 行为不变**；只图化「股票深度诊断」一条链路。详见 [可选：图编排模式](#-可选图编排模式experimental)。
@@ -207,7 +207,7 @@ invest-concierge/
 ├─ utils/orchestrator/   图编排 M3（flags / state / graph / nodes / adapters）
 ├─ scripts/           采集与评测脚本（rag_ingest*.py / rag_eval.py / rag_rerank_probe.py）
 ├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
-├─ tests/             **644 个 pytest 用例**（H5 实测全绿，2026-10-04；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额 / 行情与自选）
+├─ tests/             **674 个 pytest 用例**（H6 实测全绿，2026-10-04；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额 / 行情与自选 / 龙虎打板工具族）
 ├─ assets/            设计素材（mockups）
 ├─ .env.example       环境变量模板（复制为 .env 使用）
 ├─ requirements.txt   Python 依赖
@@ -233,7 +233,7 @@ invest-concierge/
 - **知识库需自行构建**：语料库与向量（`*.db` / `corpus/`）不随仓库分发，需跑 `scripts/rag_ingest*.py`；未构建时文档检索会如实告知「未找到」。
 - **本地向量模型**：默认走本地 Ollama `bge-m3`；未安装 Ollama 时可改用 OpenAI 兼容端点。
 - **长期记忆不入仓**：M2 的记忆存在本机 SQLite（`memories` / `memories_pending` 两表），仓库不带任何历史记忆；经验记忆的向量召回依赖本地 Ollama `bge-m3`，未安装时降级为按时间倒序，并在注入文本里如实标注「未向量化，按时间序」（不报错、也不假装记得）。
-- **图编排是 experimental**：仅 `ORCHESTRATOR=graph` 时生效，**只图化「股票深度诊断」一条链路**，其余 23 个工具仍走原线性循环；M2 未接进图（两者独立）。
+- **图编排是 experimental**：仅 `ORCHESTRATOR=graph` 时生效，**只图化「股票深度诊断」一条链路**，其余 30 个工具仍走原线性循环；M2 未接进图（两者独立）。
 - **当前 live 页面 9 个**：其余规划页（回测/定投/基金对比等）数据层函数已就绪，见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 🔍 私域知识层（带引用的文档检索）
@@ -243,7 +243,7 @@ invest-concierge/
 
 | | 说明 |
 |---|---|
-| 工具 | `retrieve_docs`（**24 个 Agent 工具之一**，AI 对话里直接问「某公司某期经营现金流多少」） |
+| 工具 | `retrieve_docs`（**31 个 Agent 工具之一**，AI 对话里直接问「某公司某期经营现金流多少」） |
 | 存储 | 本地 SQLite（`kb.db`）+ `bge-m3` 向量（1024 维，走本地 Ollama，可降级到 OpenAI 兼容端点） |
 | 检索 | 混合检索：BM25 + 向量 → **RRF 融合**，支持同文档限额 |
 | **证据分档（两档）** | 判据不通过 ⇒ `none` 档**主动弃权**；其余一律 `weak` 档 —— **返回结果但必带**「证据不足档（证据不足）—— 引用前请自行核验」警示。原有的 `strong` 档已于 2026-09-18 撤下 ⇒ **不存在"跳过警示"的通道** |
@@ -353,7 +353,7 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 ## 🕸️ 可选：图编排模式（experimental）
 
 把「股票深度诊断」**一条**链路做成图（LangGraph），换来的是**检查点（断点续跑）**与**结构化人工确认**，
-而不是重写整个 Agent；**其余 23 个工具仍走原来的线性规划循环**。
+而不是重写整个 Agent；**其余 30 个工具仍走原来的线性规划循环**。
 
 ```text
 [入口] 股票代码
@@ -394,7 +394,7 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 
 ## 🧪 测试与质量
 
-- 后端：`pytest tests/`（**644 passed**，2026-10-04 H5 实测全绿）
+- 后端：`pytest tests/`（**674 passed**，2026-10-04 H6 实测全绿）
 - 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）
 - 桌面壳：`python desktop\smoke_test.py`（依赖 / dist 产物 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）
 - CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）+ gitleaks 密钥扫描

@@ -586,7 +586,7 @@ def load_funds_snapshot(max_funds_with_metrics=6, metrics_days=365):
 
 
 # ==================== OpenAI tools schema ====================
-# Agent MVP：AI_TOOLS 由 utils.agent_core.TOOL_REGISTRY 派生（24 个声明式工具），
+# Agent MVP：AI_TOOLS 由 utils.agent_core.TOOL_REGISTRY 派生（31 个声明式工具），
 # 对外 shape 不变（{"type":"function","function":{...}}），ai_chat 无感知。
 
 AI_TOOLS = build_tool_schemas()

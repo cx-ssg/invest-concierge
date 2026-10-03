@@ -148,9 +148,51 @@ CASES = [
                    "get_stock_kline": {"stock_code": "600519"},
                    "get_stock_moneyflow": {"stock_code": "600519"}},
      "expect_facts": ["公司", "K线", "资金"], "tags": ["多工具", "个股"]},
+
+    # ---------- 龙虎/打板工具族（P4 · H6，2026-10-04；data/dragon_api 适配层） ----------
+    # 设计边界（AGENT_TOOLS_PLAN §3.2）：只做 agent 工具、不做页面、UI 不主动推荐。
+    {"id": "dragon_limit_up_pool_027", "question": "今天有哪些涨停股，连板数怎么样",
+     "expect_tools": ["get_limit_up_pool"], "expect_facts": ["涨停", "连板"],
+     "tags": ["龙虎", "打板"]},
+
+    {"id": "dragon_limit_up_detail_028", "question": "600519 今天的封板盘口怎么样",
+     "expect_tools": ["get_limit_up_detail"],
+     "tool_args": {"get_limit_up_detail": {"stock_code": "600519"}},
+     "expect_facts": ["盘口", "换手"], "tags": ["龙虎", "打板"]},
+
+    {"id": "dragon_lhb_stats_029", "question": "最近哪些股票上了龙虎榜，机构在买什么",
+     "expect_tools": ["get_lhb_stats"], "expect_facts": ["龙虎榜", "机构"],
+     "tags": ["龙虎", "龙虎榜"]},
+
+    {"id": "dragon_dragon_stocks_030", "question": "今天谁是龙头股，打板情绪到哪个阶段了",
+     "expect_tools": ["get_dragon_stocks"], "expect_facts": ["龙头", "阶段"],
+     "tags": ["龙虎", "龙头"]},
+
+    {"id": "dragon_board_list_031", "question": "今天有哪些热门概念板块",
+     "expect_tools": ["get_board_list"],
+     "tool_args": {"get_board_list": {"board_type": "concept"}},
+     "expect_facts": ["板块", "涨幅"], "tags": ["龙虎", "板块"]},
+
+    {"id": "dragon_board_members_032", "question": "BK0475 这个板块里有哪些成分股",
+     "expect_tools": ["get_board_members"],
+     "tool_args": {"get_board_members": {"board_code": "BK0475"}},
+     "expect_facts": ["成分股"], "tags": ["龙虎", "板块"]},
+
+    {"id": "dragon_stock_boards_033", "question": "600519 属于哪些概念板块",
+     "expect_tools": ["get_stock_boards"],
+     "tool_args": {"get_stock_boards": {"stock_code": "600519"}},
+     "expect_facts": ["板块"], "tags": ["龙虎", "板块"]},
+
+    # ---------- 私域知识（M1 retrieve_docs；补齐覆盖下限的最后一块） ----------
+    {"id": "rag_docs_034", "question": "贵州茅台最近一份公告说了什么",
+     "expect_tools": ["retrieve_docs"],
+     "tool_args": {"retrieve_docs": {"query": "贵州茅台 公告", "top_n": 3}},
+     "expect_facts": ["公告", "来源"], "tags": ["私域知识", "检索"]},
 ]
 
 
 # 离线契约的覆盖下限（2026-09-15 审计建议：20 形同虚设 → 提到与注册表等值 23）
 # 语义：新增工具若没同步进 golden set，这条断言立刻失败（防「加了工具却没加用例」）
-MIN_TOOL_COVERAGE = 23
+# 2026-10-04 H6：注册表 24 → 31（龙虎/打板 7 个），同步补 7 条用例 + retrieve_docs 1 条
+# ⇒ 31 与注册表等值（此前 retrieve_docs 是唯一漏网的那个）。
+MIN_TOOL_COVERAGE = 31

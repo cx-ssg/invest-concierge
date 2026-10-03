@@ -33,7 +33,7 @@ An open-source **A-share and fund analysis assistant**: no paid data feeds, work
 
 | Page | Description |
 |---|---|
-| 💬 AI chat (home) | Investment Q&A: SSE streaming + native reasoning chain + tool-call timeline (**24 tools**: quotes / reports / valuation / fund flows / search / backtest / document retrieval…) |
+| 💬 AI chat (home) | Investment Q&A: SSE streaming + native reasoning chain + tool-call timeline (**31 tools**: quotes / reports / valuation / fund flows / search / backtest / document retrieval / dragon-tiger & limit-up…) |
 | 📊 Fund · dashboard | Total assets and P&L overview |
 | 💼 Fund · portfolio | Track holdings, P&L and daily real-time estimates |
 | 📔 Fund · diary | Record the reasoning behind every trade |
@@ -47,7 +47,7 @@ An open-source **A-share and fund analysis assistant**: no paid data feeds, work
 
 | Layer | In one line | Entry point |
 |---|---|---|
-| **M1 · Private document layer** | Local filings / research-note corpus → BM25 + `bge-m3` hybrid retrieval (RRF fusion), returning source snippet + document + date | Tool `retrieve_docs` (one of the 24 agent tools) |
+| **M1 · Private document layer** | Local filings / research-note corpus → BM25 + `bge-m3` hybrid retrieval (RRF fusion), returning source snippet + document + date | Tool `retrieve_docs` (one of the 31 agent tools) |
 | **M2 · Long-term memory** | Three memory kinds stored and recalled separately (preferences **injected on every turn** / facts **by ticker** / experiences **vector top-3**); writes go through "candidate → user confirmation", **the AI never writes memory on its own** | Settings page "Long-term memory" block (list / delete / confirm candidates / **recall preview**) |
 | **M3 · Graph orchestration (optional)** | Only active with `ORCHESTRATOR=graph`; **default `legacy`, behaviour unchanged**; graphifies a single "stock diagnosis" chain to gain checkpoint resume + human review | `POST /api/stocks/{code}/diagnosis/review` + SQLite checkpoint |
 
@@ -184,7 +184,7 @@ flowchart LR
 - **Frontend**: React 19 SPA (three-zone shell: title bar / sidebar / status bar), talks to the backend over HTTP + SSE.
 - **Backend**: FastAPI serving REST (holdings / diary / diagnosis / settings / memory / alerts) + SSE (agent stream events: `status → reasoning → tool_start/tool_end → done`).
 - **Data layer**: `data/` modules share caching + fallback degradation (weak networks switch to backup sources; failures render `--` instead of crashing).
-- **Agent engine**: `utils/agent_core.py` tool registry (**24 tools**, late-binding via importlib) + an 8-round planning loop; `utils/agent_memory.py` injects session summaries.
+- **Agent engine**: `utils/agent_core.py` tool registry (**31 tools**, late-binding via importlib) + an 8-round planning loop; `utils/agent_memory.py` injects session summaries.
 - **Knowledge layer (M1)**: `utils/rag/` private document retrieval (chunking / `bge-m3` vectors + BM25 → **RRF fusion** / two-tier evidence judgement); ingestion and eval scripts live in `scripts/rag_*.py`.
 - **Long-term memory (M2)**: `utils/long_memory.py` — three memory kinds **stored and recalled separately**; **the AI never writes memory on its own** (implicit extraction → candidate → user confirmation); injection happens through the `## 长期记忆` block in `agent_run` plus a `memory_used` event; the settings page offers a **recall preview** audit entry and a privacy switch. See [Long-Term Memory (M2)](#-long-term-memory-m2).
 - **Orchestration layer (M3, optional)**: `utils/orchestrator/` — active only with `ORCHESTRATOR=graph`, **default `legacy` keeps behaviour unchanged**; graphifies a single "stock diagnosis" chain. See [Optional: Graph Orchestration](#-optional-graph-orchestration-experimental).
@@ -230,7 +230,7 @@ invest-concierge/
 - **Knowledge base must be built locally**: the corpus and vectors (`*.db` / `corpus/`) are **not shipped** — run `scripts/rag_ingest*.py`; without them document retrieval honestly reports "not found".
 - **Local embedding model**: defaults to local Ollama `bge-m3`; an OpenAI-compatible endpoint can be used instead.
 - **Memory is not shipped**: M2 memories live in your local SQLite (`memories` / `memories_pending`); the repo carries no history. Experience recall depends on local Ollama `bge-m3`, and without it degrades to reverse-chronological order, honestly labelled "not vectorised" in the injected text (no error, no pretending to remember).
-- **Graph orchestration is experimental**: only with `ORCHESTRATOR=graph`, and **only one chain is graphified** — the other 23 tools keep the original linear loop; M2 is not wired into the graph.
+- **Graph orchestration is experimental**: only with `ORCHESTRATOR=graph`, and **only one chain is graphified** — the other 30 tools keep the original linear loop; M2 is not wired into the graph.
 - **7 live pages today**: the remaining planned pages (backtest / DCA / fund compare …) already have data-layer functions — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## 🔍 Private Document Retrieval (M1)
@@ -239,7 +239,7 @@ Beyond live quotes, the project ships a **local document retrieval layer**: fili
 
 | | |
 |---|---|
-| Tool | `retrieve_docs` (**one of the 24 agent tools**) |
+| Tool | `retrieve_docs` (**one of the 31 agent tools**) |
 | Store | local SQLite (`kb.db`) + `bge-m3` vectors (1024-d, via local Ollama, with an OpenAI-compatible fallback) |
 | Retrieval | hybrid: BM25 + vectors → **RRF fusion**, with a per-document cap |
 | **Evidence tiers (two)** | when the criterion fails the tier is `none` and the tool **abstains**; everything else is `weak` — results are returned but **always** carry the "insufficient evidence — verify before quoting" warning. The former `strong` tier was retired on 2026-09-18, so **there is no channel that skips the warning** |
@@ -344,7 +344,7 @@ API entry points (for your own scripts / UI): `GET/POST /api/memory`, `DELETE /a
 ## 🕸️ Optional: Graph Orchestration (experimental)
 
 Graphify **one** chain ("stock diagnosis") with LangGraph to gain **checkpoints (resume)** and **structured human review** —
-without rewriting the whole agent. **The other 23 tools keep the original linear planning loop.**
+without rewriting the whole agent. **The other 30 tools keep the original linear planning loop.**
 
 ```text
 [entry] stock code

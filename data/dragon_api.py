@@ -663,3 +663,176 @@ def get_board_concept_stocks():
     except Exception as e:
         print("获取概念板块数据失败：{}".format(e))
         return []
+
+
+# ==================== Agent 工具适配层（H6 · 2026-10-04） ====================
+# 依据：docs/AGENT_TOOLS_PLAN.md §3.2「dragon_api 12 个函数全部工具化（打板/龙头/阶段判定）……
+# 这类"游资向"功能做成独立页面反而敏感（荐股观感），藏在 agent 工具里由用户主动问」。
+# H6（P4）落地：**只加薄适配层，不改任何业务函数、不新增数据逻辑、不做页面**。
+#
+# 为什么不把 12 个函数原样写进 TOOL_REGISTRY（合并依据）：
+#   1. 数据形状：get_lhb_stats 返回 DataFrame，而工具载荷必须 JSON 可序列化 —— 直接注册时
+#      agent_core._truncate 只能 str(df)，493 行 × 20 列的 repr 会被 8000 字符腰斩成半张表；
+#   2. 空值语义：这批函数失败时返回**空列表**，注册表的 none_error 契约只认 None
+#      ⇒ 模型看到 `[]` 分不清「今天真的没有」与「数据源不可得」（H6 实测：push2 被墙时
+#      get_stock_board_info / get_stock_concept_boards 均静默返回 []）；
+#   3. 工具粒度：板块清单有三个函数 —— get_stock_board_info（行业 [{code,name}]）、
+#      get_stock_concept_boards（概念**仅名称**、无代码，且虽名为"按股取板块"实现上忽略入参）、
+#      get_board_concept_stocks（概念 [{code,name,change,amount}] 且按涨幅排序）。后两者是同一
+#      数据源（m:90+t:3）的两种投影，保留信息量更大、能接着查成分股的 get_board_concept_stocks
+#      ⇒ 合并为 agent_board_list(board_type=industry|concept)；
+#   4. 阶段判定三件套（calc_board_score / judge_stage / get_board_limit_up_count）与
+#      get_stock_board_name_by_stock 都是 identify_dragon_stocks 的内部子步骤，入参是
+#      "涨停股 dict / 板块成分表"这类 LLM 无法构造的结构 ⇒ 由 get_dragon_stocks 整体暴露。
+#
+# 工具映射（12 业务函数 → 7 工具，函数:工具 = 12:7）：
+#   get_limit_up_pool   ← get_limit_up_stocks
+#   get_limit_up_detail ← get_limit_up_detail
+#   get_lhb_stats       ← get_lhb_stats
+#   get_dragon_stocks   ← identify_dragon_stocks（内部已涵盖 calc_board_score / judge_stage /
+#                          get_board_limit_up_count / get_stock_board_name_by_stock）
+#   get_board_list      ← get_stock_board_info（industry）
+#                          + get_board_concept_stocks（concept；取代 get_stock_concept_boards）
+#   get_board_members   ← get_stock_board_members
+#   get_stock_boards    ← get_stock_board_name_by_stock
+# 未单独暴露但**全部 12 个业务函数均可达**：get_stock_concept_boards 由 concept 分支取代。
+#
+# 合规：游资向短线数据，每个成功载荷都带 source + risk_note（含「不构成投资建议」），
+# 工具描述同款；列表统一裁到 20 条（与 agent_core._truncate 的 list_top_n 同口径，
+# 避免"先裁再截断"出现两个截断标记），真实总数放在 count 里。
+
+DRAGON_SOURCE = "东方财富（akshare 涨停池/龙虎榜统计 + push2/datacenter 行情接口）"
+DRAGON_RISK_NOTE = (
+    "游资向短线数据（打板/龙虎榜），情绪驱动、时效极短、次日不确定性高；"
+    "仅供研究参考，不构成投资建议，不荐股。"
+)
+
+# 与 agent_core._truncate(list_top_n=20) 同口径
+AGENT_TOOL_LIST_TOP_N = 20
+
+
+def _envelope(data, count=None, **extra):
+    """统一工具载荷信封：来源 + 风险提示 + 真实条数 + 数据（短线数据的合规标注）"""
+    payload = {"source": DRAGON_SOURCE, "risk_note": DRAGON_RISK_NOTE}
+    payload.update(extra)
+    if count is not None:
+        payload["count"] = count
+    payload["data"] = data
+    return payload
+
+
+def agent_limit_up_pool():
+    """Agent 工具 get_limit_up_pool ← get_limit_up_stocks（空 → None ⇒ NOT_FOUND）"""
+    stocks = get_limit_up_stocks()
+    if not stocks:
+        return None
+    return _envelope(stocks[:AGENT_TOOL_LIST_TOP_N], len(stocks), trade_date=datetime.now().strftime("%Y-%m-%d"))
+
+
+def agent_limit_up_detail(stock_code):
+    """Agent 工具 get_limit_up_detail ← get_limit_up_detail（空 → None ⇒ NOT_FOUND）"""
+    detail = get_limit_up_detail(str(stock_code))
+    if not detail:
+        return None
+    return _envelope(detail)
+
+
+def agent_lhb_stats():
+    """Agent 工具 get_lhb_stats ← get_lhb_stats（DataFrame → records，空 → None）"""
+    df = get_lhb_stats()
+    if df is None or getattr(df, "empty", True):
+        return None
+    total = int(len(df))
+    # 只取前 20 条 records（原始 493 行 × 20 列的表若整表 str() 会被 _truncate 腰斩成半张）
+    records = [{str(k): v for k, v in row.items()}
+               for row in df.head(AGENT_TOOL_LIST_TOP_N).to_dict("records")]
+    return _envelope(records, total)
+
+
+def agent_dragon_stocks():
+    """Agent 工具 get_dragon_stocks ← identify_dragon_stocks（整体暴露打板链条，空 → None）
+
+    identify_dragon_stocks 的原始返回把「同一条龙头记录」同时塞进 hot_boards.top_dragon /
+    dragon_stocks / board_stocks（同一份数据 3 次），加上全部涨停股逐只明细，JSON 体积
+    可达几十 KB —— 这里只做**裁剪投影**（不改一个数字、不加一个判断），保留模型真正需要的
+    榜单、六维评分与阶段；涨停股池明细由 get_limit_up_pool 单独提供。
+    """
+    data = identify_dragon_stocks()
+    if not data:
+        return None
+
+    def _brief(item):
+        stock = item.get("stock") or {}
+        stage = item.get("stage") or {}
+        return {
+            "code": stock.get("code"),
+            "name": stock.get("name"),
+            "board": item.get("board"),
+            "board_limit_up_count": item.get("board_limit_up_count"),
+            "total_score": item.get("total_score"),
+            "stage": stage.get("stage"),
+            "stage_advice": stage.get("advice"),
+            "stage_description": stage.get("description"),
+            "scores": item.get("scores"),
+            "change": stock.get("change"),
+            "turnover": stock.get("turnover"),
+            "amount": stock.get("amount"),
+            "board_count": stock.get("board_count"),
+        }
+
+    dragons_all = data.get("dragon_stocks") or []
+    dragons = [_brief(d) for d in dragons_all[:AGENT_TOOL_LIST_TOP_N]]
+    hot_boards = []
+    for board in (data.get("hot_boards") or [])[:AGENT_TOOL_LIST_TOP_N]:
+        top = board.get("top_dragon") or {}
+        hot_boards.append({
+            "name": board.get("name"),
+            "limit_up_count": board.get("limit_up_count"),
+            "top_dragon_code": (top.get("stock") or {}).get("code"),
+            "top_dragon_name": (top.get("stock") or {}).get("name"),
+            "top_dragon_score": top.get("total_score"),
+        })
+    return _envelope(
+        {
+            "update_time": data.get("update_time"),
+            "hot_boards": hot_boards,
+            "dragon_stocks": dragons,
+        },
+        count=len(dragons_all),
+        limit_up_total=len(data.get("limit_up_stocks") or []),
+        board_group_count=len(data.get("board_stocks") or {}),
+    )
+
+
+def agent_board_list(board_type="industry"):
+    """Agent 工具 get_board_list ← get_stock_board_info（行业）+ get_board_concept_stocks（概念）
+
+    概念分支刻意不接 get_stock_concept_boards：它同一数据源但只取名称（无代码）、
+    且忽略入参 —— 模型拿到名称后无法接着查成分股，属退化投影。
+    """
+    kind = str(board_type or "industry").strip().lower()
+    if kind in ("concept", "concepts", "gn", "t3", "概念", "概念板块"):
+        boards = get_board_concept_stocks()
+        kind_label = "concept"
+    else:
+        boards = get_stock_board_info()
+        kind_label = "industry"
+    if not boards:
+        return None
+    return _envelope(boards[:AGENT_TOOL_LIST_TOP_N], len(boards), board_type=kind_label)
+
+
+def agent_board_members(board_code):
+    """Agent 工具 get_board_members ← get_stock_board_members（该接口只返回成分股代码）"""
+    codes = get_stock_board_members(str(board_code))
+    if not codes:
+        return None
+    return _envelope(codes[:AGENT_TOOL_LIST_TOP_N], len(codes), board_code=str(board_code))
+
+
+def agent_stock_boards(stock_code):
+    """Agent 工具 get_stock_boards ← get_stock_board_name_by_stock（个股所属板块名）"""
+    boards = get_stock_board_name_by_stock(str(stock_code))
+    if not boards:
+        return None
+    return _envelope(boards, len(boards), stock_code=str(stock_code))

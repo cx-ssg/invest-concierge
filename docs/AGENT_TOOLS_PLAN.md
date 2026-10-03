@@ -126,6 +126,17 @@
 
 ### P4（远期）：龙虎/打板工具族（dragon_api 12 个函数）看社区反馈再定
 
+**✅ P4 已交付（H6，2026-10-04）**：`data/dragon_api.py` 12 个业务函数 → **7 个 Agent 工具**
+（`get_limit_up_pool` / `get_limit_up_detail` / `get_lhb_stats` / `get_dragon_stocks` /
+`get_board_list` / `get_board_members` / `get_stock_boards`；注册表 **24 → 31**，零改动 `agent_core` 结构）。
+- **合并依据**：① `get_lhb_stats` 返回 DataFrame —— 直接注册会被 `_truncate` 的 `str(df)` 腰斩成半张表 ⇒ 转 records；
+  ② 这批函数失败时返回**空列表**，`none_error` 契约只认 None ⇒ 归一出 `NOT_FOUND`（模型能判「数据不可得」而不是猜）；
+  ③ 三个板块清单函数里 `get_stock_concept_boards`（只有名称、无代码）是退化投影 ⇒ 合并进 `get_board_list(board_type=)`；
+  ④ `calc_board_score` / `judge_stage` / `get_board_limit_up_count` 是 `identify_dragon_stocks` 的内部子步骤，
+  入参是 LLM 构造不出的结构 ⇒ 由 `get_dragon_stocks` 整体暴露（并裁掉原始返回里同一记录的 3 处重复）。
+- **边界照原意执行**：**只做工具** —— 不加页面、不进导航、UI 不主动推荐；返回值带 `source` + `risk_note`（不构成投资建议）。
+- 验收见 `report-H6.md`（pytest 基线 644 → 之后全绿；golden set `MIN_TOOL_COVERAGE` 与注册表等值 31）。
+
 ## 5. 明确不做
 
 - ❌ 不做 12 个独立功能页（导航保持克制，6→7 页为止）
