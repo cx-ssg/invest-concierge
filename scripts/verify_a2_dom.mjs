@@ -71,6 +71,14 @@ const MUTATIONS = {
     to: "  if (j.verdict !== 'irrelevant') return 'relevant' /* MUTANT: uncertain→relevant */",
     expect: 'B1/judge-uncertain-not-relevant',
   },
+  'src-id-global': {
+    file: 'src/features/agent/ChatArea.tsx',
+    // H1：把来源卡 id 从「按消息唯一」退回**全局 `src-{n}`**（= 缺陷版：
+    // 历史多条消息同页时 src-1 重复，getElementById 只命中第一条）
+    from: 'id={sourceCardId(scope, n)}',
+    to: 'id={`src-${n}`}',
+    expect: 'H1/source-ids-unique',
+  },
 }
 const mutation = MUTATE ? MUTATIONS[MUTATE] : null
 if (MUTATE && !mutation) {
@@ -353,13 +361,20 @@ async function runChatScenario({ key, activeId, events, answer = ANSWER, readyJu
     await waitFor(() => host.querySelectorAll('[data-judge]').length >= readyJudgeCount)
   }
   const text = host.textContent
-  const cards = [...host.querySelectorAll('[id^="src-"]')].map((el) => ({
-    id: el.id,
-    title: (el.querySelector('span.flex-1')?.textContent || el.textContent).trim(),
-    // B1：判官标注（机器可读档位 + 文案）；无标注 = null（≠ 无关）
-    judge: el.querySelector('[data-judge]')?.getAttribute('data-judge') ?? null,
-    judgeText: el.querySelector('[data-judge]')?.textContent?.trim() ?? null,
-  }))
+  // H1：来源卡 id = `src-{scope}-{n}`（按消息唯一）。这里同时解析出 scope/n，
+  // 断言只关心「编号 n」与「文本」，不再把 scope 写死（运行 scope = `live-{runId}`）。
+  const cards = [...host.querySelectorAll('[id^="src-"]')].map((el) => {
+    const m = /^src-(.+)-(\d+)$/.exec(el.id)
+    return {
+      id: el.id,
+      scope: m ? m[1] : '',
+      n: m ? Number(m[2]) : null,
+      title: (el.querySelector('span.flex-1')?.textContent || el.textContent).trim(),
+      // B1：判官标注（机器可读档位 + 文案）；无标注 = null（≠ 无关）
+      judge: el.querySelector('[data-judge]')?.getAttribute('data-judge') ?? null,
+      judgeText: el.querySelector('[data-judge]')?.textContent?.trim() ?? null,
+    }
+  })
   const sups = [...host.querySelectorAll('sup button')].map((b) => b.textContent.trim())
   const hrefs = [...host.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') || '')
   await entry.act(async () => { root.unmount() })
@@ -537,22 +552,22 @@ async function scenarioB1() {
   const r = await runChatScenario({
     key: 'B1', activeId: null, events: eventsB1(), answer: B1_ANSWER, readyJudgeCount: 4,
   })
-  const byId = Object.fromEntries(r.cards.map((c) => [c.id, c]))
+  const byN = Object.fromEntries(r.cards.map((c) => [String(c.n), c]))
   const expect = [
-    ['src-1', 'relevant', '判官：相关'],
-    ['src-2', 'irrelevant', '判官：无关'],
-    ['src-3', 'uncertain', '判官：未确认'],
-    ['src-4', null, null],
-    ['src-5', 'rejected', '判官：未确认（引文未通过校验）'],
+    ['1', 'relevant', '判官：相关'],
+    ['2', 'irrelevant', '判官：无关'],
+    ['3', 'uncertain', '判官：未确认'],
+    ['4', null, null],
+    ['5', 'rejected', '判官：未确认（引文未通过校验）'],
   ]
-  for (const [id, state, label] of expect) {
-    const c = byId[id] || {}
+  for (const [n, state, label] of expect) {
+    const c = byN[n] || {}
     const ok = (c.judge ?? null) === state && (c.judgeText ?? null) === label
-    check(`B1/judge-${id}`, ok, `${id} 判官档位=${c.judge} 文案=${c.judgeText}（期望 ${state} / ${label}）`)
-    console.log(`  ${ok ? '✓' : '✗'} ${id} judge=${c.judge} text=${JSON.stringify(c.judgeText)}（期望 ${state} / ${label}）`)
+    check(`B1/judge-src-${n}`, ok, `src-#${n}(${c.id ?? '-'}) 判官档位=${c.judge} 文案=${c.judgeText}（期望 ${state} / ${label}）`)
+    console.log(`  ${ok ? '✓' : '✗'} src-#${n} judge=${c.judge} text=${JSON.stringify(c.judgeText)}（期望 ${state} / ${label}）`)
   }
   // 关键安全断言：未确认 / 引文被拒 的卡片**都不许**出现"相关"字样
-  const unsafe = ['src-3', 'src-5'].filter((id) => (byId[id]?.judgeText || '').includes('相关'))
+  const unsafe = ['3', '5'].filter((n) => (byN[n]?.judgeText || '').includes('相关'))
   check('B1/judge-uncertain-not-relevant', unsafe.length === 0,
     `未确认/引文被拒却被标成"相关"：${JSON.stringify(unsafe)}`)
   console.log(`  ${unsafe.length === 0 ? '✓' : '✗'} 未确认/引文被拒的卡片标成"相关"的数量=${unsafe.length}（期望 0）`)
@@ -620,10 +635,10 @@ async function scenarioF2() {
   const r = await runChatScenario({
     key: 'F2', activeId: null, events: eventsF2(903, answer), answer,
   })
-  const expectCards = ['src-1:CALL1-TOP', 'src-2:CALL1-2', 'src-3:CALL2-TOP', 'src-4:CALL3-NEW']
-  const got = r.cards.map((c) => `${c.id}:${c.title.replace(/\s+/g, '')}`)
+  const expectCards = ['1:CALL1-TOP', '2:CALL1-2', '3:CALL2-TOP', '4:CALL3-NEW']
+  const got = r.cards.map((c) => `${c.n}:${c.title.replace(/\s+/g, '')}`)
   check('F2/card-order-dedup-first-seen', got.join(' | ') === expectCards.join(' | '),
-    `cards=${got.join(' | ')}（期望 ${expectCards.join(' | ')}：chunk101 去重后仍为 src-1）`)
+    `cards=${got.join(' | ')}（期望 ${expectCards.join(' | ')}：chunk101 去重后仍为 #1）`)
   console.log(`  ${got.join(' | ') === expectCards.join(' | ') ? '✓' : '✗'} 卡片顺序/去重：${got.join(' | ')}`)
 
   const supOk = ['[1]', '[3]', '[4]'].every((s) => r.sups.includes(s))
@@ -631,13 +646,84 @@ async function scenarioF2() {
   console.log(`  ${supOk ? '✓' : '✗'} 正文上标：${JSON.stringify(r.sups)}`)
 
   // 「正文里的 [n] ↔ 卡片编号」对应关系：n 号卡片必须就是注入侧给该 chunk 的全局编号所指的那条
-  const byId = Object.fromEntries(r.cards.map((c) => [c.id, c.title.replace(/\s+/g, '')]))
-  const pairs = [['[1]', 'src-1', 'CALL1-TOP'], ['[3]', 'src-3', 'CALL2-TOP'], ['[4]', 'src-4', 'CALL3-NEW']]
-  for (const [sup, id, title] of pairs) {
-    const ok = r.sups.includes(sup) && byId[id] === title
-    check(`F2/mapping-${sup}`, ok, `${sup} → ${id}(${byId[id]}) 期望 ${title}`)
-    console.log(`  ${ok ? '✓' : '✗'} ${sup} → ${id} = ${byId[id]}（期望 ${title}）`)
+  const byN = Object.fromEntries(r.cards.map((c) => [String(c.n), c.title.replace(/\s+/g, '')]))
+  const pairs = [['[1]', '1', 'CALL1-TOP'], ['[3]', '3', 'CALL2-TOP'], ['[4]', '4', 'CALL3-NEW']]
+  for (const [sup, n, title] of pairs) {
+    const ok = r.sups.includes(sup) && byN[n] === title
+    check(`F2/mapping-${sup}`, ok, `${sup} → src-#${n}(${byN[n]}) 期望 ${title}`)
+    console.log(`  ${ok ? '✓' : '✗'} ${sup} → src-#${n} = ${byN[n]}（期望 ${title}）`)
   }
+}
+
+// ==================== 场景：H1 来源卡 id 按消息唯一 ====================
+
+const H1_SRCS = (tag) => [1, 2, 3, 4, 5].map((k) => src(9000 + k, k, `${tag}-SRC-${k}`))
+
+/**
+ * H1（`task-H1.md` §4）回归锁：**历史两条消息各 5 条来源**。
+ *
+ * 缺陷形态（旧代码）：来源卡 id 是全局 `src-{n}` ⇒ 同页两条消息各有一个 `src-1`，
+ * `document.getElementById('src-1')` 只命中**文档里第一条** ⇒ 点第 2 条消息正文的 `[1]`
+ * 会滚到第 1 条消息的位置。本场景两条都断言：id 全唯一 + 点击落在**本条消息**的卡片上。
+ */
+async function scenarioH1() {
+  section('H1 · 来源卡 id 按消息唯一（src-{scope}-{n}；两条消息各 5 条来源）')
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  resetBackend()
+  sessionsDb[901] = [
+    { role: 'user', content: 'H1 提问一' },
+    { role: 'assistant', content: 'H1 回答一，见 [1] 与 [5]。', sources: H1_SRCS('MSG1') },
+    { role: 'user', content: 'H1 提问二' },
+    { role: 'assistant', content: 'H1 回答二，见 [1] 与 [5]。', sources: H1_SRCS('MSG2') },
+  ]
+  let mounted = null
+  await entry.act(async () => {
+    mounted = entry.mountChatArea(host, {
+      activeId: 901,
+      apiKeyConfigured: true,
+      demoMode: false,
+      models: { chat: 'stub-chat', reasoner: 'stub-reasoner' },
+    })
+  })
+  await waitFor(() => host.querySelectorAll('[id^="src-"]').length >= 10)
+  const ids = [...host.querySelectorAll('[id^="src-"]')].map((el) => el.id)
+  const uniq = new Set(ids)
+  const allUnique = ids.length === 10 && uniq.size === 10
+  check('H1/source-ids-unique', allUnique,
+    `来源卡 ${ids.length} 张 / 唯一 id ${uniq.size} 个（期望 10/10）；ids=${JSON.stringify(ids)}`)
+  console.log(`  ${allUnique ? '✓' : '✗'} id 唯一性：${ids.length} 张卡 / ${uniq.size} 个唯一 id`)
+  if (!allUnique) console.log(`      ids=${JSON.stringify(ids)}`)
+
+  const wrappers = [...host.querySelectorAll('[data-msg-scope]')]
+  const scopes = wrappers.map((w) => w.getAttribute('data-msg-scope'))
+  const distinct = scopes.length === 2 && scopes[0] !== scopes[1]
+  check('H1/two-distinct-scopes', distinct,
+    `消息容器 scope=${JSON.stringify(scopes)}（期望 2 个互不相同）`)
+  console.log(`  ${distinct ? '✓' : '✗'} 两条消息的 scope：${JSON.stringify(scopes)}`)
+
+  // 行为锁：点「第 2 条消息」正文的 [1] → 滚动/高亮目标必须落在**第 2 条消息**内部
+  const scrolled = []
+  const origScroll = globalThis.Element.prototype.scrollIntoView
+  globalThis.Element.prototype.scrollIntoView = function recordScroll() { scrolled.push(this) }
+  const w2 = wrappers[1] || null
+  const btn = w2 ? w2.querySelector('sup button') : null
+  if (btn) {
+    await entry.act(async () => {
+      btn.dispatchEvent(new globalThis.MouseEvent('click', { bubbles: true }))
+    })
+  }
+  globalThis.Element.prototype.scrollIntoView = origScroll
+  const target = scrolled[0] || null
+  const own = Boolean(w2 && target && w2.contains(target))
+    && Boolean(target && target.classList.contains('src-flash'))
+  check('H1/jump-targets-own-message', own,
+    `点击第 2 条消息的 [1] → 落点 ${target ? target.id : 'null'}（期望在本消息内且带 src-flash；` +
+    `w2.scope=${w2 ? w2.getAttribute('data-msg-scope') : '-'}）`)
+  console.log(`  ${own ? '✓' : '✗'} 点击第 2 条消息 [1] → ${target ? target.id : 'null'}（期望落在本消息内）`)
+
+  await entry.act(async () => { mounted.root.unmount() })
+  host.remove()
 }
 
 // ==================== 场景：MarkdownContent 代码块保护（F3） ====================
@@ -735,6 +821,7 @@ async function main() {
   await scenarioF2()
   await scenarioF3()
   await scenarioF5()
+  await scenarioH1()
   await scenarioB1()
   if (SSE_FILE) await scenarioB1RealStream(SSE_FILE)
 

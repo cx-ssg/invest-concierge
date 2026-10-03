@@ -5,6 +5,10 @@ Agent 路由（M0）：会话 CRUD + 同步 chat + SSE 流。
 SSE（§5.2）：services.agent_service.stream_events 是同步生成器，
 丢 run_in_threadpool/线程里逐条读，asyncio 侧只做 yield 组帧；
 每 PING_INTERVAL 发 ": ping" 注释行防代理掐断。
+
+并发（H1）：名额由 `agent_service.open_stream()` 在**本路由**占用 ——
+满员时在响应开始前 503「引擎忙」（`AgentPoolFull`）；
+释放 = 守卫生成器的 finally + 本响应的 background 兜底（凭据幂等，不会双减）。
 """
 
 import asyncio
@@ -13,6 +17,7 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from typing import Optional
 
@@ -83,22 +88,27 @@ async def chat(body: ChatIn):
 
 @router.post("/chat/stream")
 async def chat_stream(body: ChatIn):
-    """SSE 流式 chat（协议见 FRONTEND_PLAN §5.1）"""
+    """SSE 流式 chat（协议见 FRONTEND_PLAN §5.1）；并发满员 → 503「引擎忙」"""
     if not body.task.strip():
         raise HTTPException(status_code=400, detail="task 不能为空")
+
+    # H1：先占名额再建响应 —— 503 必须发生在响应头之前（见 open_stream docstring）
+    try:
+        ticket, it = agent_service.open_stream(
+            body.task, body.session_id, body.context)
+    except agent_service.AgentPoolFull as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
     async def gen():
         queue_backlog = asyncio.Queue()
 
         async def pump():
             """线程池里拉同步生成器的事件，转投 asyncio 队列"""
-            def _next_sync(it):
+            def _next_sync(gen):
                 try:
-                    return next(it)
+                    return next(gen)
                 except StopIteration:
                     return None
-            it = agent_service.stream_events(
-                body.task, body.session_id, body.context)
             while True:
                 item = await run_in_threadpool(_next_sync, it)
                 if item is None:
@@ -127,4 +137,8 @@ async def chat_stream(body: ChatIn):
         gen(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        # H1 释放路径②：生成器未被及时 aclose（客户端硬断开）时由响应收尾兜底。
+        # 路径①在 services.agent_service.open_stream 的守卫生成器 finally 里；
+        # ticket.release() 幂等，两条都跑也只释放一次。
+        background=BackgroundTask(ticket.release),
     )

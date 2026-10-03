@@ -38,8 +38,9 @@
 期间还会插一条 `: ping`）。实测 p50 ≈ **0.9s** / p90 ≈ **1.2s**（n=47，`rag_eval --judge llm`）
 ⇒ 典型额外占用 ≈ 1s，上界 20s。取舍：**接受现状**（不改数据流、不拆带外通道），
 理由是：① `done` 已经发出，回答时延不含判官；② 判官结论只能随该连接下发，
-拆独立端点属协议变更（超本轮范围）。代价：单流连接占用上限 +20s；并发流数**无上限**
-（既有偏差，见 `services/agent_service.py` 的 `AGENT_POOL_SIZE` 标注）。
+拆独立端点属协议变更（超本轮范围）。代价：单流连接占用上限 +20s；并发流数由
+**HTTP SSE 入口**的 `services/agent_service.AGENT_POOL_SIZE`（=4，超限 503，
+H1 起真正生效）约束 —— 判官等待发生在该名额内，所以这 +20s 也计入名额占用。
 观测口径 = `evidence_judged.latency_ms`（每次判官事件都带）与 `JUDGE_TIMEOUT_S` 上界。
 """
 import json

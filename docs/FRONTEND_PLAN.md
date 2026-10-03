@@ -358,7 +358,11 @@ return StreamingResponse(gen(), media_type="text/event-stream",
                          headers={"Cache-Control": "no-cache"})
 ```
 
-- 有限并发：全局 `ThreadPoolExecutor(max_workers=4)`；超限 503「引擎忙」。
+- 有限并发：`services/agent_service.AGENT_POOL_SIZE = 4`（模块级计数 + 锁）——
+  **HTTP SSE 入口**（`/api/agent/chat/stream`）用 `open_stream()` 占名额，
+  满员 **503「引擎忙：并发对话已达上限（4）」**（H1 起真正生效；早期版本只有声明）。
+  释放 = 守卫生成器 `finally`（正常/异常/提前 close）+ `StreamingResponse(background=...)` 兜底，
+  凭据 `AgentPoolTicket.release()` 幂等。直接调 `stream_events()` 的脚本不占名额。
 - 断开：`ClientDisconnect` 中断 generator → 关队列；agent_run 取消点 P1。
 - **降级**：SSE 被网络层吞时同参数落 `run_id` 队列，前端轮询 `GET /api/agent/runs/{run_id}/events`（§2.3）。
 - 慢源（东财✗）：单工具超时返 error —— 该行 15s 后提示「数据不可得」而非无限转圈（复用 agent 防幻觉文案）。

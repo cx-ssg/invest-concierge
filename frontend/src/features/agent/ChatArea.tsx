@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, ExternalLink, Send, Sparkles, Square } from 'lucide-react'
 import { api } from '../../lib/api'
 import type { JudgeItem, RetrievalSource, SessionMessage } from '../../types/api'
-import { MarkdownContent } from '../../components/engine/MarkdownContent'
+import { MarkdownContent, sourceCardId } from '../../components/engine/MarkdownContent'
 import { ThinkingFlow } from '../../components/engine/ThinkingFlow'
 import { ToolTimeline } from '../../components/engine/ToolTimeline'
 import { useAgentRun, type AgentRunPhase } from './useAgentRun'
@@ -172,11 +172,11 @@ export function ChatArea({
               // 复用 MarkdownContent 的 citations（正文 [n] 可点上标回跳）与 SourceList
               // （来源卡 + 判官标注）。老会话无 `sources` 键 ⇒ SourceList 空态不渲染，
               // 行为与改造前完全一致（不显示"无来源"占位）。
-              <div key={`h-${i}`} className="flex min-w-0 flex-col gap-2">
+              <div key={`h-${i}`} data-msg-scope={`h-${i}`} className="flex min-w-0 flex-col gap-2">
                 <div className="max-w-[92%] rounded-card border border-hairline bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink">
-                  <MarkdownContent content={m.content} sources={m.sources} />
+                  <MarkdownContent content={m.content} sources={m.sources} scope={`h-${i}`} />
                 </div>
-                <SourceList sources={m.sources ?? []} judge={m.judge ?? {}} />
+                <SourceList sources={m.sources ?? []} judge={m.judge ?? {}} scope={`h-${i}`} />
               </div>
             ),
           )}
@@ -189,8 +189,12 @@ export function ChatArea({
             </div>
           ) : null}
 
-          {/* 运行中 / 刚完成的助手视图（思考流 + 工具时间线 + 正文） */}
-          {liveUser && runVisible ? <AssistantRunView key={run.runId} phase={phase} /> : null}
+          {/* 运行中 / 刚完成的助手视图（思考流 + 工具时间线 + 正文）
+              H1：scope 按**本次运行**唯一（runId 单调递增）—— 历史消息用 `h-{i}`，
+              两套前缀不同 ⇒ 同页共存也不会撞 id。 */}
+          {liveUser && runVisible ? (
+            <AssistantRunView key={run.runId} phase={phase} scope={`live-${run.runId}`} />
+          ) : null}
 
           <div ref={bottomRef} />
         </div>
@@ -274,8 +278,8 @@ function EmptyWorkbench({ onAsk }: { onAsk: (q: string) => void }) {
   )
 }
 
-/** 运行中/完成态的助手视图 */
-function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
+/** 运行中/完成态的助手视图（`scope` = 本消息的引用命名空间，见 H1） */
+function AssistantRunView({ phase, scope }: { phase: AgentRunPhase; scope: string }) {
   const streaming = phase.status === 'streaming'
   const error = phase.status === 'error'
   const cancelled = phase.status === 'cancelled'
@@ -292,7 +296,7 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
     .join(' · ')
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <div data-msg-scope={scope} className="flex min-w-0 flex-col gap-2">
       {phase.reasoning ? <ThinkingFlow text={phase.reasoning} streaming={streaming} defaultOpen={streaming} /> : null}
       {phase.toolSteps.length ? (
         <div className="rounded-tile border border-hairline bg-bg px-2 py-1.5">
@@ -310,7 +314,7 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
       ) : null}
       <div className="max-w-[92%] rounded-card border border-hairline bg-surface px-3 py-2 text-[13px] leading-relaxed text-ink">
         {phase.content ? (
-          <MarkdownContent content={phase.content} sources={phase.sources} />
+          <MarkdownContent content={phase.content} sources={phase.sources} scope={scope} />
         ) : streaming ? (
           <span className="flex items-center gap-1.5 text-ink-3">
             <Spinner size={11} /> {phase.writing || 'Agent 思考中…'}
@@ -321,7 +325,7 @@ function AssistantRunView({ phase }: { phase: AgentRunPhase }) {
           <span className="text-ink-3">已取消本次回答（会话已落库可回放）</span>
         ) : null}
       </div>
-      <SourceList sources={phase.sources} judge={phase.judge} />
+      <SourceList sources={phase.sources} judge={phase.judge} scope={scope} />
     </div>
   )
 }
@@ -368,8 +372,14 @@ const JUDGE_TEXT: Record<ReturnType<typeof judgeState>, string> = {
  * - B1：`judge` 里有该 `chunk_id` 的结论才标注判官档位（**没有结论 ≠ 无关**，保持沉默）；
  *   `checked=false` 时事件无 items ⇒ 一张卡都不会被标注（不编造"未确认"）
  * - 空态不渲染（无 sources 时行为与改造前完全一致）
+ * - **H1**：`scope` 是本消息的引用命名空间 —— 卡片 id = `src-{scope}-{n}`（不再全局 `src-{n}`，
+ *   否则历史多条消息的 `src-1` 互撞，正文上标会跳到第一条消息的位置）
  */
-function SourceList({ sources, judge }: { sources: RetrievalSource[]; judge: Record<number, JudgeItem> }) {
+function SourceList({ sources, judge, scope }: {
+  sources: RetrievalSource[]
+  judge: Record<number, JudgeItem>
+  scope: string
+}) {
   if (!sources.length) return null
   // B-F9：只要有一条判官结论，就在来源区顶部给一行"非保证"小字（不改数据流）。
   const hasJudge = sources.some((s) => s.chunk_id != null && judge[s.chunk_id])
@@ -394,7 +404,7 @@ function SourceList({ sources, judge }: { sources: RetrievalSource[]; judge: Rec
         return (
           <div
             key={`${s.chunk_id ?? 'x'}-${n}`}
-            id={`src-${n}`}
+            id={sourceCardId(scope, n)}
             className="scroll-mt-4 rounded-tile border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px]"
           >
             {hasCredential ? (

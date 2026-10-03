@@ -7,13 +7,22 @@ queue.Queue，asyncio 生成器 asyncio.to_thread 读出逐条 yield——
 agent_run 是同步阻塞多轮循环（单轮 LLM 可 30s+），绝不能直接在
 事件循环里跑。
 
-并发纪律（⚠️ B-R1 实测：**下面这条声明目前没有实现**）：原设计为全局
-ThreadPoolExecutor(max_workers=4) 限流、超限 503「引擎忙」，以防多个标签页
-并发打爆 DeepSeek 配额。但 `AGENT_POOL_SIZE` 与 503 在**全仓没有任何调用点**
-（`git grep` 只命中本文件与 `docs/FRONTEND_PLAN.md` 的声明）—— 这是**既有偏差**
-（`git log -S AGENT_POOL_SIZE` 指向 M0 `da334d5`，**不是 B1 引入**），
-本轮按审计要求**只标注不实现**（见 `report-B-R1.md` B-F5）：
-凡「SSE 已限流 / 超限会 503」的表述都不成立。
+并发纪律（H1 · 2026-10-03 **已落地，声明与实现一致**）：`AGENT_POOL_SIZE = 4`
+是 **HTTP SSE 入口**（`server/routers/agent.py::chat_stream`）的并发流上限 ——
+占不到名额的请求在**响应开始前**就 503「引擎忙」，不会进入 `agent_run`
+（多个标签页并发打爆 DeepSeek 配额的防护由此生效）。
+
+- 名额 = 模块级计数 + `threading.Lock`（`acquire_agent_slot()`）；凭据
+  `AgentPoolTicket.release()` **幂等**（重复释放不会把计数减穿）。
+- **释放走两条独立路径**（H1 审计要点：漏释放 = 越用越"满"）：
+  ① `open_stream()` 的守卫生成器 `finally` —— 正常收流 / 异常 / 调用方提前
+     `close()`（客户端断开）都会执行；
+  ② `StreamingResponse(background=BackgroundTask(ticket.release))` 兜底 ——
+     生成器未被及时 `aclose()` 时由响应收尾兜底。凭据幂等 ⇒ 两条路径不会双减。
+- ⚠️ **范围**：上限只作用于 HTTP SSE 入口。脚本/测试**直接调用** `stream_events()`
+  不占名额；同步 `/api/agent/chat`（`run_chat`）也不占 —— 它没有"流"要占。
+  （`git log -S AGENT_POOL_SIZE` 指向 M0 `da334d5`；B-R1 曾如实标注"声明无调用点"，
+  见 `report-B-R1.md` B-F5；本文件 H1 起该偏差已消除。）
 """
 
 import json
@@ -38,8 +47,57 @@ _SENTINEL = object()
 # 每条 SSE 事件的间隔保活：15s 发一次 ": ping" 注释行防代理掐断（§5.1）
 PING_INTERVAL = 15.0
 
-# agent_run 是重活（多轮 LLM），限 4 并发；超限由调用方返回 503
+# agent_run 是重活（多轮 LLM + 判官），HTTP SSE 限 4 并发；超限由路由层 503「引擎忙」
 AGENT_POOL_SIZE = 4
+
+#: 并发流名额的锁与计数（模块级：一个进程内共享）。只经由下方 3 个函数读写。
+_pool_lock = threading.Lock()
+_pool_active = 0
+
+
+class AgentPoolFull(Exception):
+    """并发流名额已满 —— 路由层把它转成 503「引擎忙」。"""
+
+
+class AgentPoolTicket:
+    """一次并发流的占位凭据。`release()` **幂等**：重复调用只真正释放一次。
+
+    幂等是硬要求：释放有两条路径（守卫生成器 `finally` + 响应 `background`），
+    客户端断开时两条都可能在同一次流上触发 —— 非幂等的 `-= 1` 会把计数减穿，
+    反而把上限从"限制"变成"形同虚设"。
+    """
+
+    __slots__ = ("_released",)
+
+    def __init__(self):
+        self._released = False
+
+    def release(self):
+        """释放名额。返回 True = 本次真的释放；False = 之前已释放过。"""
+        global _pool_active
+        with _pool_lock:
+            if self._released:
+                return False
+            self._released = True
+            if _pool_active > 0:
+                _pool_active -= 1
+            return True
+
+
+def acquire_agent_slot():
+    """尝试占一个并发流名额；满员返回 None（调用方负责 503）。"""
+    global _pool_active
+    with _pool_lock:
+        if _pool_active >= AGENT_POOL_SIZE:
+            return None
+        _pool_active += 1
+        return AgentPoolTicket()
+
+
+def active_stream_count():
+    """当前持名的并发流数（观测/测试用；不要拿它做业务判断）。"""
+    with _pool_lock:
+        return _pool_active
 
 
 def config():
@@ -238,8 +296,9 @@ def stream_events(task, session_id=None, context=None):
         （其间 `PING_INTERVAL=15s` 可能插一条 `: ping`）。实测 p50≈0.9s / p90≈1.2s
         （n=47，`scripts/rag_eval.py --judge llm`）⇒ 典型额外占用 ≈1s，上界 20s。
         **接受现状**：① `done` 已发出，回答时延不含判官；② 判官结论只能随本连接下发，
-        拆独立端点属协议变更（超 B-R1 范围）。代价：并发流连接占用上界各 +20s，
-        且并发流数**无上限**（既有偏差，见模块 docstring 的 `AGENT_POOL_SIZE` 标注）。
+        拆独立端点属协议变更（超 B-R1 范围）。代价：并发流连接占用上界各 +20s
+        （H1 起并发流数由 HTTP 入口的 `AGENT_POOL_SIZE`/`open_stream()` 限为 4，
+        超限 503；本函数所在的 SSE worker 占的就是那个名额）。
         """
         try:
             from services import judge_service as js
@@ -274,3 +333,29 @@ def stream_events(task, session_id=None, context=None):
         if item is _SENTINEL:
             break
         yield item
+
+
+def open_stream(task, session_id=None, context=None):
+    """占并发名额并返回 `(ticket, stream_events 的守卫生成器)` —— 路由层的唯一 SSE 入口。
+
+    与直接调用 `stream_events()` 的差别：
+      ① 名额满 ⇒ 抛 `AgentPoolFull`（路由层转 503「引擎忙」）；
+      ② 生成器无论**正常收流 / 抛异常 / 调用方提前 `close()`**，`finally` 都释放名额。
+
+    ⚠️ 本函数**故意不是生成器函数**（函数体里没有 yield）：调用即占名额，
+    所以 503 能在 HTTP 响应开始前发出。若写成生成器函数，占名额会被推迟到第一次
+    `next()`（那时 200 + SSE 响应头已经发出）—— 503 就没机会返回了。
+    """
+    ticket = acquire_agent_slot()
+    if ticket is None:
+        raise AgentPoolFull(
+            "引擎忙：并发对话已达上限（{}），请稍后重试".format(AGENT_POOL_SIZE))
+
+    def _guarded():
+        try:
+            for item in stream_events(task, session_id, context):
+                yield item
+        finally:
+            ticket.release()
+
+    return ticket, _guarded()

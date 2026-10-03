@@ -67,16 +67,23 @@ export function mountChatArea(
   return { root, queryClient, getActiveId: () => adopted.current }
 }
 
-/** 单独挂 **真** `MarkdownContent`（F3 的代码块保护断言用）。 */
+/** 单独挂 **真** `MarkdownContent`（F3 的代码块保护 / H1 的 scope 断言用）。
+ *
+ * H1：有 `sources` 时 `MarkdownContent` 的 `scope` 在类型上必填（引用命名空间），
+ * 因此这里显式分支 —— 无 sources 走不带 scope 的调用（与生产调用方同款）。
+ */
 export function renderMarkdown(
   container: HTMLElement,
   content: string,
   sources?: RetrievalSource[],
+  scope = 'harness',
 ): Root {
   const root = createRoot(container)
   root.render(
     <MemoryRouter initialEntries={['/']}>
-      <MarkdownContent content={content} sources={sources} />
+      {sources && sources.length
+        ? <MarkdownContent content={content} sources={sources} scope={scope} />
+        : <MarkdownContent content={content} />}
     </MemoryRouter>,
   )
   return root

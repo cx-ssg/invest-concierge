@@ -752,8 +752,12 @@ SAR [0.10, 0.15)**（`irr-0209/0215/0232/0241/0243`，v1 均 < 0.45）；删 V1 
 
 ### 本轮**没**改的（记清楚）
 
-- **`agent_core.tool_output_is_error()` 零调用点**（审计一 P3，`load_holdout` 的同族）
-- **`embed.embed_one()` 零引用**（审计一 P3）
+- ~~**`agent_core.tool_output_is_error()` 零调用点**（审计一 P3，`load_holdout` 的同族）~~
+  → ✅ **已删除**（2026-09-18 第六轮审计一 P3 收尾；H1 · 2026-10-03 复核：全仓 `def`/调用 **0 命中**，
+  原地留墓碑注释 `utils/agent_core.py:519`；判定统一走 `tool_output_error(output) is not None`）
+- ~~**`embed.embed_one()` 零引用**（审计一 P3）~~
+  → ✅ **已删除**（2026-09-18；H1 复核：`def embed_one` / `embed_one(` 在 `*.py` 全仓 **0 命中**，
+  墓碑注释 `utils/rag/embed.py:92`；重建成本 = `embed_texts([text])[0]` 一行）
 - **`test_main_cli_path_rejects_v1_negative` 名不副实**（审计二 U9：它不强锁调用链）
 - **`strong` 档存废**（产品决策，待用户）
 
