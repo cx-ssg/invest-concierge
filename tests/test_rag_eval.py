@@ -459,6 +459,15 @@ _FAKE_METRICS = {
     "delegated_rate": 0.5, "abstain_recall": 0.5, "over_abstain_rate": 0.25,
     "Recall@%d" % ev.TOP_K: 1.0, "tool_recall": 1.0, "hard_stop_count": 0,
     "trusted_recall": 0.75, "MRR@10": 1.0,
+    # 2026-10-03 F0a-2：`full` 口径的混标的条数（与 `prod` 臂同定义）
+    "contaminated_count": 3, "contamination_rate": 0.75,
+}
+
+#: F0a-2 `prod` 臂的假指标 —— 数值**故意与 `_FAKE_METRICS` 不同**，
+#: 这样「两个口径是否各自打印」才测得出来（相同值会让接线断掉也看不出来）。
+_FAKE_PROD_METRICS = {
+    "n_rel": 4, "Recall@%d" % ev.TOP_K: 0.926, "MRR@10": 0.781,
+    "contaminated_count": 0, "contamination_rate": 0.0, "rows": [],
 }
 
 
@@ -482,6 +491,9 @@ def test_main_scan_path_prints_sar_none_table(monkeypatch, capsys):
     monkeypatch.setattr(ev, "EvidenceJudge", lambda corpus: judge)
     monkeypatch.setattr(ev, "embed_texts_batched", lambda qs: [[1.0, 0.0] for _ in qs])
     monkeypatch.setattr(ev, "evaluate", lambda *a, **k: dict(_FAKE_METRICS))
+    # ⚠️ 2026-10-03 F0a-2：`main()` 现在还跑 `prod` 臂（会真调 `retrieve_docs`）——
+    # 这里是「只测打印接线」的隔离测试，必须把新臂一并换成替身，否则它会去打真库。
+    monkeypatch.setattr(ev, "evaluate_prod", lambda *a, **k: dict(_FAKE_PROD_METRICS))
 
     rc = ev.main(["--scan"])
     out = capsys.readouterr().out
@@ -553,3 +565,123 @@ def test_cli_exposes_max_per_doc():
                        encoding="utf-8", errors="replace")
     out = (r.stdout or "") + (r.stderr or "")
     assert "--max-per-doc" in out, out[:600]
+
+
+# ============================================================================
+# 2026-10-03 F0a-2 · **产线形态评测臂**（`prod`）的回归锁
+# ============================================================================
+# 背景（`docs/M1_EVAL_REPORT.md` §4j）：本脚本原先只跑 `run_hybrid`，**从不调用**
+# `retrieve_docs` ⇒ F0a 修好的 `query_scope`（查询侧标的识别）在评测里**走不到**，
+# 输出恒为全库口径（0.593/0.386），"评测与被测对象解耦"。
+# 下面四条锁：① 带标的查询改写；② prod 臂真的走 `retrieve_docs`（不是又跑 run_hybrid）；
+# ③ 混标的计数；④ **CLI 打印接线**（本仓血的教训：只测函数不测调用链，接线断了套件全绿）。
+
+
+def test_prod_queries_prefix_gold_ticker_and_keep_unknown_rows():
+    """`prod_queries` 用**金标块所属标的**的公司名前缀查询；识别不出的样本**保持原样**。"""
+    meta = [{"chunk_id": 1, "code": "600519", "title": "贵州茅台:年度报告", "text": "贵州茅台"},
+            {"chunk_id": 2, "code": "000858", "title": "五粮液:年度报告", "text": "五粮液"}]
+    rows = [{"id": "rel-1", "query": "每股能分到多少钱？", "answer_chunk_ids": [1]},
+            {"id": "rel-2", "query": "经销商有多少家", "answer_chunk_ids": [2]},
+            {"id": "rel-3", "query": "无金标的查询", "answer_chunk_ids": []}]
+    qs = ev.prod_queries(rows, meta)
+    assert qs[0] == "贵州茅台：每股能分到多少钱？"
+    assert qs[1] == "五粮液：经销商有多少家"
+    assert qs[2] == "无金标的查询", "识别不出标的的样本必须保持原样（不得编造标的）"
+
+
+def test_evaluate_prod_actually_calls_retrieve_docs(monkeypatch):
+    """`prod` 臂必须调**产线入口** `retrieve_docs(code=None)` —— 而不是又跑一遍 `run_hybrid`。
+
+    `code=None` 是产线的真实形态（F0a 实测 LLM 时带时不带 `code`）：识别由
+    `retrieve_docs` 内部的 `query_scope.detect_targets` 完成 —— 若这里写死 `code=...`，
+    等于**自己做了识别**，`query_scope` 再退化也不会反映到指标上（就退回了旧盲区）。
+    """
+    import pytest
+    calls = []
+
+    def fake_retrieve(query, code=None, top_n=5, db_path=None, query_vec=None):
+        calls.append({"query": query, "code": code, "top_n": top_n})
+        return json.dumps({"scope": {"mode": "auto", "codes": ["600519"]},
+                           "results": [{"rank": 1, "chunk_id": 1, "code": "600519"},
+                                       {"rank": 2, "chunk_id": 2, "code": "600519"}]},
+                          ensure_ascii=False)
+
+    monkeypatch.setattr(ev, "retrieve_docs", fake_retrieve)
+    meta = [{"chunk_id": 1, "code": "600519", "title": "贵州茅台:公告", "text": "x"},
+            {"chunk_id": 2, "code": "600519", "title": "贵州茅台:公告", "text": "y"}]
+    rows = [{"id": "rel-1", "query": "每股能分到多少钱？", "answer_chunk_ids": [1]},
+            {"id": "rel-2", "query": "答不上来的问题", "answer_chunk_ids": [99]}]
+    m = ev.evaluate_prod(rows, meta, np.zeros((2, 2), dtype="float32"))
+
+    assert len(calls) == 2, "每条正例都要经过 `retrieve_docs`（产线入口）"
+    assert calls[0]["query"] == "贵州茅台：每股能分到多少钱？", "没有走带标的的产线查询形态"
+    assert calls[0]["code"] is None, "产线形态必须 `code=None`（识别由 `query_scope` 做）"
+    assert calls[0]["top_n"] >= 10, "MRR@10 需要 top-10 排序"
+    assert m["Recall@5"] == 0.5, "第 1 条命中（gold 在 top-5）、第 2 条不在结果里"
+    assert m["MRR@10"] == pytest.approx(0.5), "(1/1 + 0) / 2"
+    assert m["contaminated_count"] == 0
+
+
+def test_evaluate_prod_counts_cross_ticker_contamination(monkeypatch):
+    """跨标的污染必须计入 `contaminated_count`（`prod` 臂对 F0a 卖点的**唯一**可红指标）。"""
+    monkeypatch.setattr(
+        ev, "retrieve_docs",
+        lambda *a, **k: json.dumps({"results": [
+            {"rank": 1, "chunk_id": 1, "code": "600519"},
+            {"rank": 2, "chunk_id": 2, "code": "000858"}]}))
+    meta = [{"chunk_id": 1, "code": "600519", "title": "贵州茅台:公告", "text": "x"}]
+    rows = [{"id": "rel-1", "query": "茅台的分红", "answer_chunk_ids": [1]}]
+    m = ev.evaluate_prod(rows, meta, np.zeros((1, 2), dtype="float32"))
+    assert m["contaminated_count"] == 1, "top-5 混入两个标的却未计数 ⇒ 污染指标是摆设"
+    assert m["contamination_rate"] == 1.0
+
+
+def test_evaluate_prod_rejects_qvec_mismatch():
+    """向量条数与样本数不一致必须**显式报错**（静默错位比报错危险，与本仓既有约定一致）。"""
+    import pytest
+    rows = [{"id": "rel-1", "query": "q", "answer_chunk_ids": [1]}]
+    with pytest.raises(ValueError):
+        ev.evaluate_prod(rows, [], np.zeros((3, 2), dtype="float32"))
+
+
+def test_main_prints_both_qualifiers_with_own_labels(monkeypatch, capsys):
+    """**CLI 打印接线**：`full` 与 `prod` 必须**并列**出现，且**各带自己的数字**。
+
+    为什么必须测调用链：F1 的教训（`M1_EVAL_REPORT.md` §4k）——只测 `evaluate_prod()`
+    的返回值时，`main()` 里少打一行 / 只打一个口径，套件照样全绿。
+    这里两个假指标**故意取不同值**（full 1.000 / prod 0.926），所以"只打了一个"必然被抓。
+    """
+    rel, irr = _sensitivity_rows()
+    judge = _sensitivity_judge()
+    monkeypatch.setattr(ev, "load_holdout", lambda: (rel, irr))
+    monkeypatch.setattr(ev.rag_store, "get_conn", lambda db=None: _FakeConn())
+    monkeypatch.setattr(ev.rag_store, "load_index", lambda conn: (_META, _MATRIX))
+    monkeypatch.setattr(ev, "EvidenceJudge", lambda corpus: judge)
+    monkeypatch.setattr(ev, "embed_texts_batched", lambda qs: [[1.0, 0.0] for _ in qs])
+    monkeypatch.setattr(ev, "evaluate", lambda *a, **k: dict(_FAKE_METRICS))
+    monkeypatch.setattr(ev, "evaluate_prod", lambda *a, **k: dict(_FAKE_PROD_METRICS))
+
+    rc = ev.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[full]" in out and "[prod]" in out, "两种口径没有并列打印（V1）"
+    assert "Recall@5 = 1.000" in out, "`full`（全库口径）的数字丢了"
+    assert "Recall@5 = 0.926" in out, "`prod`（产线形态）的数字丢了"
+    assert "混入其它标的 = 3/4" in out, "`full` 口径的混标的条数没打印"
+    assert "混入其它标的 = 0/4" in out, "`prod` 口径的混标的条数没打印"
+    assert "代表产线" in out, "没有说明**哪种口径代表产线**（V5）"
+    assert "不走检索" in out and "不受本次新增口径影响" in out, \
+        "没有说明 A3a 不走检索、不受新口径影响（V5）"
+
+
+def test_cli_exposes_prod_raw_flag():
+    """`--prod-raw` 必须存在：它把「原样椭圆查询走产线路径」的**退化解**也变成可复现命令。"""
+    import subprocess
+    import sys as _sys
+
+    r = subprocess.run([_sys.executable, "scripts/rag_eval.py", "--help"],
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+    out = (r.stdout or "") + (r.stderr or "")
+    assert "--prod-raw" in out, out[:600]

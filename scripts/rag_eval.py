@@ -19,6 +19,23 @@
   python scripts/rag_eval.py --scan             # 扫阈值：none 稠密网格 + SAR_NONE 敏感性表
   python scripts/rag_eval.py --judge llm        # B1 LLM 判官（仅 weak 档触发）→ judge_fp / 触发率 / 延迟
                                                 # ⚠️ 真调 LLM，耗时随样本线性增长（--judge-max 可截断）
+
+## 2026-10-03 F0a-2 · **两种口径并列**（不得用新口径替换旧口径）
+
+`docs/M1_EVAL_REPORT.md` §4g/§4h 早已记录「**评测与被测对象解耦**」：本脚本原先只跑
+`run_hybrid`（**不经 `retrieve_docs` / 不经 `query_scope`**）⇒ 输出的恒是**全库口径**，
+不反映产线形态（F0a `c12d3e1` 修好的查询侧标的识别，评测里**根本走不到**）。现并列两条臂：
+
+| 口径 | 代表什么 | 走什么路径 |
+|---|---|---|
+| `full` | 系统**无法识别标的**时的能力（旧口径，**保留不改**） | `run_hybrid` 直调 |
+| `prod` | 用户**实际问某个标的**时的能力（产线形态） | `retrieve_docs`（经 `query_scope`） |
+
+⚠️ 评测集的 27 条正例是**椭圆**查询（`每股能分到多少钱？`，不含标的）⇒ 直接送 `retrieve_docs`
+会因识别不到标的而**退化成全库**（= `[prod·raw]` 一行，如实报出）。故 `prod` 臂按产线真实形态
+**改写**查询：把样本答案所属标的的**公司名**前缀到 query 上 —— 依据是 F0a 真实链路实测
+（`report-F0a.md` §1.2：LLM 喂给 `retrieve_docs` 的 query **一律带公司名**）。
+**改写只动查询文本，不动语料 / 不改样本 / 不动金标 / 不动阈值**；`full` 口径同时并列报出。
 """
 import argparse
 import json
@@ -34,6 +51,11 @@ from utils.rag import evidence as ev_mod                      # noqa: E402
 from utils.rag.embed import embed_texts_batched               # noqa: E402
 from utils.rag.evidence import EvidenceJudge, LEVEL_NONE  # noqa: E402
 from utils.rag.hybrid import MAX_PER_DOC_DEFAULT, run_hybrid  # noqa: E402
+# 2026-10-03 F0a-2：产线形态评测臂要**经过被测对象**（`retrieve_docs` → `query_scope`）。
+# ⚠️ 这两个 import 放在模块级（而非函数内）是为了让测试能 `monkeypatch.setattr(ev, ...)`
+#    把整条产线路径换成替身 —— 与 `judge_metrics()` 里那个函数内 import 不同，那是历史写法。
+from utils.rag.query_scope import company_names               # noqa: E402
+from utils.rag.retrieve import retrieve_docs                  # noqa: E402
 from utils.rag.tokenize import tokenize                       # noqa: E402
 
 GOLDEN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -115,6 +137,10 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K,
     over_abstain = 0
     recall_hits, trusted_hits, rr = 0, 0, []
     tool_recall_hits, hard_stop = 0, 0
+    # 2026-10-03 F0a-2：**混入其它标的**的条数（top-k 里出现 >1 个 `code`）——
+    # 与 `prod` 臂用**同一个定义**（`report-F0a.md` 的「混标的」列），两臂可逐位对照。
+    # 该量此前只在 F0a 的一次性脚本里算过，评测器**从不报** ⇒ 污染只能靠人工脚本发现。
+    contaminated = 0
     for r, qv in zip(rows_rel, qvecs[:len(rows_rel)]):
         ev = judge.assess(r["query"])
         # ⚠️ 2026-09-18 **撤下 `strong` 档**后不再统计「正例 strong 率」——
@@ -156,6 +182,11 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K,
         all10 = [meta[i]["chunk_id"] for i in order[:10]]
         rank = next((j + 1 for j, c in enumerate(all10) if c in gold), None)
         rr.append(1.0 / rank if rank else 0.0)
+        # 混标的：top-k 的 `code` 集合 > 1（`code` 为 None 的块不参与判定，避免把
+        # 「无标的元数据」误记成另一个标的）。
+        top_codes = {meta[i].get("code") for i in order[:k]} - {None}
+        if len(top_codes) > 1:
+            contaminated += 1
         # ⚠️ 2026-09-18 **删除了 `guarded_recall`**（两份外部审计**各自实测**证明它恒等于 `Recall@k`）：
         #   删掉 none 档硬停后，`run_hybrid` 的 `judge` **只用于算 evidence、不参与任何过滤/排序**
         #   （构造性恒等）→「带闸门再跑一次」与「裸检索」返回同一个 order；
@@ -223,6 +254,93 @@ def evaluate(rows_rel, rows_irr, judge, meta, matrix, qvecs, k=TOP_K,
         # 旧值（**仅存历史，勿再引用**）：holdout `strong_fp=0.000`、正例 strong 率 0.381。
         "n_over_abstain": over_abstain,
         "MRR@10": sum(rr) / n_rel if rr else 0.0,
+        # 2026-10-03 F0a-2：**全库口径的混标的条数**（定义与 `prod` 臂一致）。
+        # 它是「这个数字代表什么」的一部分：全库口径下 top-k 会跨标的（F0a 实测 23/27）。
+        "contaminated_count": contaminated,
+        "contamination_rate": contaminated / n_rel,
+    }
+
+
+# ============================================================================
+# 2026-10-03 F0a-2 · **产线形态评测臂**（`prod`）—— 经过被测对象的那条路
+# ============================================================================
+# 为什么需要一条新臂：`evaluate()` 里两次 `run_hybrid` 都是**绕过被测对象**的
+# （`docs/M1_EVAL_REPORT.md` §4g/§4h：「`rag_eval.py` 从不调用 `retrieve_docs`」）。
+# F0a 把**查询侧标的识别**做进了 `retrieve_docs`，而评测走不到那里 ⇒ 修好的东西
+# **没有任何指标能看见**（`full` 口径恒 0.593/0.386）。本臂直接调 `retrieve_docs`
+# —— 与产线工具**同一个入口**（`retrieve_docs` → `query_scope.detect_targets` → 池过滤 → `run_hybrid`），
+# 因此 `query_scope` 的退化（识别不出标的 / 误收窄池）会**真的改变指标**。
+
+def prod_queries(rows_rel, meta):
+    """把 27 条**椭圆**评测查询改写成「用户点名某个标的」的产线形态（**模拟**）。
+
+    - 标的来源 = 该样本**答案块所属的 `code`**（`answer_chunk_ids` → `meta[*].code`），
+      再由 `query_scope.company_names()` 取公司名（与 `query_scope` 里**同一套**数据驱动规则）。
+    - **依据**：F0a 真实链路实测（`report-F0a.md` §1.2）—— LLM 喂给 `retrieve_docs` 的 query
+      **一律带公司名**（`贵州茅台 分红方案 利润分配`），"用户实际问某个标的"就是产线常态；
+      而评测集是椭圆查询（`每股能分到多少钱？`），直接送检索 **不含任何标的词**。
+    - **边界**：改写只动 **query 文本**：语料（65 docs / 1691 chunks）、样本、金标块、阈值、
+      评分函数全部不动。它度量的是「**查询形态已知标的**时的检索能力」，**不是**「修复涨了多少分」。
+    - 识别不出标的 / 名称未知的样本**保持原样**（不收窄 —— 与产线 `code=None` 的兜底一致）。
+    """
+    by_id = {m.get("chunk_id"): m for m in (meta or [])}
+    names = company_names(meta)
+    out = []
+    for r in rows_rel:
+        code = None
+        for cid in (r.get("answer_chunk_ids") or []):
+            code = (by_id.get(cid) or {}).get("code") or code
+            if code:
+                break
+        name = names.get(code)
+        q = r.get("query") or ""
+        out.append("%s：%s" % (name, q) if name and name not in q else q)
+    return out
+
+
+def evaluate_prod(rows_rel, meta, qvecs, db_path=None, queries=None, k=TOP_K):
+    """**产线形态**评测臂：`retrieve_docs`（经 `query_scope`）→ `Recall@5` / `MRR@10` / 混标的。
+
+    - `queries`：本次实际送进 `retrieve_docs` 的查询文本（默认 = `prod_queries()` 的**带标的**改写形态；
+      传原样查询即得 `[prod·raw]` 退化诊断 —— 识别不到标的 ⇒ 与 `full` 几乎重合）。
+    - `qvecs` 必须是**同一批 `queries`** 的向量（错位向量比报错更危险 ⇒ 这里显式校验条数）。
+    - MRR 取 `retrieve_docs` 返回的 rank（`top_n=max(k,10)`），top-5 只用于 `Recall@k` 与混标的，
+      与 `report-F0a.md` 的口径逐字一致（同一 `retrieve_docs`、同一个 `top_n=10`）。
+    - ⚠️ **它才是"经过被测对象"的召回**：`evaluate()` 的 `Recall@k` / `tool_recall` 都只走
+      `run_hybrid`，`query_scope` 的收窄与 `_payload` 的档位剥离在它们眼里**不存在**。
+    """
+    if queries is not None and len(queries) != len(rows_rel):
+        raise ValueError("queries 条数 %d 与正例数 %d 不一致" % (len(queries), len(rows_rel)))
+    if len(qvecs) != len(rows_rel):
+        raise ValueError("qvecs 条数 %d 与正例数 %d 不一致 —— 静默错位会算错指标"
+                         % (len(qvecs), len(rows_rel)))
+    n = max(len(rows_rel), 1)
+    hits5, rr, contaminated = 0, [], 0
+    rows_out = []
+    qs = queries if queries is not None else prod_queries(rows_rel, meta)
+    for r, q, qv in zip(rows_rel, qs, qvecs):
+        raw = json.loads(retrieve_docs(q, code=None, top_n=max(k, 10),
+                                       db_path=db_path, query_vec=qv))
+        results = raw.get("results") or []
+        gold = set(r.get("answer_chunk_ids") or [])
+        top5 = results[:k]
+        hit = bool(gold & {x.get("chunk_id") for x in top5})
+        if hit:
+            hits5 += 1
+        rank = next((x.get("rank") for x in results if x.get("chunk_id") in gold), None)
+        rr.append(1.0 / rank if rank else 0.0)
+        codes = {x.get("code") for x in top5} - {None}
+        if len(codes) > 1:
+            contaminated += 1
+        rows_out.append({"id": r.get("id"), "query": q, "scope": raw.get("scope"),
+                         "hit@%d" % k: hit, "codes": [x.get("code") for x in top5]})
+    return {
+        "n_rel": len(rows_rel),
+        "Recall@%d" % k: hits5 / n,
+        "MRR@10": sum(rr) / n,
+        "contaminated_count": contaminated,
+        "contamination_rate": contaminated / n,
+        "rows": rows_out,
     }
 
 
@@ -398,6 +516,8 @@ def main(argv=None):
                     help="单行判官的 LLM 调用上限（秒；缺省 = judge_service.JUDGE_TIMEOUT_S）")
     ap.add_argument("--max-per-doc", type=int, default=MAX_PER_DOC_DEFAULT,
                     help="同文档限额（每文档最多几块进 top-k）；0 = 关闭（复现旧行为）")
+    ap.add_argument("--prod-raw", action="store_true",
+                    help="额外报一行 [prod·raw]：原样椭圆查询走产线路径（识别不到标的 ⇒ 退化为全库）")
     args = ap.parse_args(argv)
 
     if args.split == "tuning":
@@ -439,6 +559,16 @@ def main(argv=None):
 
     m = evaluate(rel, irr, judge, meta, matrix, qvecs,
                  max_per_doc=args.max_per_doc)
+    # 2026-10-03 F0a-2：**产线形态臂** —— 与 `full` **并列**报出，不替换。
+    # `prod_queries()` 只改写 query 文本；`evaluate_prod()` 走的是产线工具入口 `retrieve_docs`。
+    prod_qs = prod_queries(rel, meta)
+    prod_qvecs = np.asarray(embed_texts_batched(prod_qs), dtype="float32")
+    pm = evaluate_prod(rel, meta, prod_qvecs, db_path=args.db, queries=prod_qs)
+    raw_pm = None
+    if args.prod_raw:
+        # 诚实边界：**原样**椭圆查询走同一条产线路径 —— 识别不到标的 ⇒ 退化成全库口径。
+        raw_pm = evaluate_prod(rel, meta, qvecs[:len(rel)], db_path=args.db,
+                               queries=[r["query"] for r in rel])
     print("[eval] chunks=%d 阈值：none 档 sar<%.2f v1<%.2f（**strong 档已撤下**：非 none 一律 weak）"
           % (len(meta), ev_mod.SAR_NONE, ev_mod.V1_NONE))
     print("[eval] n_rel=%d n_irr=%d" % (m["n_rel"], m["n_irr"]))
@@ -462,9 +592,10 @@ def main(argv=None):
     print("  --- 检索侧 ---")
     print("  Recall@%d          = %.3f   (judge=None **裸检索**能力 —— 旧版在 none 档 `continue`，分子被少算)"
           % (TOP_K, m["Recall@%d" % TOP_K]))
-    print("  tool_recall       = %.3f   (**工具真实形态**：judge 生效 + 分层硬停 —— 评测此前从不走这条路；"
+    print("  tool_recall       = %.3f   (judge 生效 + 分层硬停 —— 但它**仍只走 `run_hybrid`**，"
           % m["tool_recall"])
-    print("                                它是**唯一经过被测对象**的检索指标)")
+    print("                                 **不经 `retrieve_docs`/`query_scope`** ⇒ 不是产线入口；"
+          "真正的产线入口见下方 [prod])")
     if abs(m["tool_recall"] - m["Recall@%d" % TOP_K]) > 1e-9:
         # ⚠️ 对照物是 **`Recall@k`**（**同义**：都是"gold 是否在 top-k"），**不是 `trusted_recall`** ——
         # 后者额外要求 `level != none`，两者**定义不同**，差值反映的是判据弃权、不是工具退化。
@@ -483,6 +614,33 @@ def main(argv=None):
     print("                                  —— 判据退化时它会变红（对照用例："
           "tests/test_rag_eval.py::test_trusted_recall_turns_red_when_judge_degrades）")
     print("  MRR@10            = %.3f" % m["MRR@10"])
+    # ========================================================================
+    # 2026-10-03 F0a-2：**两种口径并列**（`full` 旧口径**原样保留** + `prod` 产线形态）
+    # 数字含义必须写在数字旁：`full` ≠ `prod`，读到哪个数字都要知道它代表什么。
+    # ========================================================================
+    print("  --- 检索口径对照（两种口径**并列**，不得用新口径替换旧口径）---")
+    print("  [full] 全库口径（`run_hybrid` 直调，**不经** `retrieve_docs`/`query_scope`）"
+          " = 系统**无法识别标的**时的能力")
+    print("         Recall@5 = %.3f  MRR@10 = %.3f  混入其它标的 = %d/%d  n=%d"
+          % (m["Recall@%d" % TOP_K], m["MRR@10"], m["contaminated_count"],
+             m["n_rel"], m["n_rel"]))
+    print("  [prod] 产线形态（`retrieve_docs` **经** `query_scope`；带标的查询形态[模拟 LLM 改写]）"
+          " = 用户**实际问某个标的**时的能力  <<< 代表产线")
+    print("         Recall@5 = %.3f  MRR@10 = %.3f  混入其它标的 = %d/%d  n=%d"
+          % (pm["Recall@%d" % TOP_K], pm["MRR@10"], pm["contaminated_count"],
+             pm["n_rel"], pm["n_rel"]))
+    if raw_pm is not None:
+        print("  [prod·raw] 同一条产线路径，但用**评测集原样查询**（椭圆、不含标的 ⇒ 识别不到 "
+              "⇒ 退化为全库）：Recall@5 = %.3f  MRR@10 = %.3f  混入其它标的 = %d/%d"
+              % (raw_pm["Recall@%d" % TOP_K], raw_pm["MRR@10"],
+                 raw_pm["contaminated_count"], raw_pm["n_rel"]))
+    print("  [prod] 改写只动 **query 文本**（语料 65 docs/1691 chunks、样本 27+113、金标块、阈值**全未动**）"
+          "；`full` 口径**原样保留**，两个数字各自独立")
+    if ood.get("n"):
+        # F0a-2 任务书 §3：必须明写「A3a 不走检索 ⇒ 不受本口径新增影响」，防下游误读。
+        print("  [!] A3a = %d/%d = %.3f —— **不走检索**（判据恒在**全库**上判定）"
+              "⇒ **不受本次新增口径影响**"
+              % (ood["none"], ood["n"], ood["none"] / ood["n"]))
     print("  --- 按 kind 分列（混池会互相抵消，必须分列看）---")
     for kind, d in sorted(m["by_kind"].items()):
         print("   %-26s n=%-3d none=%-3d weak=%-3d"
