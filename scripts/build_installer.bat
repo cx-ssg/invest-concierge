@@ -42,6 +42,14 @@ if not defined ISCC (
 )
 echo [1/3] ISCC = %ISCC%
 
+rem --- 锁定「被装进去的那一份 exe」：critic 审计 F2 指出，原先只查文件存在、不查同一性
+rem     （dist_m4 与 dist_v150 的 exe 大小曾逐字节相同 ⇒ 大小不能证明同源）。这里打印
+rem     SHA256 供核对；建议与构建日志中的哈希比对。---
+for /f "skip=1 tokens=*" %%H in ('certutil -hashfile "%EXE%" SHA256') do (
+    if not defined EXE_SHA set "EXE_SHA=%%H"
+)
+echo [1/3] main exe SHA256 = !EXE_SHA!
+
 echo [2/3] compiling installer ...
 "%ISCC%" "%ISS%"
 if errorlevel 1 (

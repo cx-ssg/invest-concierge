@@ -41,7 +41,7 @@
 
 An open-source **A-share and fund analysis assistant**: no paid data feeds, works right after cloning. Built-in AI (optional DeepSeek key) translates financial reports, valuation and fund flows into plain language.
 
-7 live pages today (React frontend, desktop shell / browser):
+9 live pages today (React frontend, desktop shell / browser):
 
 | Page | Description |
 |---|---|
@@ -243,7 +243,7 @@ invest-concierge/
 - **Local embedding model**: defaults to local Ollama `bge-m3`; an OpenAI-compatible endpoint can be used instead.
 - **Memory is not shipped**: M2 memories live in your local SQLite (`memories` / `memories_pending`); the repo carries no history. Experience recall depends on local Ollama `bge-m3`, and without it degrades to reverse-chronological order, honestly labelled "not vectorised" in the injected text (no error, no pretending to remember).
 - **Graph orchestration is experimental**: only with `ORCHESTRATOR=graph`, and **only one chain is graphified** — the other 30 tools keep the original linear loop; M2 is not wired into the graph.
-- **7 live pages today**: the remaining planned pages (backtest / DCA / fund compare …) already have data-layer functions — see [docs/ROADMAP.md](docs/ROADMAP.md).
+- **9 live pages today**: the remaining planned pages (backtest / DCA / fund compare …) already have data-layer functions — see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## 🔍 Private Document Retrieval (M1)
 
@@ -397,7 +397,7 @@ without rewriting the whole agent. **The other 30 tools keep the original linear
 
 ## 🧪 Testing & Quality
 
-- Backend: `pytest tests/` (**625 passed**, all green on 2026-10-04)
+- Backend: `pytest tests/` (**676 passed**, all green on 2026-10-04)
 - Frontend: `cd frontend && npm run build` (tsc type-check + vite build)
 - Desktop shell: `python desktop\smoke_test.py` (dependencies / dist artefacts / port policy / embedded backend / GUI·tray smoke)
 - CI: GitHub Actions double matrix (Python 3.9 / 3.11) + gitleaks secret scan

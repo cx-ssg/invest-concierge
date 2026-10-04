@@ -86,10 +86,14 @@ def _installer_output_version():
     import re
 
     bat = REPO / "scripts" / "build_installer.bat"
-    m = re.search(r"invest-concierge-setup-v(\d+\.\d+\.\d+)\.exe",
-                  bat.read_text(encoding="utf-8"))
+    # ⚠️ 必须锚定赋值行 `set OUT=`：2026-10-04 critic 审计 F4 指出——原先用 re.search
+    # 全文搜索时，**第 9 行的 rem 注释**就能满足断言（五面升版 + 注释同步 + 赋值行留旧
+    # ⇒ 锁全绿而安装包输出名是旧的）。
+    m = re.search(r"^set OUT=.*invest-concierge-setup-v(\d+\.\d+\.\d+)\.exe",
+                  bat.read_text(encoding="utf-8"), re.MULTILINE)
     if not m:
-        raise AssertionError(f"{bat.name} 里找不到 `invest-concierge-setup-v<x.y.z>.exe`")
+        raise AssertionError(
+            f"{bat.name} 里找不到 `set OUT=...invest-concierge-setup-v<x.y.z>.exe` 赋值行")
     return m.group(1)
 
 

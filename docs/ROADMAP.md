@@ -5,7 +5,7 @@
 > 维护约定：本文件与 [README.md](../README.md) 口径一致；**指标必须带口径限定**（见 §5），
 > 行末给出实查证据（文件/命令），不写印象。
 >
-> 最近一次核对：**2026-10-04（H5）**——逐条核对见 §2。
+> 最近一次核对：**2026-10-04（H7）**——§2 逐条核对表为 H5 时实查；H6 / H7 的增量记于 §1。
 
 ## 1. 已上线
 
@@ -13,9 +13,9 @@
 
 - ✅ 基金持仓管理 / 资产总览 / 投资日记
 - ✅ AI 对话（DeepSeek + 工具调用，**31 个工具**；SSE 流式 + 思考流 + 工具时间线）
-- ✅ 股票综合诊断（5 引擎体检 + AI 多角色辩论；`ORCHESTRATOR=graph` 时走图编排人审链路）
+- ✅ 股票综合诊断（6 引擎体检 + AI 多角色辩论；`ORCHESTRATOR=graph` 时走图编排人审链路）
 - ✅ 双轨导航（基金 / 股票）
-- ✅ CI / 测试 / 安全加固（CI 双矩阵 Python 3.9 / 3.11 + gitleaks；pytest **674 passed**，2026-10-04 H6 实测）
+- ✅ CI / 测试 / 安全加固（CI 双矩阵 Python 3.9 / 3.11 + gitleaks；pytest **676 passed**，2026-10-04 H7 实测）
 - ✅ **Agent 对话直达 12 项数据能力（P1 已交付）**：基金/股票搜索、基金量化指标（收益/回撤/夏普）、历史净值、定投回测、个股行情/K 线/资金流向、大盘资金（含北向）、热门板块、涨停复盘、指数估值分位——在 AI 对话里直接提问即可。验收实录见 [AGENT_TOOLS_PLAN.md](AGENT_TOOLS_PLAN.md) §P1。
 
 ### v1.1.0 · 粘性三件套 + 私域知识层（M1）
@@ -89,7 +89,7 @@ P1（对话能力）/ P2（市场行情）/ P3（自选股 + 预警）**均已�
 | A3a（域外主动弃权） | 0.863 | ⚠️ **经 holdout 二次标定的拟合值，不能称「holdout 验收」**；敏感性区间 [0.863, 0.902]（更高值需第三次动用 holdout ⇒ 主动不取） |
 | A3b 判官 `judge_fp` / `judge_fn` / `span_valid` | 0.097 / 0.192 / 0.955 | 门槛 ≤0.10 / **≤0.20（v1.3.2 订正）** / ≥0.95；`judge_fn` 中「判官自身」份额是**上界口径** |
 | 语料 | 65 docs / 2111 chunks | 语料与向量**不随仓库分发**，需自行构建 |
-| 测试 | pytest **674 passed**（2026-10-04 H6） | 前端 `npx tsc -b` exit 0；`npm run build` 成功 |
+| 测试 | pytest **676 passed**（2026-10-04 H7） | 前端 `npx tsc -b` exit 0；`npm run build` 成功；构建后跑 `python scripts/verify_bundle.py`（动态导入面完整性） |
 
 完整依据与自查边界见 [README.md](../README.md) 评测小节、[M1_EVAL_REPORT.md](M1_EVAL_REPORT.md)、
 [COVERAGE_DESIGN.md](COVERAGE_DESIGN.md) 与各版 RELEASE_NOTES。

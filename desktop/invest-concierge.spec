@@ -72,6 +72,31 @@ hiddenimports = [
     "langgraph.checkpoint.sqlite",
 ]
 
+# 2026-10-04 交付线（critic 审计 F1 **实测**，非推测）——工具注册表用**字符串晚绑定**
+# （`utils/agent_core.py` 写 `module="data.dragon_api"`，真正 import 在其
+# `importlib.import_module(mod_name)`，参数是**变量**）⇒ PyInstaller 静态分析收不到，
+# 且**不报错、不 warn**。v1.5.0 的 exe 实测缺 data.dragon_api / data.moneyflow_api /
+# data.limit_up_api ⇒ **9 个工具（含全部 7 个龙虎工具）在安装版 ModuleNotFoundError**，
+# 而源码态 pytest 全绿（模块就在磁盘上）。
+#
+# ⚠️ 两个坑（本轮实测踩到，写下来防复发）：
+#   ① `collect_submodules` 需要**能 import 目标包** ⇒ 必须先把 ROOT 注入 sys.path，
+#      否则它**静默返回 []**（本轮第一次"改完仍缺"的根因之一）
+#   ② PyInstaller 会**复用已存在的 `PYZ-00.pyz`**（只重算 Analysis/PKG/EXE 的 .toc）
+#      ⇒ 改完本 spec 必须**删掉 workpath**（如 `rm -rf build_v150`）再构建，
+#      否则新 hiddenimports 不生效（本轮第一次"修完仍红"的第二个根因）
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from PyInstaller.utils.hooks import collect_submodules  # noqa: E402
+
+_data_mods = sorted(set(collect_submodules("data"))
+                    | {"data.dragon_api", "data.moneyflow_api", "data.limit_up_api"})
+if not _data_mods:
+    raise SystemExit("[spec] data 包一个模块都没收到 ⇒ 检查 ROOT/sys.path（禁止静默通过）")
+hiddenimports += _data_mods
+print("[spec] hiddenimports += data 包 %d 个模块：%s" % (len(_data_mods), _data_mods))
+
 a = Analysis(
     [os.path.join(ROOT, "desktop", "launcher.py")],
     pathex=[ROOT, os.path.join(ROOT, "desktop")],

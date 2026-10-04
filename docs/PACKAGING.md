@@ -29,6 +29,11 @@ cd frontend && npm run build && cd ..
 desktop\build_env\Scripts\pyinstaller desktop\invest-concierge.spec --noconfirm
 
 :: 4. 产物：dist\invest-concierge.exe（**onefile 单文件**；输出目录可用 --distpath 自定，如 --distpath dist_v150）
+
+:: 5. 【必做】构建后校验「字符串晚绑定」动态导入面 —— 源码态测试**覆盖不到**这类缺失
+::    （2026-10-04 F1 实证：v1.5.0 的 exe 缺 3 个 data 模块 ⇒ 9 个工具在安装版不可用，
+::     而 674 条 pytest 全绿）；退出码非 0 时**不要发布**
+python scripts\verify_bundle.py
 ```
 
 ## 3. spec 三个核心难点（desktop/invest-concierge.spec 已处理）
@@ -52,6 +57,11 @@ PyInstaller 执行 spec 时 `__file__` 不可靠 → 用 `SPECPATH`（spec 所�
 - 冒烟脚本的 vite 日志改写 `tempfile`（不往仓库路径写文件）。
 
 ## 5. exe 冒烟清单（每次出包必跑）
+
+> ⚠️ **2026-10-04 交付线未执行本节**：项目有 **GUI 禁令**（禁起桌面壳 / 打包 exe，
+> 避免强杀 GUI 进程触发 Windows `0x80000003`），**双击冒烟必须人工完成**。
+> 本轮替代验证 = 源码态 `/api/health`（实测 `version=1.5.0`）+ 构建后 `scripts/verify_bundle.py`
+> （动态导入面完整性 —— F1 正是靠它抓出来的）。**双击冒烟仍待补**（见交付说明）。
 
 1. 双击 exe → 原生窗口（pywebview/WebView2）
 2. 窗口内 React 加载、`/api/health` 200（backend.py 自检会先跑）

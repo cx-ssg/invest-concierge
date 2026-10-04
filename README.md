@@ -12,7 +12,7 @@
 
 ![演示 GIF](assets/demo/invest-concierge-demo.gif)
 
-*↑ 37 秒演示（GIF 1.1 MB / 也有 [MP4](assets/demo/invest-concierge-demo.mp4) 版）：真实运行录屏式巡览，含一次真实的 AI 问答。*
+*↑ 37 秒演示（GIF 1.1 MB / 也有 [MP4](assets/demo/invest-concierge-demo.mp4) 版）：**由实机截图合成的页面巡览（非屏幕录制）**，含一次真实的 AI 问答。*
 
 | AI 对话（真实问答 · 工具时间线 + 诚实标注数据缺口） | 股票 · 综合诊断 |
 |:---:|:---:|
@@ -219,7 +219,7 @@ invest-concierge/
 ├─ utils/orchestrator/   图编排 M3（flags / state / graph / nodes / adapters）
 ├─ scripts/           采集与评测脚本（rag_ingest*.py / rag_eval.py / rag_rerank_probe.py）
 ├─ pages/             旧 Streamlit 页面（保留备查，不参与新 UI；入口 app.py）
-├─ tests/             **674 个 pytest 用例**（H6 实测全绿，2026-10-04；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额 / 行情与自选 / 龙虎打板工具族）
+├─ tests/             **676 个 pytest 用例**（2026-10-04 H7 实测全绿；工具契约 / 排雷与估值 / 记忆 / RAG / 图编排 / 采集与切块 / 并发名额 / 行情与自选 / 龙虎打板工具族 / 版本口径六面锁）
 ├─ assets/            设计素材（mockups）
 ├─ .env.example       环境变量模板（复制为 .env 使用）
 ├─ requirements.txt   Python 依赖
@@ -406,7 +406,7 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 
 ## 🧪 测试与质量
 
-- 后端：`pytest tests/`（**674 passed**，2026-10-04 H6 实测全绿）
+- 后端：`pytest tests/`（**676 passed**，2026-10-04 H7 实测全绿）
 - 前端：`cd frontend && npm run build`（tsc 类型检查 + vite 构建）
 - 桌面壳：`python desktop\smoke_test.py`（依赖 / dist 产物 / 端口策略 / 内嵌后端 / GUI·托盘冒烟）
 - CI：GitHub Actions 双矩阵（Python 3.9 / 3.11）+ gitleaks 密钥扫描

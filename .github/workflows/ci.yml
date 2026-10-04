@@ -30,7 +30,11 @@ jobs:
         run: python -m pytest -q
 
   # A-R1 F1（2026-10-03）：BUG-001 的修复此前**没有任何自动化回归** —— 把它改回缺陷版，
-  # 上面那个 job 仍 476 全绿。本 job 用 jsdom 跑**真 ChatArea 组件 bundle + 桩 SSE**，
+  # 上面那个 job 仍会全绿（写这条注释时基线 476，现 676 —— 数字本身只是「它抓不到」的旁证）。
+  # ⚠️ 且两个 job 都**不覆盖打包链**：字符串晚绑定（importlib.import_module(变量)）导致的
+  #    模块缺失只有构建后才暴露（2026-10-04 F1 实证：exe 缺 3 个 data 模块 ⇒ 9 个工具不可用，
+  #    而 pytest 674 条全绿）⇒ 构建后必须跑 `python scripts/verify_bundle.py`。
+  # 本 job 用 jsdom 跑**真 ChatArea 组件 bundle + 桩 SSE**，
   # 不需要浏览器、不需要 LLM/Key、不需要 Ollama、不需要后端。
   # 最后一步是 harness 自检：缺陷版变异体必须被断言抓住（否则等于没测）。
   frontend-dom:

@@ -7,13 +7,28 @@
 
 ## [Unreleased]
 
-> **交付线**（尚未发版）：重打包桌面版 + 版本口径统一。未发版期间本节不代表任何 tag。
+> **交付线**（尚未发版）：重打包桌面版 + 版本口径统一 + 打包链校验。未发版期间本节不代表任何 tag。
+
+### Added
+- **构建后校验 `scripts/verify_bundle.py`**：AST 扫「字符串晚绑定」动态导入面
+  （`module="data.xxx"` / `import_module("...")` / `__import__(...)` 的**字面量**），
+  断言每个模块都在 `PYZ-00.toc` 内。对缺陷产物**实测 exit 1**、修复后 exit 0。
 
 ### Changed
-- **版本口径统一**：对外 tag 已到 `v1.5.0`，而应用内 `services/status_service.VERSION`、`frontend/package.json`、安装器 `.iss` 三处仍写 `1.2.0` —— **自洽但不反映发布版本**（旧锁只钉「内部一致」）。现统一升到 `1.5.0`；`server/main.py` 改为引用同一常量（不再硬编码）；并把「仓库外三面」纳入锁：CHANGELOG 顶部 / `desktop/installer/invest-concierge-setup.iss` / `scripts/build_installer.bat` 输出名。
+- **版本口径统一**：对外 tag 已到 `v1.5.0`，而应用内 `services/status_service.VERSION`、`frontend/package.json`、安装器 `.iss` 三处仍写 `1.2.0` —— **自洽但不反映发布版本**（旧锁只钉「内部一致」）。现统一升到 `1.5.0`；`server/main.py` 改为引用同一常量（不再硬编码）；锁由 3 面扩为 **6 面**（+ CHANGELOG 顶部 / `.iss` `MyAppVersion` / `.bat` 输出名，且 `.bat` 面**锚定 `^set OUT=`**，避免「注释即可满足断言」）。
+- 测试基线 **674 → 676 passed**（新增 2 条版本口径锁）。
 
 ### Fixed
-- `docs/PACKAGING.md` 产物形态订正为 **onefile**（spec 只有 `EXE(...)`、无 `COLLECT`；`.iss` 注释亦按 onefile 设计）——原文「onedir 而非 onefile」与代码不符。
+- 🔴 **打包产物缺模块（critic 审计 F1 实测）**：工具注册表用字符串晚绑定
+  （`utils/agent_core.py` 的 `module="data.dragon_api"`，真正 import 在其 `importlib.import_module(变量)`），
+  PyInstaller 静态分析收不到 ⇒ **v1.5.0 的 exe 实测缺 `data.dragon_api` / `data.moneyflow_api` /
+  `data.limit_up_api`**，**9 个 Agent 工具（含全部 7 个龙虎工具）在安装版抛 `ModuleNotFoundError`**
+  —— 构建**不报错**、`warn-*.txt` **不提示**、源码态 674 条测试**全绿**
+  （⇒ 这类风险源码态测试原理上覆盖不到，必须在构建产物上校验）。
+  修：spec 改用 `collect_submodules("data")` 收全；新增 `scripts/verify_bundle.py` 在构建产物上断言。
+- 英文 `README.en.md` 数字漂移：**7 live pages → 9**、**625 passed → 676**（中文版此前已更新，英文版漏同步）。
+- `docs/PACKAGING.md` 产物形态订正为 **onefile**（spec 只有 `EXE(...)`、无 `COLLECT`；`.iss` 注释亦按 onefile 设计）——原文「onedir 而非 onefile」与代码不符；同处给 §5 冒烟清单补「本轮因 GUI 禁令**未执行**」的标注。
+- `docs/ROADMAP.md`「5 引擎」→「6 引擎」（与 README / `data/diagnosis.py` 一致）；元数据「最近一次核对」H5 → H7。
 
 ## [1.5.0] - 2026-10-04
 
