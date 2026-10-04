@@ -2,10 +2,11 @@
 
 > 2026-09-04 本地产判。记录真实踩坑与最终可复现路径，供 CI/他人复刻。
 > 结论先行：**必须在干净 venv 里打包**，宿主 Anaconda 环境有两大杀手（见 §1）。
-> **最近一次复跑（2026-10-04 · v1.5.0）**：干净 `desktop\build_env`（PyInstaller 6.22.2）打包 → exit 0，
+> **最近一次复跑（2026-10-04 · v1.5.1）**：干净 `desktop\build_env`（PyInstaller 6.22.2）打包 → exit 0，
 > 产物 `dist_v150\invest-concierge.exe` **87.11 MiB**（= 91.35 MB 十进制；耗时 ≈98 s）；
-> `scripts\build_installer.bat` → exit 0，`dist_m4\invest-concierge-setup-v1.5.0.exe` **87.81 MiB**（= 92.08 MB）。
-> ⚠️ 体积随依赖变化：补齐 `langgraph` 全家（F1 连带修复）后，v1.5.0 由 83.19 → **87.11 MiB**。
+> `scripts\build_installer.bat` → exit 0，`dist_m4\invest-concierge-setup-v1.5.1.exe` **87.81 MiB**（= 92.08 MB）。
+> ⚠️ 与 v1.5.0 的差别：体积 **83.19 → 87.11 MiB**（补齐 `langgraph` 全家 —— F1 的连带修复），
+> 且 **v1.5.1 起构建后必跑** §2 的两条校验（`verify_bundle` / `verify_exe`）。
 > ⚠️ 口径：本文用 **MiB**（`size / 1MB`，同 Windows 资源管理器）；十进制 MB 见括号。
 
 ## 1. 环境杀手（宿主 Anaconda 的问题，不是代码问题）
@@ -80,6 +81,6 @@ PyInstaller 执行 spec 时 `__file__` 不可靠 → 用 `SPECPATH`（spec 所�
 
 - akshare 动态 import 面广，冷启首问 15-40s（与开发态一致，非打包引入）
 - WebView2 依赖系统自带（Win10/11 默认有）；无 WebView2 → launcher 自动回退浏览器模式
-- exe 体积实测 **≈87 MiB**（pandas/akshare/langgraph 全家桶 + 前端 dist；2026-10-04 v1.5.0 实测 **87.11 MiB** = 91.35 MB 十进制）；
+- exe 体积实测 **≈87 MiB**（pandas/akshare/langgraph 全家桶 + 前端 dist；2026-10-04 **v1.5.1** 实测 **87.11 MiB** = 91.35 MB 十进制）；
   产物是 **onefile 单文件** —— spec 只有 `EXE(...)`、**没有 `COLLECT`**（.iss 的 `[Files]` 也按单文件搬运安装）。
   ⚠️ 本节旧文曾写「onedir 而非 onefile」，与代码不符，2026-10-04 实查订正。

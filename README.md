@@ -66,7 +66,7 @@
 | **M2 · 长期记忆层** | 三类记忆分离存储、分离召回（偏好**每次对话必注入** / 事实**按标的** / 经验**向量 top-3**）；写入走「候选 → 用户确认」，**AI 不自行写记忆** | 设置页「长期记忆」区（列表 / 删除 / 候选确认 / **召回预览**） |
 | **M3 · 图编排（可选）** | `ORCHESTRATOR=graph` 才开启，**默认 `legacy`、行为不变**；只图化「股票深度诊断」一条链路，换来检查点续跑与人工确认 | `POST /api/stocks/{code}/diagnosis/review` + SQLite 检查点 |
 
-**v1.3.0 → v1.3.2 新增（当前能力，详细口径见后续章节与 [docs/RELEASE_NOTES_v1.3.2.md](docs/RELEASE_NOTES_v1.3.2.md)）**：
+**v1.3.x → v1.5.1 新增（当前能力，详细口径见后续章节与 [docs/RELEASE_NOTES_v1.5.1.md](docs/RELEASE_NOTES_v1.5.1.md)）**：
 
 | 能力 | 说明 |
 |---|---|
@@ -80,15 +80,13 @@
 
 ### 方式一：下载安装包（推荐，零 Python 环境）
 
-> ⚠️ **版本与下载口径（务必先读）**：仓库最新 tag 与**最新 GitHub Release 均为 `v1.3.2`**
-> （`Releases/latest` 指向它，2026-10-04 发布）。
-> **但最新 Release 不一定带安装包**：`v1.1.0` / `v1.2.0` / `v1.3.0` 发布说明都写明「本次未重新打包安装器」，
-> `v1.3.1` / `v1.3.2` 为 patch 版、发布说明未提及资产变更 ⇒ **请按 `Releases/latest` 页面实际列出的资产下载**；
-> 若该页没有 exe，安装包请到
-> [v1.0.0 Release](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0) 下载
-> （`v1.1.0` / `v1.2.0` / `v1.3.0` 发布说明均记载安装包落在该页）。
-> **安装包里的 exe 对应 v1.0.0 的代码；M1 / M2 / M3 等新能力是源码功能，不要把安装包当成最新代码。**
-> 想用新功能请按下面「方式二」源码运行，或按 `docs/PACKAGING.md` 自行构建安装包。
+> ✅ **版本与下载口径**：仓库最新 tag 与**最新 GitHub Release 均为 `v1.5.1`**（2026-10-04 发布，`Releases/latest` 指向它），
+> **该页已附安装包与绿色 exe，且它们就是本 tag 的源码构建出来的** —— 构建后跑过两道校验：
+> `scripts/verify_bundle.py`（模块完整性）与 `scripts/verify_exe.py`（**直接读 exe 内的版本常量 = `1.5.1`**）。
+> ⚠️ **历史情况（已在本版纠正）**：`v1.1.0` – `v1.5.0` 的 Release **均未附资产**，
+> 安装包长期停留在 [v1.0.0 Release](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0)
+> （该页的 exe 对应 v1.0.0 代码，**不含 M1/M2/M3 等新能力**）。要更早版本可用那一页；
+> **要新功能请用本页（`v1.5.1`）的安装包，或按「方式二」源码运行。**
 
 到 [Releases](https://github.com/cx-ssg/invest-concierge/releases/latest) 下载：
 
@@ -423,6 +421,9 @@ API 入口（供自建脚本 / UI 调用）：`GET/POST /api/memory`、`DELETE /
 - [诊断页验收记录](docs/verification.md)
 - [M1 检索评测报告](docs/M1_EVAL_REPORT.md)（指标、未达标项与证据）
 - [能力覆盖与边界](docs/COVERAGE_DESIGN.md)
+- [Release Notes v1.5.1 · 桌面版打包链修复（F1）+ 首次带安装包](docs/RELEASE_NOTES_v1.5.1.md)
+- [Release Notes v1.5.0 · 龙虎/打板工具族接入（31 个工具）](docs/RELEASE_NOTES_v1.5.0.md)
+- [Release Notes v1.4.0 · 自选股 / 市场行情两页面](docs/RELEASE_NOTES_v1.4.0.md)
 - [Release Notes v1.3.2 · 代码卫生与判据门槛订正](docs/RELEASE_NOTES_v1.3.2.md)
 - [Release Notes v1.3.1 · 检索污染修复与口径订正](docs/RELEASE_NOTES_v1.3.1.md)
 - [Release Notes v1.3.0 · M2 长期记忆层](docs/RELEASE_NOTES_v1.3.0.md)

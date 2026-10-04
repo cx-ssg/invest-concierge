@@ -63,7 +63,7 @@ An open-source **A-share and fund analysis assistant**: no paid data feeds, work
 | **M2 · Long-term memory** | Three memory kinds stored and recalled separately (preferences **injected on every turn** / facts **by ticker** / experiences **vector top-3**); writes go through "candidate → user confirmation", **the AI never writes memory on its own** | Settings page "Long-term memory" block (list / delete / confirm candidates / **recall preview**) |
 | **M3 · Graph orchestration (optional)** | Only active with `ORCHESTRATOR=graph`; **default `legacy`, behaviour unchanged**; graphifies a single "stock diagnosis" chain to gain checkpoint resume + human review | `POST /api/stocks/{code}/diagnosis/review` + SQLite checkpoint |
 
-**New in v1.3.0 → v1.3.2 (current capabilities; full caveats in the sections below and in [docs/RELEASE_NOTES_v1.3.2.md](docs/RELEASE_NOTES_v1.3.2.md))**:
+**New in v1.3.x → v1.5.1 (current capabilities; full caveats in the sections below and in [docs/RELEASE_NOTES_v1.5.1.md](docs/RELEASE_NOTES_v1.5.1.md))**:
 
 | Capability | What it does |
 |---|---|
@@ -77,15 +77,15 @@ An open-source **A-share and fund analysis assistant**: no paid data feeds, work
 
 ### Option 1 — Download the installer (zero Python environment)
 
-> ⚠️ **Version & download caveat (please read)**: both the newest tag and the **latest GitHub Release are `v1.3.2`**
-> (`Releases/latest` points to it, released 2026-10-04).
-> **But the latest Release does not necessarily carry installer assets**: the release notes for `v1.1.0` / `v1.2.0` / `v1.3.0`
-> all state "no rebuilt installer this time", and `v1.3.1` / `v1.3.2` are patch releases whose notes do not mention asset changes
-> ⇒ **download whatever assets the `Releases/latest` page actually lists**; if that page has no exe, get the installer from the
-> [v1.0.0 Release](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0)
-> (the `v1.1.0` / `v1.2.0` / `v1.3.0` notes all record that the installer lives there).
-> **The bundled exe corresponds to v1.0.0 code; M1 / M2 / M3 and later capabilities are source-only — do not treat the installer as the latest code.**
-> Use Option 2 below for the new features, or build the installer yourself following `docs/PACKAGING.md`.
+> ✅ **Version & download**: both the newest tag and the **latest GitHub Release are `v1.5.1`**
+> (released 2026-10-04; `Releases/latest` points to it), and **that page ships both the installer and the standalone exe —
+> built from exactly this tag's source**. Two post-build checks were run:
+> `scripts/verify_bundle.py` (module completeness) and `scripts/verify_exe.py`
+> (which **reads the version constant inside the exe = `1.5.1`**).
+> ⚠️ **Historical note (corrected in this release)**: the `v1.1.0`–`v1.5.0` releases **carried no assets**, so the
+> installer stayed on the [v1.0.0 Release](https://github.com/cx-ssg/invest-concierge/releases/tag/v1.0.0)
+> (whose exe corresponds to v1.0.0 code, **without M1/M2/M3 and later capabilities**).
+> Use that page only for older versions; **for current features use the `v1.5.1` installer, or Option 2 (run from source).**
 
 Download from [Releases](https://github.com/cx-ssg/invest-concierge/releases/latest):
 
@@ -414,6 +414,9 @@ This project is developed through a multi-agent workflow (AI-assisted programmin
 - [Diagnosis verification notes](docs/verification.md)
 - [M1 retrieval evaluation report](docs/M1_EVAL_REPORT.md) (metrics, missing targets, evidence)
 - [Capability coverage & boundaries](docs/COVERAGE_DESIGN.md)
+- [Release Notes v1.5.1 · desktop packaging fix (F1) + first installer assets](docs/RELEASE_NOTES_v1.5.1.md)
+- [Release Notes v1.5.0 · dragon/limit-up tool family (31 tools)](docs/RELEASE_NOTES_v1.5.0.md)
+- [Release Notes v1.4.0 · watchlist / market pages](docs/RELEASE_NOTES_v1.4.0.md)
 - [Release Notes v1.3.2 · code hygiene & judge-threshold revision](docs/RELEASE_NOTES_v1.3.2.md)
 - [Release Notes v1.3.1 · retrieval-contamination fix & caliber revision](docs/RELEASE_NOTES_v1.3.1.md)
 - [Release Notes v1.3.0 · M2 long-term memory](docs/RELEASE_NOTES_v1.3.0.md)
