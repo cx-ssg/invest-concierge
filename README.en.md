@@ -9,15 +9,27 @@
 
 ## 🖼️ Screenshots
 
-| AI chat (quick prompts) | Fund · dashboard |
-|:---:|:---:|
-| ![AI chat](assets/screenshots/chat-light.png) | ![Dashboard](assets/screenshots/dashboard-dark.png) |
+![Demo GIF](assets/demo/invest-concierge-demo.gif)
 
-| Fund · portfolio | Stock · diagnosis |
-|:---:|:---:|
-| ![Portfolio](assets/screenshots/portfolio-light.png) | ![Diagnosis](assets/screenshots/diagnosis-dark.png) |
+*↑ 37-second demo (GIF 1.1 MB / [MP4](assets/demo/invest-concierge-demo.mp4) also available): a real run, including one real AI Q&A.*
 
-*Light / dark themes, one-click toggle in the top-right corner.*
+| AI chat (real run · tool timeline + honest data-gap note) | Stock · diagnosis |
+|:---:|:---:|
+| ![AI chat](assets/screenshots/chat-live-light.png) | ![Diagnosis](assets/screenshots/diagnosis-dark.png) |
+
+| Market overview · 5 tabs (live index data) | Fund · investment diary |
+|:---:|:---:|
+| ![Market](assets/screenshots/market-light.png) | ![Diary](assets/screenshots/diary-light.png) |
+
+| Stock · watchlist | Price alerts |
+|:---:|:---:|
+| ![Watchlist](assets/screenshots/watchlist-light.png) | ![Alerts](assets/screenshots/alerts-light.png) |
+
+| Fund · portfolio | Settings (model / privacy / long-term memory) |
+|:---:|:---:|
+| ![Portfolio](assets/screenshots/portfolio-light.png) | ![Settings](assets/screenshots/settings-dark.png) |
+
+*Light / dark themes, one-click toggle in the top-right corner. Screenshots taken from a **real local run on 2026-10-04 (v1.5.0)**; market data is that day's real quotes.*
 
 ## ⚠️ Disclaimer (read first)
 

@@ -5,6 +5,43 @@
 > 版本线说明（2026-10-01）：项目内部曾以 `v1.2 / v1.2.1` 称呼「多 provider 模型接入」阶段，而对外 tag 只有 `v1.0.0`。
 > 自本版起对外统一按 **semver `v1.x`** 记录；历史分段内容原样保留，仅重组标题。
 
+## [Unreleased]
+
+> **交付线**（尚未发版）：重打包桌面版 + 版本口径统一。未发版期间本节不代表任何 tag。
+
+### Changed
+- **版本口径统一**：对外 tag 已到 `v1.5.0`，而应用内 `services/status_service.VERSION`、`frontend/package.json`、安装器 `.iss` 三处仍写 `1.2.0` —— **自洽但不反映发布版本**（旧锁只钉「内部一致」）。现统一升到 `1.5.0`；`server/main.py` 改为引用同一常量（不再硬编码）；并把「仓库外三面」纳入锁：CHANGELOG 顶部 / `desktop/installer/invest-concierge-setup.iss` / `scripts/build_installer.bat` 输出名。
+
+### Fixed
+- `docs/PACKAGING.md` 产物形态订正为 **onefile**（spec 只有 `EXE(...)`、无 `COLLECT`；`.iss` 注释亦按 onefile 设计）——原文「onedir 而非 onefile」与代码不符。
+
+## [1.5.0] - 2026-10-04
+
+> minor 版：龙虎/打板工具族接入。对外说明见 [docs/RELEASE_NOTES_v1.5.0.md](docs/RELEASE_NOTES_v1.5.0.md)。
+
+### Added
+- **Agent 工具 24 → 31**：`data/dragon_api.py` 12 个业务函数按数据访问形态合并为 7 个工具（`get_limit_up_pool` / `get_limit_up_detail` / `get_lhb_stats` / `get_dragon_stocks` / `get_board_list` / `get_board_members` / `get_stock_boards`）；只在文件尾部加薄适配层，`utils/agent_core.py` 结构零改动（声明式注册表 + 晚绑定 importlib）。合并依据见 `report-H6.md §V2`。
+- 边界按 `docs/AGENT_TOOLS_PLAN.md §3.2` 原意执行：游资向能力**只由用户在 AI 对话里主动问** —— 不加页面 / 不加导航 / UI 不推荐（测试锁 `pages/` 与 `frontend/src` 零命中）；每个返回体带 `source` + `risk_note`。
+- golden set **+8 用例**；`MIN_TOOL_COVERAGE` 23 → **31**（与注册表键集等值）。
+
+### Verification
+- `pytest -q` → **674 passed**；`npx tsc -b` exit 0；`npm run build` exit 0
+- 真实数据：`get_limit_up_pool` 52 只 / `get_lhb_stats` 493 行 / `get_dragon_stocks` 52 只
+- ⚠️ 东财 `push2` / `datacenter` 不可达时 **4 个工具返回 `NOT_FOUND`**（零假数据）
+
+## [1.4.0] - 2026-10-04
+
+> minor 版：新增两个页面 + ROADMAP 同步。对外说明见 [docs/RELEASE_NOTES_v1.4.0.md](docs/RELEASE_NOTES_v1.4.0.md)。
+
+### Added
+- **自选股页 `/stock/watchlist`**：自选 / 持仓两个 tab，复用库层既有 `watchlist` / `stock_holdings` CRUD，未另起数据通路；新增 `/api/watchlist`、`/api/stocks/holdings`。
+- **市场行情页 `/fund/market`**：指数 / 板块 / 情绪 / 资金 / 估值 五个 tab，数据源与 AI 对话里的工具是同一批引擎（`/api/market/*`），缓存 60 秒。
+- 行情兜底：东财不可达时个股行情走**腾讯 `qt.gtimg.cn` / smartbox 同源兜底**（字段位次实测并注释）。
+- `docs/ROADMAP.md` 重写：更正「预警设置 🔜 规划中」→ 已上线；补齐 v1.1 → v1.3.2 期间上线的能力；指标口径与 README 逐字对齐。
+
+### Verification
+- `pytest -q` → **644 passed**（v1.3.2 时 625）；真浏览器两页 `ALL_TRUE`（`report-H5.md §V3`）；`npx tsc -b` exit 0、`npm run build` exit 0
+
 ## [1.3.2] - 2026-10-04
 
 > patch 版，无破坏性变更。对外说明与验证口径见 [docs/RELEASE_NOTES_v1.3.2.md](docs/RELEASE_NOTES_v1.3.2.md)。

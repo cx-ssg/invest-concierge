@@ -94,3 +94,8 @@ desktop-electron/icon.ico
 dist_m*/
 build_m*/
 *.pyz
+
+# 2026-10-04：交付线重打包用了 dist_v150/build_v150 —— 把模式放宽到 dist_*/build_*
+# （10-02 的同类踩坑：只写具体目录名，换名构建就会被 git add -A 吞进去）
+dist_*/
+build_*/

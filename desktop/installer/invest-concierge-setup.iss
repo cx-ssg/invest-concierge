@@ -1,6 +1,7 @@
 ; ============================================================
 ; invest-concierge Inno Setup 安装器脚本（SHELL_UPGRADE_PLAN §1）
-; 版本：与 server/main.py FastAPI(version=) 对齐，由构建脚本 -D 注入或此处手改
+; 版本：与 services/status_service.VERSION / server/main.py FastAPI(version=) 对齐
+;   （tests/test_version_sync.py 钉死；改版时必须同步本文件 MyAppVersion 与 bat 的输出名）
 ; 构建：scripts/build_installer.bat（自动探测 ISCC 路径）
 ;
 ; 设计要点：
@@ -13,7 +14,7 @@
 
 #define MyAppName "invest-concierge"
 #define MyAppCNName "投资私人管家"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.5.0"
 #define MyAppPublisher "cx-ssg"
 #define MyAppExeName "invest-concierge.exe"
 #define MyAppDataDir "{localappdata}\invest-concierge"
@@ -61,7 +62,7 @@ UninstallAppFullTitle=卸载 投资私人管家
 ConfirmUninstall=确定要完全移除投资私人管家及其所有组件吗？
 
 [Files]
-; 主程序（onefile，59MB）
+; 主程序（onefile 单文件，v1.5.0 实测 83.2MB）
 Source: "..\..\dist_m4\invest-concierge.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; README（GitHub 网络不佳时本地可看）
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion

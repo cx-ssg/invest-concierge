@@ -2,6 +2,9 @@
 
 > 2026-09-04 本地产判。记录真实踩坑与最终可复现路径，供 CI/他人复刻。
 > 结论先行：**必须在干净 venv 里打包**，宿主 Anaconda 环境有两大杀手（见 §1）。
+> **最近一次复跑（2026-10-04 · v1.5.0）**：干净 `desktop\build_env`（PyInstaller 6.22.2）打包 → exit 0，
+> 产物 `dist_v150\invest-concierge.exe` **83.2 MB**（耗时 ≈98 s）；`scripts\build_installer.bat` → exit 0，
+> `dist_m4\invest-concierge-setup-v1.5.0.exe` **83.9 MB**（ISCC 压缩 9.7 s）。
 
 ## 1. 环境杀手（宿主 Anaconda 的问题，不是代码问题）
 
@@ -25,7 +28,7 @@ cd frontend && npm run build && cd ..
 :: 3. 打包（spec 已处理三个难点，见 §3）
 desktop\build_env\Scripts\pyinstaller desktop\invest-concierge.spec --noconfirm
 
-:: 4. 产物：dist\invest-concierge\invest-concierge.exe（onedir）
+:: 4. 产物：dist\invest-concierge.exe（**onefile 单文件**；输出目录可用 --distpath 自定，如 --distpath dist_v150）
 ```
 
 ## 3. spec 三个核心难点（desktop/invest-concierge.spec 已处理）
@@ -61,4 +64,6 @@ PyInstaller 执行 spec 时 `__file__` 不可靠 → 用 `SPECPATH`（spec 所�
 
 - akshare 动态 import 面广，冷启首问 15-40s（与开发态一致，非打包引入）
 - WebView2 依赖系统自带（Win10/11 默认有）；无 WebView2 → launcher 自动回退浏览器模式
-- exe 体积 ~200-300MB（pandas/akshare 全家桶），onedir 而非 onefile（onedir 启动快、杀毒误报低）
+- exe 体积实测 **≈83 MB**（pandas/akshare 全家桶 + 前端 dist；2026-10-04 v1.5.0 实测 **83.2 MB**）；
+  产物是 **onefile 单文件** —— spec 只有 `EXE(...)`、**没有 `COLLECT`**（.iss 的 `[Files]` 也按单文件搬运安装）。
+  ⚠️ 本节旧文曾写「onedir 而非 onefile」，与代码不符，2026-10-04 实查订正。

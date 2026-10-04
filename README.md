@@ -10,15 +10,27 @@
 
 ## 🖼️ 界面预览
 
-| AI 对话（快捷问题直发） | 基金 · 资产总览 |
-|:---:|:---:|
-| ![AI 对话](assets/screenshots/chat-light.png) | ![资产总览](assets/screenshots/dashboard-dark.png) |
+![演示 GIF](assets/demo/invest-concierge-demo.gif)
 
-| 基金 · 持仓管理 | 股票 · 综合诊断 |
-|:---:|:---:|
-| ![持仓管理](assets/screenshots/portfolio-light.png) | ![综合诊断](assets/screenshots/diagnosis-dark.png) |
+*↑ 37 秒演示（GIF 1.1 MB / 也有 [MP4](assets/demo/invest-concierge-demo.mp4) 版）：真实运行录屏式巡览，含一次真实的 AI 问答。*
 
-*浅色 / 暗色双主题，右上角一键切换。*
+| AI 对话（真实问答 · 工具时间线 + 诚实标注数据缺口） | 股票 · 综合诊断 |
+|:---:|:---:|
+| ![AI 对话](assets/screenshots/chat-live-light.png) | ![综合诊断](assets/screenshots/diagnosis-dark.png) |
+
+| 市场行情 · 五 tab（真实指数数据） | 基金 · 投资日记 |
+|:---:|:---:|
+| ![市场行情](assets/screenshots/market-light.png) | ![投资日记](assets/screenshots/diary-light.png) |
+
+| 股票 · 自选股 | 价格预警 |
+|:---:|:---:|
+| ![自选股](assets/screenshots/watchlist-light.png) | ![价格预警](assets/screenshots/alerts-light.png) |
+
+| 基金 · 持仓管理 | 系统设置（模型接入 / 隐私 / 长期记忆） |
+|:---:|:---:|
+| ![持仓管理](assets/screenshots/portfolio-light.png) | ![系统设置](assets/screenshots/settings-dark.png) |
+
+*浅色 / 暗色双主题，右上角一键切换。截图取自 **2026-10-04 实机运行（v1.5.0）**，行情为当日真实数据。*
 
 ## ⚠️ 免责声明（请先阅读）
 

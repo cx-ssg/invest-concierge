@@ -12,11 +12,13 @@ from config import DEEPSEEK_MODEL, DEEPSEEK_REASONER_MODEL
 from services.llm_config import get_llm_config
 from utils.common import fetch_with_timeout
 
-# 应用内版本（/api/health、/api/status、/api/settings、前端状态栏与设置页都读它）。
-# 2026-10-03 A-R2/F6：此前是 `1.0.0`，而仓库实际版本是 `1.2.0`（frontend/package.json
-# + `git tag v1.2.0` + `server.main` 的 FastAPI(version=)）⇒ 同一产品两个版本号。
-# 现与上述三处对齐；`tests/test_version_sync.py` 把一致性钉死（改一处必须改全部）。
-VERSION = "1.2.0"
+# 应用内版本（/api/health、/api/status、/api/settings、前端状态栏与设置页都读它）—— **唯一来源**。
+# 2026-10-03 A-R2/F6：此前是 `1.0.0`，而仓库实际版本是 `1.2.0` ⇒ 同一产品两个版本号。
+# 2026-10-04 交付线：对外 tag 已到 `v1.5.0`，而应用内/package.json/安装器三处仍写 `1.2.0`
+# （**自洽但不反映发布版本** —— 旧锁只钉「内部一致」，钉不住「与发布版本对应」）
+# ⇒ 统一升到 `1.5.0`，并把「仓库外三面」也纳入锁：CHANGELOG 顶部 / 安装器 .iss / 打包 .bat。
+# `tests/test_version_sync.py` 钉死全部一致性（改一处必须改全部）。
+VERSION = "1.5.0"
 
 # 状态栏行情/情绪的最大等待秒数（超时降级为"不可用"，不阻塞）
 STATUS_FETCH_TIMEOUT = 8

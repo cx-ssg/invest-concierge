@@ -23,6 +23,8 @@ from data.database import init_db
 from server.routers import agent, core, diary, diagnosis, holdings, settings
 from server.routers import alert, reports
 from server.routers import market, memory, watchlist
+# 版本单一来源：services/status_service.VERSION（`/api/health` 读的是同一常量）
+from services.status_service import VERSION as APP_VERSION
 
 
 def create_app() -> FastAPI:
@@ -38,7 +40,7 @@ def create_app() -> FastAPI:
         from services import alert_service
         alert_service.stop_scheduler()
 
-    app = FastAPI(title="invest-concierge", version="1.2.0", lifespan=lifespan)
+    app = FastAPI(title="invest-concierge", version=APP_VERSION, lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
