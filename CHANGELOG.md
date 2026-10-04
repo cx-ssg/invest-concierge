@@ -26,7 +26,9 @@
   —— 构建**不报错**、`warn-*.txt` **不提示**、源码态 674 条测试**全绿**
   （⇒ 这类风险源码态测试原理上覆盖不到，必须在构建产物上校验）。
   修：spec 改用 `collect_submodules("data")` 收全；新增 `scripts/verify_bundle.py` 在构建产物上断言。
-- 英文 `README.en.md` 数字漂移：**7 live pages → 9**、**625 passed → 676**（中文版此前已更新，英文版漏同步）。
+- 英文 `README.en.md` 数字漂移（**多处**）：**7 live pages → 9**、**625 passed → 676**（中文版此前已更新，英文版漏同步）。
+  ⚠️ 首轮整改**只改了 1 处**（第 400 行），第 219 行的 `625 pytest cases` 与第 14 行的 `a real run` 由**第二轮审计**抓出后补齐
+  —— 教训：宣称「已同步」前应按**关键词全量 grep**核对，而不是只改已知的那一处。
 - `docs/PACKAGING.md` 产物形态订正为 **onefile**（spec 只有 `EXE(...)`、无 `COLLECT`；`.iss` 注释亦按 onefile 设计）——原文「onedir 而非 onefile」与代码不符；同处给 §5 冒烟清单补「本轮因 GUI 禁令**未执行**」的标注。
 - `docs/ROADMAP.md`「5 引擎」→「6 引擎」（与 README / `data/diagnosis.py` 一致）；元数据「最近一次核对」H5 → H7。
 

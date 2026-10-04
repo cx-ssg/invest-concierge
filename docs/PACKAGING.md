@@ -3,8 +3,10 @@
 > 2026-09-04 本地产判。记录真实踩坑与最终可复现路径，供 CI/他人复刻。
 > 结论先行：**必须在干净 venv 里打包**，宿主 Anaconda 环境有两大杀手（见 §1）。
 > **最近一次复跑（2026-10-04 · v1.5.0）**：干净 `desktop\build_env`（PyInstaller 6.22.2）打包 → exit 0，
-> 产物 `dist_v150\invest-concierge.exe` **83.2 MB**（耗时 ≈98 s）；`scripts\build_installer.bat` → exit 0，
-> `dist_m4\invest-concierge-setup-v1.5.0.exe` **83.9 MB**（ISCC 压缩 9.7 s）。
+> 产物 `dist_v150\invest-concierge.exe` **87.11 MiB**（= 91.35 MB 十进制；耗时 ≈98 s）；
+> `scripts\build_installer.bat` → exit 0，`dist_m4\invest-concierge-setup-v1.5.0.exe` **87.81 MiB**（= 92.08 MB）。
+> ⚠️ 体积随依赖变化：补齐 `langgraph` 全家（F1 连带修复）后，v1.5.0 由 83.19 → **87.11 MiB**。
+> ⚠️ 口径：本文用 **MiB**（`size / 1MB`，同 Windows 资源管理器）；十进制 MB 见括号。
 
 ## 1. 环境杀手（宿主 Anaconda 的问题，不是代码问题）
 
@@ -30,10 +32,14 @@ desktop\build_env\Scripts\pyinstaller desktop\invest-concierge.spec --noconfirm
 
 :: 4. 产物：dist\invest-concierge.exe（**onefile 单文件**；输出目录可用 --distpath 自定，如 --distpath dist_v150）
 
-:: 5. 【必做】构建后校验「字符串晚绑定」动态导入面 —— 源码态测试**覆盖不到**这类缺失
-::    （2026-10-04 F1 实证：v1.5.0 的 exe 缺 3 个 data 模块 ⇒ 9 个工具在安装版不可用，
-::     而 674 条 pytest 全绿）；退出码非 0 时**不要发布**
+:: 5. 【必做】构建后校验（两条，退出码非 0 时**不要发布**）
+::    5a. 动态导入面完整性（扫磁盘源码 vs 包内清单）—— 源码态测试**覆盖不到**这类缺失
+::        （2026-10-04 F1 实证：v1.5.0 的 exe 缺 3 个 data 模块 ⇒ 9 个工具在安装版不可用，
+::         而 674 条 pytest 全绿）
+::    5b. exe 端到端自证（解开 exe 直接读：模块数/TOC 同源、工具依赖模块、**版本常量**、
+::        exe 比源码新）—— 回答「exe 里到底是哪份代码」，不靠时间戳推断
 python scripts\verify_bundle.py
+python scripts\verify_exe.py
 ```
 
 ## 3. spec 三个核心难点（desktop/invest-concierge.spec 已处理）
@@ -74,6 +80,6 @@ PyInstaller 执行 spec 时 `__file__` 不可靠 → 用 `SPECPATH`（spec 所�
 
 - akshare 动态 import 面广，冷启首问 15-40s（与开发态一致，非打包引入）
 - WebView2 依赖系统自带（Win10/11 默认有）；无 WebView2 → launcher 自动回退浏览器模式
-- exe 体积实测 **≈83 MB**（pandas/akshare 全家桶 + 前端 dist；2026-10-04 v1.5.0 实测 **83.2 MB**）；
+- exe 体积实测 **≈87 MiB**（pandas/akshare/langgraph 全家桶 + 前端 dist；2026-10-04 v1.5.0 实测 **87.11 MiB** = 91.35 MB 十进制）；
   产物是 **onefile 单文件** —— spec 只有 `EXE(...)`、**没有 `COLLECT`**（.iss 的 `[Files]` 也按单文件搬运安装）。
   ⚠️ 本节旧文曾写「onedir 而非 onefile」，与代码不符，2026-10-04 实查订正。

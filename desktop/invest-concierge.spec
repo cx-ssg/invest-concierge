@@ -92,10 +92,19 @@ from PyInstaller.utils.hooks import collect_submodules  # noqa: E402
 
 _data_mods = sorted(set(collect_submodules("data"))
                     | {"data.dragon_api", "data.moneyflow_api", "data.limit_up_api"})
+# 不能只断言「非空」——某个子模块在 import 期报错时 collect 会**静默跳过它**，
+# 于是「非空」依然成立、包却缺模块（等同 F1 复发）。这里与磁盘实际模块数对账。
+_disk_data = {"data" if f == "__init__.py" else "data." + f[:-3]
+              for f in os.listdir(os.path.join(ROOT, "data")) if f.endswith(".py")}
+_missing_data = sorted(_disk_data - set(_data_mods))
+if _missing_data:
+    raise SystemExit("[spec] data 包收集不全，缺：%s（检查这些模块的 import 期错误）"
+                     % _missing_data)
 if not _data_mods:
     raise SystemExit("[spec] data 包一个模块都没收到 ⇒ 检查 ROOT/sys.path（禁止静默通过）")
 hiddenimports += _data_mods
-print("[spec] hiddenimports += data 包 %d 个模块：%s" % (len(_data_mods), _data_mods))
+print("[spec] hiddenimports += data 包 %d 个模块（磁盘 %d 个，全数对齐）：%s"
+      % (len(_data_mods), len(_disk_data), _data_mods))
 
 a = Analysis(
     [os.path.join(ROOT, "desktop", "launcher.py")],

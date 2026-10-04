@@ -11,7 +11,7 @@
 
 ![Demo GIF](assets/demo/invest-concierge-demo.gif)
 
-*↑ 37-second demo (GIF 1.1 MB / [MP4](assets/demo/invest-concierge-demo.mp4) also available): a real run, including one real AI Q&A.*
+*↑ 37-second demo (GIF 1.1 MB / [MP4](assets/demo/invest-concierge-demo.mp4) also available): a **page tour assembled from real-run screenshots (not a screen recording)**, including one real AI Q&A.*
 
 | AI chat (real run · tool timeline + honest data-gap note) | Stock · diagnosis |
 |:---:|:---:|
@@ -216,7 +216,7 @@ invest-concierge/
 ├─ utils/orchestrator/    graph orchestration M3 (flags / state / graph / nodes / adapters)
 ├─ scripts/           ingestion and eval scripts (rag_ingest*.py / rag_eval.py / rag_rerank_probe.py)
 ├─ pages/             legacy Streamlit pages (kept for reference, not part of the new UI; entry app.py)
-├─ tests/             **625 pytest cases** (all green on v1.3.2, 2026-10-04; tool contracts / minefield & valuation / memory / RAG / graph orchestration / ingestion & chunking / concurrency slots)
+├─ tests/             **676 pytest cases** (all green on 2026-10-04 H7; tool contracts / minefield & valuation / memory / RAG / graph orchestration / ingestion & chunking / concurrency slots / version-consistency locks)
 ├─ assets/            design assets (mockups)
 ├─ .env.example       environment template (copy to .env)
 ├─ requirements.txt   Python dependencies

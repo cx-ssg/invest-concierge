@@ -62,7 +62,7 @@ UninstallAppFullTitle=卸载 投资私人管家
 ConfirmUninstall=确定要完全移除投资私人管家及其所有组件吗？
 
 [Files]
-; 主程序（onefile 单文件，v1.5.0 实测 83.2MB）
+; 主程序（onefile 单文件，v1.5.0 实测 87.11 MiB）
 Source: "..\..\dist_m4\invest-concierge.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; README（GitHub 网络不佳时本地可看）
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
