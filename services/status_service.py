@@ -17,8 +17,10 @@ from utils.common import fetch_with_timeout
 # 2026-10-04 交付线：对外 tag 已到 `v1.5.0`，而应用内/package.json/安装器三处仍写 `1.2.0`
 # （**自洽但不反映发布版本** —— 旧锁只钉「内部一致」，钉不住「与发布版本对应」）
 # ⇒ 统一升到 `1.5.0`，并把「仓库外三面」也纳入锁：CHANGELOG 顶部 / 安装器 .iss / 打包 .bat。
+# 2026-10-04 v1.5.1：打包链修复（F1：exe 缺 3 个 data 模块）后**重出**桌面版，按 semver 升 patch ——
+# 目的之一是让 **tag 与 assets 同源**（v1.5.0 的 tag 指向含该缺陷的源码，且那次 Release 未附 assets）。
 # `tests/test_version_sync.py` 钉死全部一致性（改一处必须改全部）。
-VERSION = "1.5.0"
+VERSION = "1.5.1"
 
 # 状态栏行情/情绪的最大等待秒数（超时降级为"不可用"，不阻塞）
 STATUS_FETCH_TIMEOUT = 8

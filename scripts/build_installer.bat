@@ -6,7 +6,7 @@ rem   1. verify main exe exists (dist_m4\invest-concierge.exe)
 rem   2. locate ISCC (where -> user path -> Program Files)
 rem   3. compile desktop\installer\invest-concierge-setup.iss
 rem   4. verify output exists and size > 50MB
-rem Output: dist_m4\invest-concierge-setup-v1.5.0.exe
+rem Output: dist_m4\invest-concierge-setup-v1.5.1.exe
 rem NOTE: keep this file ASCII-only + CRLF (cmd breaks on UTF-8 CN)
 rem ============================================================
 setlocal enabledelayedexpansion
@@ -58,7 +58,7 @@ if errorlevel 1 (
 )
 
 rem --- verify output ---
-set OUT=%ROOT%\dist_m4\invest-concierge-setup-v1.5.0.exe
+set OUT=%ROOT%\dist_m4\invest-concierge-setup-v1.5.1.exe
 if not exist "%OUT%" (
     echo [ERROR] output not generated: %OUT%
     exit /b 1

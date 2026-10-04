@@ -5,9 +5,17 @@
 > 版本线说明（2026-10-01）：项目内部曾以 `v1.2 / v1.2.1` 称呼「多 provider 模型接入」阶段，而对外 tag 只有 `v1.0.0`。
 > 自本版起对外统一按 **semver `v1.x`** 记录；历史分段内容原样保留，仅重组标题。
 
-## [Unreleased]
+## [1.5.1] - 2026-10-04
 
-> **交付线**（尚未发版）：重打包桌面版 + 版本口径统一 + 打包链校验。未发版期间本节不代表任何 tag。
+> patch 版：**桌面版打包链修复 + 版本口径统一 + 交付物重出**。对外说明见
+> [docs/RELEASE_NOTES_v1.5.1.md](docs/RELEASE_NOTES_v1.5.1.md)。
+> ⚠️ **本版是 `v1.5.0` 之后第一次带安装包发布**：`v1.5.0` 的 Release 创建时未附 assets（`assets: []`），
+> 且其 tag 指向含下述 F1 缺陷的源码 ⇒ 按 semver 升 patch 重发，使 **tag 与 assets 同源**。
+
+### Changed
+- **版本号 `1.5.0` → `1.5.1`**：应用内 `services/status_service.VERSION`、`frontend/package.json`(+lock)、
+  安装器 `.iss`、打包 `.bat` 四处同步（`tests/test_version_sync.py` 六面锁全绿）。
+- 桌面版与安装包**重出**（含 F1 修复）：exe **87.11 MiB** / 安装包 **87.81 MiB**。
 
 ### Added
 - **构建后校验 `scripts/verify_bundle.py`**：AST 扫「字符串晚绑定」动态导入面

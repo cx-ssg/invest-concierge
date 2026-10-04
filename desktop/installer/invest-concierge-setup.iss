@@ -14,7 +14,7 @@
 
 #define MyAppName "invest-concierge"
 #define MyAppCNName "投资私人管家"
-#define MyAppVersion "1.5.0"
+#define MyAppVersion "1.5.1"
 #define MyAppPublisher "cx-ssg"
 #define MyAppExeName "invest-concierge.exe"
 #define MyAppDataDir "{localappdata}\invest-concierge"
